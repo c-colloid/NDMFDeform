@@ -11,8 +11,15 @@
     ],
     "autoReferenced": false,
     "defineConstraints": [
-        "UNITY_EDITOR"
+        "UNITY_EDITOR",
+        "!DefromAsset"
     ],
-    "versionDefines": [],
+    "versionDefines": [
+        {
+            "name": "com.beans.deform",
+            "expression": "",
+            "define": "DefromAsset"
+        }
+    ],
     "noEngineReferences": false
 }
