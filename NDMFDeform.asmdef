@@ -1,7 +1,11 @@
 {
     "name": "NDMFDeform",
     "rootNamespace": "NDMFDeform",
-    "references": [],
+    "references": [
+        "GUID:62ced99b048af7f4d8dfe4bed8373d76",
+        "GUID:8c67b99c79eb6774c8dc164a864bb789",
+        "GUID:0e50cbf5a9b463742858b4eecc087415"
+    ],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
@@ -12,13 +16,19 @@
     "autoReferenced": false,
     "defineConstraints": [
         "UNITY_EDITOR",
-        "!DefromAsset"
+        "!DefromAsset",
+        "NDMF"
     ],
     "versionDefines": [
         {
             "name": "com.beans.deform",
             "expression": "",
             "define": "DefromAsset"
+        },
+        {
+            "name": "nadena.dev.ndmf",
+            "expression": "",
+            "define": "NDMF"
         }
     ],
     "noEngineReferences": false
