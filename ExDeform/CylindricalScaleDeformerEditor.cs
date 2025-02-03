@@ -11,7 +11,7 @@ using DeformEditor;
 
 namespace MeshModifier.NDMFDeform.ExDeform
 {
-	[CustomEditor (typeof(CylinderScalerDeformer)),CanEditMultipleObjects]
+	[CustomEditor (typeof(CylindricalScaleDeformer)),CanEditMultipleObjects]
 	public class CylinderScakerDeformerEditor : DeformerEditor
 	{
 		private static class Content
@@ -74,7 +74,7 @@ namespace MeshModifier.NDMFDeform.ExDeform
 			
 			if (target == null) return;
 			
-			var cylinderscaler = target as CylinderScalerDeformer;
+			var cylinderscaler = target as CylindricalScaleDeformer;
 			
 			DrawRadiusHandle(cylinderscaler);
 			DrawScopeHandle(cylinderscaler);
@@ -83,7 +83,7 @@ namespace MeshModifier.NDMFDeform.ExDeform
 			EditorApplication.QueuePlayerLoopUpdate();
 		}
 		
-		private void DrawRadiusHandle(CylinderScalerDeformer cylinderscaler)
+		private void DrawRadiusHandle(CylindricalScaleDeformer cylinderscaler)
 		{
 			var positon = Vector3.down * cylinderscaler.Radius;
 			
@@ -133,7 +133,7 @@ namespace MeshModifier.NDMFDeform.ExDeform
 			}
 		}
 		
-		private void DrawScopeHandle(CylinderScalerDeformer cylinderscaler)
+		private void DrawScopeHandle(CylindricalScaleDeformer cylinderscaler)
 		{
 			var positon = Vector3.down * cylinderscaler.Scope;
 			

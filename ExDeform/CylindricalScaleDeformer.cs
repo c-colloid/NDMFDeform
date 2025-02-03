@@ -15,8 +15,8 @@ using float4x4 = Unity.Mathematics.float4x4;
 
 namespace MeshModifier.NDMFDeform.ExDeform
 {
-	[Deformer(Name = "Cylinder Scaler", Description = "Scale deform a mesh using cylinder controler", XRotation = 90f, Type = typeof(CylinderScalerDeformer))]
-	public class CylinderScalerDeformer : Deformer, IFactor
+	[Deformer(Name = "Cylindrical Scale", Description = "Scale deform a mesh using cylinder controler", XRotation = 90f, Type = typeof(CylindricalScaleDeformer))]
+	public class CylindricalScaleDeformer : Deformer, IFactor
 	{
 		public float Factor
 		{
@@ -69,7 +69,7 @@ namespace MeshModifier.NDMFDeform.ExDeform
 				
 			var meshToAxis = DeformerUtils.GetMeshToAxisSpace(Axis, data.Target.GetTransform());
 			
-			return new CylinderScalerJob
+			return new CylindricalScaleJob
 			{
 				factor = Factor,
 				radius = Radius,
@@ -82,7 +82,7 @@ namespace MeshModifier.NDMFDeform.ExDeform
 			}.Schedule(data.Length, DEFAULT_BATCH_COUNT, dependency);
 		}
 		
-		public struct CylinderScalerJob : IJobParallelFor
+		public struct CylindricalScaleJob : IJobParallelFor
 		{
 			public float factor;
 			public float radius;
