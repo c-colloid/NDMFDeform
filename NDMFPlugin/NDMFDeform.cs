@@ -26,6 +26,8 @@ namespace MeshModifier.NDMFDeform.NDMFPlugin
 				var target = ctx?.AvatarDescriptor.GetComponentsInChildren<Deformable>();
 				if (target is null) return;
 				target.ToList().ForEach(d => {
+					d.assignOriginalMeshOnDisable = false;
+					
 					d.DeformerElements.ForEach(e => Object.DestroyImmediate(e.Component.gameObject));
 					Object.DestroyImmediate(d);
 				});
