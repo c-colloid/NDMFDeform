@@ -1,2 +1,2 @@
 # NDMFDeform
- Plug-in to run Deform nondestructively
+ Plug-in to run [Deform](https://github.com/keenanwoodall/Deform) nondestructively
