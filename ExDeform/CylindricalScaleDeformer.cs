@@ -15,7 +15,7 @@ using float4x4 = Unity.Mathematics.float4x4;
 
 namespace MeshModifier.NDMFDeform.ExDeform
 {
-	[Deformer(Name = "Cylindrical Scale", Description = "Scale deform a mesh using cylinder controler", XRotation = 90f, Type = typeof(CylindricalScaleDeformer))]
+	[Deformer(Name = "Cylindrical Scale", Description = "Scale deform a mesh using cylinder controler", XRotation = -90f, Type = typeof(CylindricalScaleDeformer))]
 	public class CylindricalScaleDeformer : Deformer, IFactor
 	{
 		public float Factor
