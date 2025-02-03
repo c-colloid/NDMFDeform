@@ -18,8 +18,13 @@ namespace MeshModifier.NDMFDeform.NDMFPlugin
 		{
 			InPhase(BuildPhase.Transforming).Run("Generate DefromMesh",ctx =>{
 				var target = ctx?.AvatarDescriptor.GetComponentsInChildren<Deformable>();
-				if (target == null) return;
-				target.ToList().ForEach(d => d.ApplyData());
+				if (target is null) return;
+				target.ToList().ForEach(d => {
+					d.ApplyData();
+					var mesh = d.GetCurrentMesh();
+					AssetDatabase.AddObjectToAsset(mesh,ctx.AssetContainer);
+					d.GetComponent<SkinnedMeshRenderer>().sharedMesh = mesh;
+				});
 			});
 			
 			InPhase(BuildPhase.Optimizing).Run("Destroy Deformable",ctx =>{
