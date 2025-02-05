@@ -11,7 +11,12 @@ using float4x4 = Unity.Mathematics.float4x4;
 
 namespace MeshModifier.NDMFDeform.ExDeform
 {
-	[Deformer(Name = "Cylindrical Vertex Transform", Description = "Vertex deform a mesh using cylinder controler", XRotation = -90f, Type = typeof(CylindricalVertexTransformDefomer))]
+	[Deformer(
+	Name = "Cylindrical Vertex Transform",
+	Description = "Vertex deform a mesh using cylinder controler",
+	XRotation = -90f, Type = typeof(CylindricalVertexTransformDefomer),
+	Category = Category.VRChat
+	)]
 	public class CylindricalVertexTransformDefomer : Deformer, IFactor
 	{
 		public float Factor
