@@ -11,10 +11,20 @@ namespace MeshModifier.NDMFDeform.ExDeform
 	[CustomEditor (typeof(CylindricalVertexTransformDefomer)),CanEditMultipleObjects]
 	public class CylindricalVertexTransformDefomerEditor : DeformerEditor
 	{
+		[SerializeField]
+		VisualTreeAsset UXML;
+		
+		public override void OnInspectorGUI() {
+			base.OnInspectorGUI();
+		}
 		
 		public override VisualElement CreateInspectorGUI() {
-			var root = new VisualElement();
-			InspectorElement.FillDefaultInspector(root,serializedObject,this);
+			var root = base.CreateInspectorGUI() ?? new VisualElement();
+			root.Add(new IMGUIContainer(OnInspectorGUI));
+			
+			UXML.CloneTree(root);
+			
+			//InspectorElement.FillDefaultInspector(root,serializedObject,this);
 			return root;
 		}
 		

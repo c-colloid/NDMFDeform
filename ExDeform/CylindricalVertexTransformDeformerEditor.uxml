@@ -1,0 +1,8 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements" xsi="http://www.w3.org/2001/XMLSchema-instance" engine="UnityEngine.UIElements" editor="UnityEditor.UIElements" noNamespaceSchemaLocation="../../../UIElementsSchema/UIElements.xsd" editor-extension-mode="True">
+    <ui:Toggle label="Update" style="display: none;" />
+    <ui:Slider label="Factor" high-value="1" binding-path="factor" show-input-field="true" />
+    <ui:FloatField label="Radius" value="0.5" binding-path="radius" />
+    <ui:FloatField label="Scope" value="0.5" binding-path="scope" />
+    <ui:MinMaxSlider label="Top/Bottom" min-value="0.5" max-value="-0.5" low-limit="-1" high-limit="1" />
+    <uie:ObjectField label="Axis" type="UnityEngine.Transform, UnityEngine.CoreModule" binding-path="axis" />
+</ui:UXML>
