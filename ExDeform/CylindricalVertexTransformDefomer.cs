@@ -55,12 +55,12 @@ namespace MeshModifier.NDMFDeform.ExDeform
 			set => axis = value;
 		}
 		
-		[SerializeField] private float factor = 0f;
-		[SerializeField] private float radius = 1f;
-		[SerializeField] private float scope = 1f;
-		[SerializeField] private float top = 0.5f;
-		[SerializeField] private float bottom = -0.5f;
-		[SerializeField] private Transform axis;
+		[SerializeField, HideInInspector] private float factor = 0f;
+		[SerializeField, HideInInspector] private float radius = 1f;
+		[SerializeField, HideInInspector] private float scope = 1f;
+		[SerializeField, HideInInspector] private float top = 0.5f;
+		[SerializeField, HideInInspector] private float bottom = -0.5f;
+		[SerializeField, HideInInspector] private Transform axis;
 		
 		public override DataFlags DataFlags => Deform.DataFlags.Vertices;
 		
