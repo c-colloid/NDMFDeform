@@ -82,6 +82,7 @@ namespace MeshModifier.NDMFDeform.ExDeform
 			}.Schedule(data.Length, DEFAULT_BATCH_COUNT, dependency);
 		}
 		
+		[BurstCompile (CompileSynchronously = COMPILE_SYNCHRONOUSLY)]
 		public struct CylindricalScaleJob : IJobParallelFor
 		{
 			public float factor;
