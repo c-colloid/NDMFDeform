@@ -16,7 +16,15 @@
     "overrideReferences": false,
     "precompiledReferences": [],
     "autoReferenced": false,
-    "defineConstraints": [],
-    "versionDefines": [],
+    "defineConstraints": [
+        "!DefromAsset"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.beans.deform",
+            "expression": "",
+            "define": "DefromAsset"
+        }
+    ],
     "noEngineReferences": false
 }
