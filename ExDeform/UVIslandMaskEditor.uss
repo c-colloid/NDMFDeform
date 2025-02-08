@@ -1,0 +1,39 @@
+.root-container {
+    padding: 8px;
+}
+
+.properties-container {
+    margin-bottom: 8px;
+}
+
+.property-field {
+    margin: 4px 0;
+}
+
+.toolbar {
+    margin-bottom: 8px;
+    height: 22px;
+}
+
+.canvas-container {
+    min-height: 400px;
+    background-color: var(--unity-colors-inspector_titlebar-background);
+    border-width: 1px;
+    border-color: var(--unity-colors-default-border);
+    margin: 4px 0;
+}
+
+.uv-canvas {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+}
+
+.help-box {
+    margin-top: 8px;
+    padding: 4px;
+    -unity-font-style: italic;
+    font-size: 11px;
+}

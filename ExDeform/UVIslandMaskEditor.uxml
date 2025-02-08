@@ -1,0 +1,16 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements" editor-extension-mode="True">
+    <Style src="project://database/Assets/NDMFDeform/ExDeform/UVIslandMaskEditor.uss?fileID=7433441132597879392&amp;guid=9f2fbb03c3080f84cbcb55edbc83d0db&amp;type=3#UVIslandMaskEditor" />
+    <ui:VisualElement class="root-container">
+        <ui:VisualElement class="properties-container">
+            <uie:FloatField label="Factor" name="factor-field" class="property-field" />
+            <uie:FloatField label="Falloff" name="falloff-field" class="property-field" />
+            <ui:Toggle label="Invert" name="invert-toggle" class="property-field" />
+        </ui:VisualElement>
+        <uie:Toolbar class="toolbar">
+            <uie:ToolbarButton text="Reset View" name="reset-view-button" style="flex-grow: 1; -unity-text-align: middle-center;" />
+            <uie:ToolbarButton text="Clear Points" name="clear-points-button" style="flex-grow: 1; -unity-text-align: middle-center;" />
+        </uie:Toolbar>
+        <ui:VisualElement name="uv-canvas-container" class="canvas-container" style="overflow: hidden;" />
+        <ui:HelpBox text="Left Click: Add/Move Points | Middle Click: Pan | Wheel: Zoom | Delete: Remove Point" message-type="Info" class="help-box" />
+    </ui:VisualElement>
+</ui:UXML>
