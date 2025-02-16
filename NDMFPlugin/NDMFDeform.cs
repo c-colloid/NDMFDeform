@@ -20,6 +20,7 @@ namespace MeshModifier.NDMFDeform.NDMFPlugin
 				var target = ctx?.AvatarDescriptor.GetComponentsInChildren<Deformable>();
 				if (target is null) return;
 				target.ToList().ForEach(d => {
+					if (!d.isActiveAndEnabled) return;
 					d.ApplyData();
 					var mesh = d.GetCurrentMesh();
 					AssetDatabase.AddObjectToAsset(mesh,ctx.AssetContainer);
@@ -28,7 +29,7 @@ namespace MeshModifier.NDMFDeform.NDMFPlugin
 			});
 			
 			InPhase(BuildPhase.Optimizing).Run("Destroy Deformable",ctx =>{
-				var target = ctx?.AvatarDescriptor.GetComponentsInChildren<Deformable>();
+				var target = ctx?.AvatarDescriptor.GetComponentsInChildren<Deformable>(true);
 				if (target is null) return;
 				var defomers = new HashSet<Deformer>();
 				target.ToList().ForEach(d => {
@@ -37,7 +38,7 @@ namespace MeshModifier.NDMFDeform.NDMFPlugin
 					d.DeformerElements.ForEach(e => defomers.Add(e.Component));
 					Object.DestroyImmediate(d);
 				});
-				defomers.ToList().ForEach(d => Object.DestroyImmediate(d.gameObject));
+				defomers.ToList().ForEach(d =>Object.DestroyImmediate(d?.gameObject));
 			});
 		}
 	}
