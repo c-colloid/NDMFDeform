@@ -1,7 +1,7 @@
 ﻿using UnityEngine;
 using UnityEngine.UIElements;
 using UnityEditor;
-using UnityEditor.UIElements;
+
 using System.Collections.Generic;
 using System.Linq;
 
@@ -23,12 +23,12 @@ namespace Deform.Masking.Editor
             mask = (UVIslandMask)target;
 	        // Load UXML
 	        var visualTree = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(
-		        "Assets/NDMFDeform/ExDeform/UVIslandMaskEditor.uxml");
+		        "Assets/NDMFDeform/ExDeform/Editor/UVIslandMaskEditor.uxml");
 	        VisualElement root = visualTree.CloneTree();
 
             // Load USS
             var styleSheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(
-                "Assets/NDMFDeform/ExDeform/UVIslandMaskEditor.uss");
+	            "Assets/NDMFDeform/ExDeform/Editor/UVIslandMaskEditor.uss");
             if (styleSheet != null)
             {
                 root.styleSheets.Add(styleSheet);
@@ -36,19 +36,19 @@ namespace Deform.Masking.Editor
 
 	        // Bind properties
 	        var factorField = root.Q<FloatField>("factor-field");
-	        factorField.BindProperty(serializedObject.FindProperty("factor"));
+	        factorField.bindingPath = "factor";
 
 	        var falloffField = root.Q<FloatField>("falloff-field");
-	        falloffField.BindProperty(serializedObject.FindProperty("falloff"));
+	        falloffField.bindingPath = "falloff";
 
 	        var invertToggle = root.Q<Toggle>("invert-toggle");
-	        invertToggle.BindProperty(serializedObject.FindProperty("invert"));
+	        invertToggle.bindingPath = "invert";
 
 	        // Setup buttons
-	        var resetViewButton = root.Q<ToolbarButton>("reset-view-button");
+	        var resetViewButton = root.Q<UnityEditor.UIElements.ToolbarButton>("reset-view-button");
 	        resetViewButton.clicked += ResetView;
 
-	        var clearPointsButton = root.Q<ToolbarButton>("clear-points-button");
+	        var clearPointsButton = root.Q<UnityEditor.UIElements.ToolbarButton>("clear-points-button");
 	        clearPointsButton.clicked += ClearPoints;
 
 	        // Setup UV canvas

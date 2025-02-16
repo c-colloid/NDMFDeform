@@ -1,5 +1,5 @@
 {
-    "name": "NDMFDeform.ExDeform",
+    "name": "NDMFDeform.ExDeform.Editor",
     "rootNamespace": "NDMFDeform",
     "references": [
         "GUID:94a248ecf8d3e5d42afbfc524bbc651b",
@@ -8,9 +8,12 @@
         "GUID:d8b63aba1907145bea998dd612889d6b",
         "GUID:2665a8d13d1b3f18800f46e256720795",
         "GUID:0e50cbf5a9b463742858b4eecc087415",
-        "GUID:69aa1ac38438e98489035e8ef8a51331"
+        "GUID:69aa1ac38438e98489035e8ef8a51331",
+        "GUID:40171b62354d07342bc0b7be8441eae8"
     ],
-    "includePlatforms": [],
+    "includePlatforms": [
+        "Editor"
+    ],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
     "overrideReferences": false,
