@@ -25,7 +25,7 @@ namespace MeshModifier.NDMFDeform.NDMFPlugin
 		protected override void Configure()
 		{
 			InPhase(BuildPhase.Transforming).Run("Generate DefromMesh",ctx =>{
-				var target = ctx?.AvatarDescriptor.GetComponentsInChildren<Deformable>();
+				var target = ctx?.AvatarDescriptor.GetComponentsInChildren<Deformable>(true);
 				if (target is null) return;
 				target.ToList().ForEach(d => {
 					if (!d.enabled) return;
