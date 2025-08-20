@@ -28,10 +28,18 @@ namespace MeshModifier.NDMFDeform.NDMFPlugin
 				var target = ctx?.AvatarDescriptor.GetComponentsInChildren<Deformable>(true);
 				if (target is null) return;
 				target.ToList().ForEach(d => {
+					var isactive = d.gameObject.activeSelf;
+					
 					if (!d.enabled || d.CompareTag("EditorOnly")) return;
+					d.gameObject.SetActive(true);
+					
 					d.ApplyData();
-					var mesh = d.GetCurrentMesh();
+					var mesh = Object.Instantiate(d.GetCurrentMesh());
+					mesh.name = System.Text.RegularExpressions.Regex.Replace(mesh.name,@"(\(Clone\)){1,}","(Generated)");
 					AssetDatabase.AddObjectToAsset(mesh,ctx.AssetContainer);
+					Debug.Log($"Generate {mesh.name} for {d.name} Mesh");
+					
+					d.gameObject.SetActive(isactive);
 					d.GetComponent<SkinnedMeshRenderer>().sharedMesh = mesh;
 				});
 			})
