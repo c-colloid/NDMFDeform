@@ -28,7 +28,7 @@ namespace MeshModifier.NDMFDeform.NDMFPlugin
 				var target = ctx?.AvatarDescriptor.GetComponentsInChildren<Deformable>();
 				if (target is null) return;
 				target.ToList().ForEach(d => {
-					if (!d.isActiveAndEnabled) return;
+					if (!d.enabled) return;
 					d.ApplyData();
 					var mesh = d.GetCurrentMesh();
 					AssetDatabase.AddObjectToAsset(mesh,ctx.AssetContainer);
