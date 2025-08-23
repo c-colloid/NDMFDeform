@@ -22,6 +22,9 @@ namespace MeshModifier.NDMFDeform.NDMFPlugin
 		
 		public override string DisplayName => "NDMFDeform";
 		
+		/// <summary>
+		/// NDMFDeformの動作を設定します
+		/// </summary>
 		protected override void Configure()
 		{
 			InPhase(BuildPhase.Transforming).Run("Generate DefromMesh",ctx =>{
