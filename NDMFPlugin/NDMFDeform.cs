@@ -27,20 +27,41 @@ namespace MeshModifier.NDMFDeform.NDMFPlugin
 			InPhase(BuildPhase.Transforming).Run("Generate DefromMesh",ctx =>{
 				var target = ctx?.AvatarDescriptor.GetComponentsInChildren<Deformable>(true);
 				if (target is null) return;
+				var GOActiveDic = new Dictionary<GameObject,bool>();
+				var MeshDic = new Dictionary<Deformable,Mesh>();
+				
 				target.ToList().ForEach(d => {
-					var isactive = d.gameObject.activeSelf;
-					
-					if (!d.enabled || d.CompareTag("EditorOnly")) return;
+					GOActiveDic.TryAdd(d.gameObject,d.gameObject.activeSelf);
+					//Debug.Log("GOActiveDicCount:"+GOActiveDic.Count);
 					d.gameObject.SetActive(true);
+					var parent = d.transform.parent;
+					while (parent != ctx.AvatarRootTransform && parent != null)
+					{
+						var tryAdd = GOActiveDic.TryAdd(parent.gameObject,parent.gameObject.activeSelf);
+						//Debug.Log($"{parent.gameObject}:{tryAdd}:{GOActiveDic.Count}");
+						if (!tryAdd) return;
+						parent.gameObject.SetActive(true);
+						parent = parent.parent;
+					}
+				});
+				
+				target.ToList().ForEach(d => {
+					if (!d.enabled || d.CompareTag("EditorOnly")) return;
 					
-					d.ApplyData();
 					var mesh = Object.Instantiate(d.GetCurrentMesh());
 					mesh.name = System.Text.RegularExpressions.Regex.Replace(mesh.name,@"(\(Clone\)){1,}","(Generated)");
 					AssetDatabase.AddObjectToAsset(mesh,ctx.AssetContainer);
 					Debug.Log($"Generate {mesh.name} for {d.name} Mesh");
 					
-					d.gameObject.SetActive(isactive);
-					d.GetComponent<SkinnedMeshRenderer>().sharedMesh = mesh;
+					MeshDic.TryAdd(d,mesh);
+				});
+				
+				GOActiveDic.ToList().ForEach(d => {
+					d.Key.SetActive(d.Value);
+				});
+				
+				MeshDic.ToList().ForEach(d => {
+					d.Key.GetComponent<SkinnedMeshRenderer>().sharedMesh = d.Value;
 				});
 			})
 				.PreviewingWith(ConfigurePreview());
