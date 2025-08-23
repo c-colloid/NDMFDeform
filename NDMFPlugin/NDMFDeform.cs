@@ -79,6 +79,11 @@ namespace MeshModifier.NDMFDeform.NDMFPlugin
 				defomers.ToList().ForEach(d =>Object.DestroyImmediate(d?.gameObject));
 			});
 			
+			InPhase(BuildPhase.Optimizing).Run("Destroy Deformer",ctx =>{
+				var target = ctx?.AvatarDescriptor.GetComponentsInChildren<Deformer>(true);
+				if (target is null) return;
+				target.ToList().ForEach(d => Object.DestroyImmediate(d?.gameObject));
+			});
 		}
 		
 		/// <summary>
