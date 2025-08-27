@@ -1,0 +1,164 @@
+name: add-lss-new-version
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        type: string
+        required: true
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+
+jobs:
+  add-lss-new-version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get NewVarsion Data
+        id: ReleaseData
+        uses: cardinalby/git-get-release-action@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          repo: c-colloid/NDMFDeform
+          tag: ${{ github.event.inputs.tag }}
+
+      - name: Get LSSZipURL
+        id: LSSZipURL
+        uses: actions/github-script@v7
+        env:
+          InputStr: ${{ steps.ReleaseData.outputs.assets }}
+        with:
+          script: |
+            const {InputStr } = process.env
+
+            for (const asset of JSON.parse(InputStr))
+            {
+              if (asset.name.startsWith("NDMFDeform-") && asset.name.endsWith(".zip"))
+              {
+                return asset.browser_download_url;
+              }
+            }
+
+      - name: GetPackegeDotJsonURL
+        id: PackageDotJsonURL
+        uses: actions/github-script@v7
+        env:
+          InputStr: ${{ steps.ReleaseData.outputs.assets }}
+        with:
+          script: |
+            const { InputStr } = process.env
+
+            for (const asset of JSON.parse(InputStr))
+            {
+              if (asset.name === "package.json")
+              {
+                return asset.browser_download_url;
+              }
+            }
+
+      - name: GetToVar
+        id: PackageDotJson
+        run: |
+          Temp=`wget -q -O - ${{ steps.PackageDotJsonURL.outputs.result }}`
+          echo 'result=' $Temp >> "$GITHUB_OUTPUT"
+
+
+
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+        with:
+          path: ./VpmRepo
+
+      - name: MoveToVar
+        id: VPMDotJson
+        run: |
+          Temp=`cat ./VpmRepo/.vpm.json`
+          echo 'result=' $Temp >> "$GITHUB_OUTPUT"
+
+
+
+      - name: Debug
+        run: |
+          echo ${{ steps.LSSZipURL.outputs.result }}
+          echo ${{ steps.PackageDotJson.outputs.result }}
+
+
+      - name: EditURLForPackageDotJson
+        id: RepoAddJsonStr
+        uses: actions/github-script@v7
+        env:
+          InputStr: ${{ steps.PackageDotJson.outputs.result }}
+          ReplaseURL: ${{ steps.LSSZipURL.outputs.result }}
+        with:
+          result-encoding: string
+          script: |
+            const { InputStr , ReplaseURL } = process.env
+
+            let jsonObj = JSON.parse(InputStr);
+            jsonObj.url = ReplaseURL.substring(1, ReplaseURL.length - 1);
+            return JSON.stringify(jsonObj);
+
+
+      - name: AddVPMDotJson
+        id: AddedVPMDotJson
+        uses: actions/github-script@v7
+        env:
+          InputStr: ${{ steps.VPMDotJson.outputs.result }}
+          AddVersion: ${{ steps.RepoAddJsonStr.outputs.result }}
+        with:
+          script: |
+            const { InputStr , AddVersion } = process.env
+
+            let jsonObj = JSON.parse(InputStr || "null");
+            let addJsonObj = JSON.parse(AddVersion || "null");
+
+            if (jsonObj)
+            {
+              jsonObj.packages[addJsonObj.name].versions[addJsonObj.version] = addJsonObj;
+            }
+            else
+            {
+              jsonObj = addJsonObj;
+            }
+
+            return JSON.stringify(jsonObj);
+
+      - name: Write Json
+        run: |
+          rm  ./VpmRepo/.vpm.json
+          echo ${{ steps.AddedVPMDotJson.outputs.result }} >> ./VpmRepo/.vpm.json
+
+      #region FormatJson
+      - name: Get Version Num Only
+        id: VersionNumOnly
+        run: |
+          tag=${{ github.event.inputs.tag }}
+          version=${tag#v}
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Get RepositoryName
+        id: repository
+        run: echo "name=${GITHUB_REPOSITORY#${GITHUB_REPOSITORY_OWNER}/}" >> $GITHUB_OUTPUT
+  
+      - name: Format Json
+        id: FormatJson
+        uses: jossef/action-set-json-field@v2
+        env:
+          InputStr: ${{ steps.VPMDotJson.outputs.result }}
+          AddVersion: ${{ steps.RepoAddJsonStr.outputs.result }}
+        with:
+          file: ./VpmRepo/.vpm.json
+          field: "name"
+          value: ${{ steps.repository.outputs.name }}
+      #endregion FormatJson
+
+      - name: git commit
+        run: |
+          cd ./VpmRepo
+          git config user.name  "GitHub Action"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ./.vpm.json
+          git commit -m "Add LSS New Version ${{ github.event.inputs.tag }}!!"
+          git push origin
