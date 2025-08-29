@@ -24,8 +24,35 @@ namespace Deform.Masking.Editor
         private Toggle highlightInSceneToggle;
         private Button exportToDeformerButton;
         
+        // 新機能用UI要素
+        private Slider vertexSizeSlider;
+        private Toggle useAdaptiveSizeToggle;
+        private Slider adaptiveMultiplierSlider;
+        private Toggle autoUpdatePreviewToggle;
+        private Slider zoomSlider;
+        private Button resetZoomButton;
+        private Toggle rangeSelectionToggle;
+        private Toggle magnifyingGlassToggle;
+        private Slider magnifyingGlassZoomSlider;
+        private Slider magnifyingGlassSizeSlider;
+        
+        // 範囲選択UI要素
+        private VisualElement rangeSelectionOverlay;
+        
+        // ルーペUI要素
+        private VisualElement magnifyingGlassOverlay;
+        private VisualElement magnifyingGlassImage;
+        private Label magnifyingGlassLabel;
+        
         private const int UV_MAP_SIZE = 300;
         private static bool highlightInScene = true;
+        private bool isDraggingUVMap = false;
+        private Vector2 lastMousePos;
+        private Texture2D magnifyingGlassTexture;
+        
+        // ルーペ状態管理
+        private bool isMagnifyingGlassActive = false;
+        private Vector2 currentMagnifyingMousePos;
         
         public override VisualElement CreateInspectorGUI()
         {
@@ -44,6 +71,9 @@ namespace Deform.Masking.Editor
             // レンダラー情報表示
             CreateRendererInfo();
             
+            // 表示設定セクションを作成
+            CreateDisplaySettings();
+            
             // UVマップ表示エリアを作成
             CreateUVMapArea();
             
@@ -61,6 +91,10 @@ namespace Deform.Masking.Editor
             
             // ステータス表示を作成
             CreateStatusArea();
+            
+            // root要素にもマウスイベントを登録（範囲選択時のマウス追従用）
+            root.RegisterCallback<MouseMoveEvent>(OnRootMouseMove, TrickleDown.TrickleDown);
+            root.RegisterCallback<MouseUpEvent>(OnRootMouseUp, TrickleDown.TrickleDown);
             
             // 初期データを読み込み
             RefreshData();
@@ -153,6 +187,253 @@ namespace Deform.Masking.Editor
         }
         
         /// <summary>
+        /// 表示設定セクションを作成
+        /// </summary>
+        private void CreateDisplaySettings()
+        {
+            var settingsContainer = new VisualElement
+            {
+                style = {
+                    backgroundColor = new Color(0.2f, 0.2f, 0.3f, 0.3f),
+                    paddingTop = 10,
+                    paddingBottom = 10,
+                    paddingLeft = 10,
+                    paddingRight = 10,
+                    marginBottom = 15
+                }
+            };
+            
+            var settingsLabel = new Label("Display Settings")
+            {
+                style = {
+                    fontSize = 14,
+                    unityFontStyleAndWeight = FontStyle.Bold,
+                    marginBottom = 10
+                }
+            };
+            settingsContainer.Add(settingsLabel);
+            
+            // 頂点球サイズ設定
+            var vertexSizeContainer = new VisualElement { style = { marginBottom = 5 } };
+            
+            useAdaptiveSizeToggle = new Toggle("Use Adaptive Vertex Size")
+            {
+                value = targetComponent?.UseAdaptiveVertexSize ?? true
+            };
+            useAdaptiveSizeToggle.RegisterValueChangedCallback(evt =>
+            {
+                if (targetComponent != null)
+                {
+                    Undo.RecordObject(targetComponent, "Toggle Adaptive Vertex Size");
+                    var so = new SerializedObject(targetComponent);
+                    so.FindProperty("useAdaptiveVertexSize").boolValue = evt.newValue;
+                    so.ApplyModifiedProperties();
+                    
+                    vertexSizeSlider.SetEnabled(!evt.newValue);
+                    adaptiveMultiplierSlider.SetEnabled(evt.newValue);
+                    SceneView.RepaintAll();
+                }
+            });
+            
+            vertexSizeSlider = new Slider("Manual Vertex Size", 0.001f, 0.1f)
+            {
+                value = targetComponent?.ManualVertexSphereSize ?? 0.01f
+            };
+            vertexSizeSlider.RegisterValueChangedCallback(evt =>
+            {
+                if (targetComponent != null)
+                {
+                    Undo.RecordObject(targetComponent, "Change Manual Vertex Size");
+                    var so = new SerializedObject(targetComponent);
+                    so.FindProperty("manualVertexSphereSize").floatValue = evt.newValue;
+                    so.ApplyModifiedProperties();
+                    SceneView.RepaintAll();
+                }
+            });
+            
+            adaptiveMultiplierSlider = new Slider("Adaptive Size Multiplier", 0.001f, 0.02f)
+            {
+                value = 0.007f
+            };
+            adaptiveMultiplierSlider.RegisterValueChangedCallback(evt =>
+            {
+                if (targetComponent != null)
+                {
+                    Undo.RecordObject(targetComponent, "Change Adaptive Size Multiplier");
+                    var so = new SerializedObject(targetComponent);
+                    so.FindProperty("adaptiveSizeMultiplier").floatValue = evt.newValue;
+                    so.ApplyModifiedProperties();
+                    targetComponent.UpdateMeshData(); // 再計算
+                    SceneView.RepaintAll();
+                }
+            });
+            
+            vertexSizeContainer.Add(useAdaptiveSizeToggle);
+            vertexSizeContainer.Add(vertexSizeSlider);
+            vertexSizeContainer.Add(adaptiveMultiplierSlider);
+            settingsContainer.Add(vertexSizeContainer);
+            
+            // UVプレビュー設定
+            var uvPreviewContainer = new VisualElement { style = { marginTop = 10 } };
+            
+            autoUpdatePreviewToggle = new Toggle("Auto Update Preview")
+            {
+                value = targetComponent?.AutoUpdatePreview ?? true
+            };
+            autoUpdatePreviewToggle.RegisterValueChangedCallback(evt =>
+            {
+                if (targetComponent != null)
+                {
+                    Undo.RecordObject(targetComponent, "Toggle Auto Update Preview");
+                    var so = new SerializedObject(targetComponent);
+                    so.FindProperty("autoUpdatePreview").boolValue = evt.newValue;
+                    so.ApplyModifiedProperties();
+                }
+            });
+            
+            var zoomContainer = new VisualElement 
+            { 
+                style = { 
+                    flexDirection = FlexDirection.Row,
+                    alignItems = Align.Center,
+                    marginTop = 5
+                } 
+            };
+            
+            zoomSlider = new Slider("Zoom", 1f, 8f)
+            {
+                value = targetComponent?.UvMapZoom ?? 1f,
+                style = { flexGrow = 1, marginRight = 10 }
+            };
+            zoomSlider.RegisterValueChangedCallback(evt =>
+            {
+                if (targetComponent != null)
+                {
+                    targetComponent.SetZoomLevel(evt.newValue);
+                    if (targetComponent.AutoUpdatePreview)
+                        RefreshUVMapImage();
+                }
+            });
+            
+            resetZoomButton = new Button(() => 
+            {
+                if (targetComponent != null)
+                {
+                    targetComponent.ResetViewTransform();
+                    zoomSlider.value = 1f;
+                    if (targetComponent.AutoUpdatePreview)
+                        RefreshUVMapImage();
+                }
+            })
+            {
+                text = "Reset",
+                style = { width = 50 }
+            };
+            
+            zoomContainer.Add(zoomSlider);
+            zoomContainer.Add(resetZoomButton);
+            
+            uvPreviewContainer.Add(autoUpdatePreviewToggle);
+            uvPreviewContainer.Add(zoomContainer);
+            settingsContainer.Add(uvPreviewContainer);
+            
+            // 選択機能設定
+            var selectionContainer = new VisualElement { style = { marginTop = 10 } };
+            
+            rangeSelectionToggle = new Toggle("Enable Range Selection")
+            {
+                value = targetComponent?.EnableRangeSelection ?? true
+            };
+            rangeSelectionToggle.RegisterValueChangedCallback(evt =>
+            {
+                if (targetComponent != null)
+                {
+                    Undo.RecordObject(targetComponent, "Toggle Range Selection");
+                    var so = new SerializedObject(targetComponent);
+                    so.FindProperty("enableRangeSelection").boolValue = evt.newValue;
+                    so.ApplyModifiedProperties();
+                }
+            });
+            
+            selectionContainer.Add(rangeSelectionToggle);
+            settingsContainer.Add(selectionContainer);
+            
+            // ルーペ機能設定
+            var magnifyingContainer = new VisualElement { style = { marginTop = 10 } };
+            
+            magnifyingGlassToggle = new Toggle("Enable Magnifying Glass")
+            {
+                value = targetComponent?.EnableMagnifyingGlass ?? true
+            };
+            magnifyingGlassToggle.RegisterValueChangedCallback(evt =>
+            {
+                if (targetComponent != null)
+                {
+                    Undo.RecordObject(targetComponent, "Toggle Magnifying Glass");
+                    var so = new SerializedObject(targetComponent);
+                    so.FindProperty("enableMagnifyingGlass").boolValue = evt.newValue;
+                    so.ApplyModifiedProperties();
+                    
+                    magnifyingGlassZoomSlider.SetEnabled(evt.newValue);
+                    magnifyingGlassSizeSlider.SetEnabled(evt.newValue);
+                }
+            });
+            
+            magnifyingGlassZoomSlider = new Slider("Magnifying Zoom", 2f, 10f)
+            {
+                value = targetComponent?.MagnifyingGlassZoom ?? 4f
+            };
+            magnifyingGlassZoomSlider.RegisterValueChangedCallback(evt =>
+            {
+                if (targetComponent != null)
+                {
+                    Undo.RecordObject(targetComponent, "Change Magnifying Glass Zoom");
+                    var so = new SerializedObject(targetComponent);
+                    so.FindProperty("magnifyingGlassZoom").floatValue = evt.newValue;
+                    so.ApplyModifiedProperties();
+                }
+            });
+            
+            magnifyingGlassSizeSlider = new Slider("Magnifying Size", 50f, 200f)
+            {
+                value = targetComponent?.MagnifyingGlassSize ?? 100f
+            };
+            magnifyingGlassSizeSlider.RegisterValueChangedCallback(evt =>
+            {
+                if (targetComponent != null)
+                {
+                    Undo.RecordObject(targetComponent, "Change Magnifying Glass Size");
+                    var so = new SerializedObject(targetComponent);
+                    so.FindProperty("magnifyingGlassSize").floatValue = evt.newValue;
+                    so.ApplyModifiedProperties();
+                }
+            });
+            
+            magnifyingContainer.Add(magnifyingGlassToggle);
+            magnifyingContainer.Add(magnifyingGlassZoomSlider);
+            magnifyingContainer.Add(magnifyingGlassSizeSlider);
+            settingsContainer.Add(magnifyingContainer);
+            
+            root.Add(settingsContainer);
+            
+            // 初期状態を設定
+            UpdateSettingsUI();
+        }
+        
+        /// <summary>
+        /// 設定UIを更新
+        /// </summary>
+        private void UpdateSettingsUI()
+        {
+            if (targetComponent == null) return;
+            
+            vertexSizeSlider.SetEnabled(!targetComponent.UseAdaptiveVertexSize);
+            adaptiveMultiplierSlider.SetEnabled(targetComponent.UseAdaptiveVertexSize);
+            magnifyingGlassZoomSlider.SetEnabled(targetComponent.EnableMagnifyingGlass);
+            magnifyingGlassSizeSlider.SetEnabled(targetComponent.EnableMagnifyingGlass);
+        }
+        
+        /// <summary>
         /// UVマップ表示エリアを作成
         /// </summary>
         private void CreateUVMapArea()
@@ -197,14 +478,148 @@ namespace Deform.Masking.Editor
                 }
             };
             
-            // クリックイベントを登録
-            uvMapImage.RegisterCallback<MouseDownEvent>(OnUVMapClick);
+            // インタラクションイベントを登録（キャプチャフェーズでも取得）
+            uvMapImage.RegisterCallback<MouseDownEvent>(OnUVMapMouseDown, TrickleDown.TrickleDown);
+            uvMapImage.RegisterCallback<MouseMoveEvent>(OnUVMapMouseMove, TrickleDown.TrickleDown);
+            uvMapImage.RegisterCallback<MouseUpEvent>(OnUVMapMouseUp, TrickleDown.TrickleDown);
+            uvMapImage.RegisterCallback<WheelEvent>(OnUVMapWheel, TrickleDown.TrickleDown);
+            
+            // コンテナレベルでもマウスイベントを取得
+            uvMapContainer.RegisterCallback<MouseMoveEvent>(OnUVMapContainerMouseMove, TrickleDown.TrickleDown);
+            uvMapContainer.RegisterCallback<MouseUpEvent>(OnUVMapContainerMouseUp, TrickleDown.TrickleDown);
             
             // ツールチップ
-            uvMapImage.tooltip = "Click on UV islands to select/deselect them";
+            uvMapImage.tooltip = "Click: select islands, Drag: pan view, Wheel: zoom, Middle-click: magnifying glass";
             
             uvMapContainer.Add(uvMapImage);
+            
+            // 範囲選択オーバーレイを追加
+            rangeSelectionOverlay = new VisualElement
+            {
+                style = {
+                    position = Position.Absolute,
+                    left = 0,
+                    top = 0,
+                    right = 0,
+                    bottom = 0,
+                    backgroundColor = new Color(0.3f, 0.5f, 0.8f, 0.3f),
+                    borderLeftColor = new Color(0.3f, 0.5f, 0.8f, 0.8f),
+                    borderRightColor = new Color(0.3f, 0.5f, 0.8f, 0.8f),
+                    borderTopColor = new Color(0.3f, 0.5f, 0.8f, 0.8f),
+                    borderBottomColor = new Color(0.3f, 0.5f, 0.8f, 0.8f),
+                    borderLeftWidth = 2,
+                    borderRightWidth = 2,
+                    borderTopWidth = 2,
+                    borderBottomWidth = 2,
+                    display = DisplayStyle.None
+                }
+            };
+            
+            uvMapContainer.Add(rangeSelectionOverlay);
+            
+            // ルーペオーバーレイを追加
+            CreateMagnifyingGlassOverlay();
+            uvMapContainer.Add(magnifyingGlassOverlay);
+            
             root.Add(uvMapContainer);
+        }
+        
+        /// <summary>
+        /// ルーペオーバーレイを作成
+        /// </summary>
+        private void CreateMagnifyingGlassOverlay()
+        {
+            magnifyingGlassOverlay = new VisualElement
+            {
+                style = {
+                    position = Position.Absolute,
+                    width = 120,
+                    height = 140,
+                    backgroundColor = new Color(0.2f, 0.2f, 0.2f, 0.95f),
+                    borderLeftColor = Color.white,
+                    borderRightColor = Color.white,
+                    borderTopColor = Color.white,
+                    borderBottomColor = Color.white,
+                    borderLeftWidth = 2,
+                    borderRightWidth = 2,
+                    borderTopWidth = 2,
+                    borderBottomWidth = 2,
+                    borderTopLeftRadius = 8,
+                    borderTopRightRadius = 8,
+                    borderBottomLeftRadius = 8,
+                    borderBottomRightRadius = 8,
+                    display = DisplayStyle.None,
+                    paddingTop = 5,
+                    paddingBottom = 5,
+                    paddingLeft = 5,
+                    paddingRight = 5
+                }
+            };
+            
+            // UV座標ラベル
+            magnifyingGlassLabel = new Label
+            {
+                style = {
+                    fontSize = 10,
+                    color = Color.white,
+                    unityTextAlign = TextAnchor.MiddleCenter,
+                    height = 15,
+                    marginBottom = 3
+                }
+            };
+            
+            // ルーペ画像エリア
+            magnifyingGlassImage = new VisualElement
+            {
+                style = {
+                    flexGrow = 1,
+                    backgroundColor = Color.black,
+                    position = Position.Relative
+                }
+            };
+            
+            // レティクル（十字線）を追加
+            CreateMagnifyingGlassReticle();
+            
+            magnifyingGlassOverlay.Add(magnifyingGlassLabel);
+            magnifyingGlassOverlay.Add(magnifyingGlassImage);
+        }
+        
+        /// <summary>
+        /// ルーペにレティクル（十字線）を作成
+        /// </summary>
+        private void CreateMagnifyingGlassReticle()
+        {
+            // 縦線
+            var verticalLine = new VisualElement
+            {
+                style = {
+                    position = Position.Absolute,
+                    left = new StyleLength(new Length(50, LengthUnit.Percent)),
+                    top = new StyleLength(new Length(20, LengthUnit.Percent)),
+                    bottom = new StyleLength(new Length(20, LengthUnit.Percent)),
+                    width = 2,
+                    backgroundColor = Color.red,
+                    marginLeft = -1
+                }
+            };
+            
+            // 横線
+            var horizontalLine = new VisualElement
+            {
+                style = {
+                    position = Position.Absolute,
+                    top = new StyleLength(new Length(50, LengthUnit.Percent)),
+                    left = new StyleLength(new Length(20, LengthUnit.Percent)),
+                    right = new StyleLength(new Length(20, LengthUnit.Percent)),
+                    height = 2,
+                    backgroundColor = Color.red,
+                    marginTop = -1
+                }
+            };
+            
+            magnifyingGlassImage.Add(verticalLine);
+            magnifyingGlassImage.Add(horizontalLine);
         }
         
         /// <summary>
@@ -467,7 +882,563 @@ namespace Deform.Masking.Editor
         }
         
         /// <summary>
-        /// UVマップクリックイベント
+        /// UVマップマウスダウンイベント
+        /// </summary>
+        private void OnUVMapMouseDown(MouseDownEvent evt)
+        {
+            if (targetComponent == null) return;
+            
+            var localPosition = evt.localMousePosition;
+            
+            if (evt.button == 0) // 左クリック
+            {
+                // ルーペ表示中は通常のクリック選択を無効化
+                if (isMagnifyingGlassActive)
+                {
+                    evt.StopPropagation();
+                    return;
+                }
+                
+                if (targetComponent.EnableRangeSelection && evt.shiftKey)
+                {
+                    // 範囲選択開始
+                    StartRangeSelection(localPosition);
+                    isDraggingUVMap = false;
+                }
+                else
+                {
+                    // 通常のクリック選択またはパン開始
+                    var normalizedPos = new Vector2(
+                        localPosition.x / UV_MAP_SIZE,
+                        1f - (localPosition.y / UV_MAP_SIZE)
+                    );
+                    
+                    // デバッグ情報
+                    Debug.Log($"[UVIslandSelector] Click at local: {localPosition}, normalized: {normalizedPos}");
+                    
+                    int islandID = targetComponent.GetIslandAtUVCoordinate(normalizedPos);
+                    
+                    if (islandID >= 0)
+                    {
+                        // アイランドの選択を切り替え
+                        Undo.RecordObject(targetComponent, "Toggle UV Island Selection");
+                        targetComponent.ToggleIslandSelection(islandID);
+                        RefreshUI();
+                        isDraggingUVMap = false;
+                    }
+                    else
+                    {
+                        // パン開始
+                        isDraggingUVMap = true;
+                        lastMousePos = localPosition;
+                    }
+                }
+                evt.StopPropagation();
+            }
+            else if (evt.button == 2 && targetComponent.EnableMagnifyingGlass) // 中ボタン
+            {
+                // ルーペ表示開始（通常のクリック選択を無効化）
+                StartMagnifyingGlass(localPosition);
+                evt.StopPropagation();
+                // マウスダウン時点でisMagnifyingGlassActiveがtrueになるため、他の処理をブロック
+                return;
+            }
+        }
+        
+        /// <summary>
+        /// UVマップマウスムーブイベント
+        /// </summary>
+        private void OnUVMapMouseMove(MouseMoveEvent evt)
+        {
+            HandleMouseMove(evt);
+        }
+        
+        /// <summary>
+        /// マウスムーブイベントを処理
+        /// </summary>
+        private void HandleMouseMove(MouseMoveEvent evt)
+        {
+            if (targetComponent == null) return;
+            
+            var localPosition = evt.localMousePosition;
+            
+            if (isMagnifyingGlassActive)
+            {
+                // ルーペ更新（マウス移動に追従）
+                UpdateMagnifyingGlass(localPosition);
+                evt.StopPropagation();
+            }
+            else if (targetComponent.IsRangeSelecting)
+            {
+                // 範囲選択更新
+                UpdateRangeSelection(localPosition);
+                evt.StopPropagation();
+            }
+            else if (isDraggingUVMap && !isMagnifyingGlassActive)
+            {
+                // パン更新（正確な座標変換）- ルーペ表示中は無効化
+                var deltaPos = localPosition - lastMousePos;
+                
+                // マウス移動量をUV座標空間での移動量に変換
+                // ズーム時でもマウス移動と画面移動が一致するように計算
+                var uvDelta = new Vector2(
+                    deltaPos.x / (UV_MAP_SIZE * targetComponent.UvMapZoom),
+                    -deltaPos.y / (UV_MAP_SIZE * targetComponent.UvMapZoom)
+                );
+                
+                var currentOffset = targetComponent.UvMapPanOffset;
+                targetComponent.SetPanOffset(currentOffset + uvDelta);
+                
+                lastMousePos = localPosition;
+                
+                if (targetComponent.AutoUpdatePreview)
+                    RefreshUVMapImage();
+                
+                evt.StopPropagation();
+            }
+        }
+        
+        /// <summary>
+        /// UVマップマウスアップイベント
+        /// </summary>
+        private void OnUVMapMouseUp(MouseUpEvent evt)
+        {
+            HandleMouseUp(evt);
+        }
+        
+        /// <summary>
+        /// UVマップコンテナマウスムーブイベント
+        /// </summary>
+        private void OnUVMapContainerMouseMove(MouseMoveEvent evt)
+        {
+            HandleMouseMove(evt);
+        }
+        
+        /// <summary>
+        /// UVマップコンテナマウスアップイベント
+        /// </summary>
+        private void OnUVMapContainerMouseUp(MouseUpEvent evt)
+        {
+            HandleMouseUp(evt);
+        }
+        
+        /// <summary>
+        /// Root要素マウスムーブイベント（グローバル追従用）
+        /// </summary>
+        private void OnRootMouseMove(MouseMoveEvent evt)
+        {
+            if (targetComponent == null) return;
+            
+            // root座標をUVマップコンテナ相対座標に変換
+            var containerWorldBound = uvMapContainer.worldBound;
+            
+            // マウス座標をuvMapContainerのローカル座標に変換
+            var relativeX = evt.mousePosition.x - containerWorldBound.x;
+            var relativeY = evt.mousePosition.y - containerWorldBound.y;
+            
+            var localPos = new Vector2(relativeX, relativeY);
+            
+            // 範囲選択中の処理
+            if (targetComponent.IsRangeSelecting)
+            {
+                // 範囲をUVマップエリア内にクランプ（表示用）
+                var clampedPos = new Vector2(
+                    Mathf.Clamp(localPos.x, 0, UV_MAP_SIZE),
+                    Mathf.Clamp(localPos.y, 0, UV_MAP_SIZE)
+                );
+                
+                // UV座標変換（クランプされた座標を使用）
+                var uvCoord = LocalPosToUV(clampedPos);
+                targetComponent.UpdateRangeSelection(uvCoord);
+                UpdateRangeSelectionVisual();
+                
+                evt.StopPropagation();
+            }
+            // ルーペ表示中の処理
+            else if (isMagnifyingGlassActive)
+            {
+                // マウス位置をUVマップ内にクランプしてルーペ更新
+                var clampedPos = new Vector2(
+                    Mathf.Clamp(localPos.x, 0, UV_MAP_SIZE),
+                    Mathf.Clamp(localPos.y, 0, UV_MAP_SIZE)
+                );
+                
+                UpdateMagnifyingGlass(clampedPos);
+                evt.StopPropagation();
+            }
+            // パンドラッグ中の処理
+            else if (isDraggingUVMap)
+            {
+                // ドラッグでのパン操作を継続
+                var clampedPos = new Vector2(
+                    Mathf.Clamp(localPos.x, 0, UV_MAP_SIZE),
+                    Mathf.Clamp(localPos.y, 0, UV_MAP_SIZE)
+                );
+                
+                var deltaPos = clampedPos - lastMousePos;
+                
+                // 正確な座標変換でマウス移動と画面移動を一致させる
+                var uvDelta = new Vector2(
+                    deltaPos.x / (UV_MAP_SIZE * targetComponent.UvMapZoom),
+                    -deltaPos.y / (UV_MAP_SIZE * targetComponent.UvMapZoom)
+                );
+                
+                var currentOffset = targetComponent.UvMapPanOffset;
+                targetComponent.SetPanOffset(currentOffset + uvDelta);
+                
+                lastMousePos = clampedPos;
+                
+                if (targetComponent.AutoUpdatePreview)
+                    RefreshUVMapImage();
+                
+                evt.StopPropagation();
+            }
+        }
+        
+        /// <summary>
+        /// Root要素マウスアップイベント
+        /// </summary>
+        private void OnRootMouseUp(MouseUpEvent evt)
+        {
+            if (targetComponent == null) return;
+            
+            if (evt.button == 0) // 左ボタン
+            {
+                // 範囲選択の終了
+                if (targetComponent.IsRangeSelecting)
+                {
+                    bool addToSelection = evt.shiftKey && !evt.ctrlKey;
+                    bool removeFromSelection = evt.ctrlKey && evt.shiftKey;
+                    FinishRangeSelection(addToSelection, removeFromSelection);
+                    Debug.Log($"[UVIslandSelector] Range selection finished from root: add={addToSelection}, remove={removeFromSelection}");
+                    evt.StopPropagation();
+                }
+                // パンドラッグの終了
+                else if (isDraggingUVMap)
+                {
+                    isDraggingUVMap = false;
+                    Debug.Log("[UVIslandSelector] Pan drag ended from root");
+                    evt.StopPropagation();
+                }
+            }
+            else if (evt.button == 2) // 中ボタン
+            {
+                // ルーペの終了
+                if (isMagnifyingGlassActive)
+                {
+                    StopMagnifyingGlass();
+                    Debug.Log("[UVIslandSelector] Magnifying glass stopped from root");
+                    evt.StopPropagation();
+                }
+            }
+        }
+        
+        /// <summary>
+        /// マウスアップイベントを処理
+        /// </summary>
+        private void HandleMouseUp(MouseUpEvent evt)
+        {
+            if (evt.button == 0) // 左クリック
+            {
+                Debug.Log($"[UVIslandSelector] Mouse up detected: IsRangeSelecting={targetComponent?.IsRangeSelecting}, IsDragging={isDraggingUVMap}");
+                
+                if (isMagnifyingGlassActive)
+                {
+                    // ルーペ中央でクリック選択
+                    HandleMagnifyingGlassClick(evt);
+                }
+                else if (targetComponent?.IsRangeSelecting == true)
+                {
+                    // 範囲選択完了
+                    bool addToSelection = evt.shiftKey && !evt.ctrlKey;
+                    bool removeFromSelection = evt.ctrlKey && evt.shiftKey;
+                    FinishRangeSelection(addToSelection, removeFromSelection);
+                    Debug.Log($"[UVIslandSelector] Range selection finished: add={addToSelection}, remove={removeFromSelection}");
+                }
+                
+                isDraggingUVMap = false;
+                evt.StopPropagation();
+            }
+            else if (evt.button == 2) // 中ボタン
+            {
+                // ルーペ終了
+                StopMagnifyingGlass();
+                evt.StopPropagation();
+            }
+        }
+        
+        /// <summary>
+        /// UVマップホイールイベント
+        /// </summary>
+        private void OnUVMapWheel(WheelEvent evt)
+        {
+            if (targetComponent == null) return;
+            
+            var localPosition = evt.localMousePosition;
+            var zoomPoint = LocalPosToUV(localPosition);
+            var zoomDelta = -evt.delta.y * 0.1f;
+            
+            targetComponent.ZoomAtPoint(zoomPoint, zoomDelta);
+            zoomSlider.value = targetComponent.UvMapZoom;
+            
+            if (targetComponent.AutoUpdatePreview)
+                RefreshUVMapImage();
+            
+            evt.StopPropagation();
+        }
+        
+        /// <summary>
+        /// ローカル座標をUV座標に変換（変換行列考慮）
+        /// </summary>
+        private Vector2 LocalPosToUV(Vector2 localPos)
+        {
+            if (targetComponent == null) 
+                return Vector2.zero;
+            
+            // ローカル座標を正規化（Y軸反転）
+            var normalizedPos = new Vector2(
+                localPos.x / UV_MAP_SIZE,
+                1f - (localPos.y / UV_MAP_SIZE)
+            );
+            
+            // 変換行列の逆行列を使って実際のUV座標を取得
+            var transform = targetComponent.CalculateUVTransformMatrix();
+            var inverseTransform = transform.inverse;
+            var actualUV = inverseTransform.MultiplyPoint3x4(new Vector3(normalizedPos.x, normalizedPos.y, 0f));
+            
+            // デバッグ情報
+            Debug.Log($"[LocalPosToUV] LocalPos: {localPos}, Normalized: {normalizedPos}, ActualUV: {actualUV}");
+            
+            return new Vector2(actualUV.x, actualUV.y);
+        }
+        
+        /// <summary>
+        /// UV座標をローカル座標に変換（変換行列考慮）
+        /// </summary>
+        private Vector2 UVToLocalPos(Vector2 uvCoord)
+        {
+            if (targetComponent == null) 
+                return Vector2.zero;
+            
+            // 変換行列を適用
+            var transform = targetComponent.CalculateUVTransformMatrix();
+            var transformedUV = transform.MultiplyPoint3x4(new Vector3(uvCoord.x, uvCoord.y, 0f));
+            
+            // ローカル座標に変換（Y軸反転）
+            return new Vector2(
+                transformedUV.x * UV_MAP_SIZE,
+                (1f - transformedUV.y) * UV_MAP_SIZE
+            );
+        }
+        
+        /// <summary>
+        /// 範囲選択を開始
+        /// </summary>
+        private void StartRangeSelection(Vector2 localPos)
+        {
+            var uvCoord = LocalPosToUV(localPos);
+            targetComponent.StartRangeSelection(uvCoord);
+            
+            // 初期の範囲選択表示を更新
+            UpdateRangeSelectionVisual();
+        }
+        
+        /// <summary>
+        /// 範囲選択を更新
+        /// </summary>
+        private void UpdateRangeSelection(Vector2 localPos)
+        {
+            var uvCoord = LocalPosToUV(localPos);
+            targetComponent.UpdateRangeSelection(uvCoord);
+            
+            // 範囲選択矩形を視覚的に表示
+            UpdateRangeSelectionVisual();
+        }
+        
+        /// <summary>
+        /// 範囲選択の視覚的表示を更新
+        /// </summary>
+        private void UpdateRangeSelectionVisual()
+        {
+            if (targetComponent == null || !targetComponent.IsRangeSelecting)
+            {
+                rangeSelectionOverlay.style.display = DisplayStyle.None;
+                return;
+            }
+            
+            var selectionRect = targetComponent.GetCurrentSelectionRect();
+            
+            // UV座標をローカル座標に変換
+            var startLocal = UVToLocalPos(new Vector2(selectionRect.xMin, selectionRect.yMax));
+            var endLocal = UVToLocalPos(new Vector2(selectionRect.xMax, selectionRect.yMin));
+            
+            // 矩形の位置とサイズを設定
+            var left = Mathf.Min(startLocal.x, endLocal.x);
+            var top = Mathf.Min(startLocal.y, endLocal.y);
+            var width = Mathf.Abs(endLocal.x - startLocal.x);
+            var height = Mathf.Abs(endLocal.y - startLocal.y);
+            
+            rangeSelectionOverlay.style.left = left;
+            rangeSelectionOverlay.style.top = top;
+            rangeSelectionOverlay.style.width = width;
+            rangeSelectionOverlay.style.height = height;
+            
+            // Ctrl+Shiftキーの状態を確認して色を変更
+            bool isCtrlShiftPressed = Event.current != null && Event.current.control && Event.current.shift;
+            if (isCtrlShiftPressed)
+            {
+                // 選択解除モードの色（赤系）
+                rangeSelectionOverlay.style.backgroundColor = new Color(0.8f, 0.3f, 0.3f, 0.3f);
+                rangeSelectionOverlay.style.borderLeftColor = new Color(0.8f, 0.3f, 0.3f, 0.8f);
+                rangeSelectionOverlay.style.borderRightColor = new Color(0.8f, 0.3f, 0.3f, 0.8f);
+                rangeSelectionOverlay.style.borderTopColor = new Color(0.8f, 0.3f, 0.3f, 0.8f);
+                rangeSelectionOverlay.style.borderBottomColor = new Color(0.8f, 0.3f, 0.3f, 0.8f);
+            }
+            else
+            {
+                // 通常の選択モードの色（青系）
+                rangeSelectionOverlay.style.backgroundColor = new Color(0.3f, 0.5f, 0.8f, 0.3f);
+                rangeSelectionOverlay.style.borderLeftColor = new Color(0.3f, 0.5f, 0.8f, 0.8f);
+                rangeSelectionOverlay.style.borderRightColor = new Color(0.3f, 0.5f, 0.8f, 0.8f);
+                rangeSelectionOverlay.style.borderTopColor = new Color(0.3f, 0.5f, 0.8f, 0.8f);
+                rangeSelectionOverlay.style.borderBottomColor = new Color(0.3f, 0.5f, 0.8f, 0.8f);
+            }
+            
+            rangeSelectionOverlay.style.display = DisplayStyle.Flex;
+        }
+        
+        /// <summary>
+        /// 範囲選択を完了
+        /// </summary>
+        private void FinishRangeSelection(bool addToSelection, bool removeFromSelection = false)
+        {
+            targetComponent.FinishRangeSelection(addToSelection, removeFromSelection);
+            
+            // 範囲選択オーバーレイを非表示
+            rangeSelectionOverlay.style.display = DisplayStyle.None;
+            
+            RefreshUI();
+        }
+        
+        /// <summary>
+        /// ルーペ表示を開始
+        /// </summary>
+        private void StartMagnifyingGlass(Vector2 localPos)
+        {
+            if (!targetComponent.EnableMagnifyingGlass) return;
+            
+            isMagnifyingGlassActive = true;
+            currentMagnifyingMousePos = localPos;
+            UpdateMagnifyingGlass(localPos);
+        }
+        
+        /// <summary>
+        /// ルーペを更新
+        /// </summary>
+        private void UpdateMagnifyingGlass(Vector2 localPos)
+        {
+            if (!isMagnifyingGlassActive || !targetComponent.EnableMagnifyingGlass) return;
+            
+            currentMagnifyingMousePos = localPos;
+            
+            // 範囲選択と同じ座標変換を使用
+            var uvCoord = LocalPosToUV(localPos);
+            var size = Mathf.RoundToInt(targetComponent.MagnifyingGlassSize);
+            
+            // デバッグ情報
+            Debug.Log($"[Magnifying Glass Editor] LocalPos: {localPos}, UV (LocalPosToUV): {uvCoord}, Zoom: {targetComponent.UvMapZoom}, Pan: {targetComponent.UvMapPanOffset}");
+            
+            // 既存のテクスチャを破棄
+            if (magnifyingGlassTexture != null)
+            {
+                DestroyImmediate(magnifyingGlassTexture);
+            }
+            
+            // 範囲選択と同じUV座標変換を使ってルーペテクスチャを生成
+            magnifyingGlassTexture = targetComponent.GenerateMagnifyingGlassTexture(uvCoord, size);
+            
+            if (magnifyingGlassTexture != null)
+            {
+                // ルーペの位置をマウス位置近くに設定
+                var overlaySize = 120f;
+                var posX = Mathf.Clamp(localPos.x + 10, 0, UV_MAP_SIZE - overlaySize);
+                var posY = Mathf.Clamp(localPos.y - overlaySize - 10, 0, UV_MAP_SIZE - 140);
+                
+                magnifyingGlassOverlay.style.left = posX;
+                magnifyingGlassOverlay.style.top = posY;
+                
+                // UV座標を表示（範囲選択と同じ変換）
+                magnifyingGlassLabel.text = $"UV: ({uvCoord.x:F3}, {uvCoord.y:F3})";
+                
+                // ルーペ画像を設定
+                magnifyingGlassImage.style.backgroundImage = new StyleBackground(magnifyingGlassTexture);
+                magnifyingGlassImage.style.unityBackgroundScaleMode = ScaleMode.StretchToFill;
+                
+                // 表示
+                magnifyingGlassOverlay.style.display = DisplayStyle.Flex;
+            }
+        }
+        
+        /// <summary>
+        /// ルーペ表示を停止
+        /// </summary>
+        private void StopMagnifyingGlass()
+        {
+            isMagnifyingGlassActive = false;
+            
+            if (magnifyingGlassOverlay != null)
+            {
+                magnifyingGlassOverlay.style.display = DisplayStyle.None;
+            }
+            
+            if (magnifyingGlassTexture != null)
+            {
+                DestroyImmediate(magnifyingGlassTexture);
+                magnifyingGlassTexture = null;
+            }
+        }
+        
+        /// <summary>
+        /// ルーペ中央でのクリック処理
+        /// </summary>
+        private void HandleMagnifyingGlassClick(MouseUpEvent evt)
+        {
+            // 通常のクリック選択と同じ正規化座標を使用
+            var normalizedPos = new Vector2(
+                currentMagnifyingMousePos.x / UV_MAP_SIZE,
+                1f - (currentMagnifyingMousePos.y / UV_MAP_SIZE)
+            );
+            
+            int islandID = targetComponent.GetIslandAtUVCoordinate(normalizedPos);
+            
+            Debug.Log($"[Magnifying Glass Click] Normalized Pos: {normalizedPos}, Mouse Pos: {currentMagnifyingMousePos}, Island ID: {islandID}");
+            
+            if (islandID >= 0)
+            {
+                Undo.RecordObject(targetComponent, "Select UV Island from Magnifying Glass");
+                targetComponent.ToggleIslandSelection(islandID);
+                RefreshUI();
+                Debug.Log($"[UVIslandSelector] Selected island {islandID} via magnifying glass at normalized pos: {normalizedPos}");
+            }
+            else
+            {
+                Debug.Log($"[UVIslandSelector] No island found at magnifying glass normalized pos: {normalizedPos}");
+            }
+        }
+        
+        /// <summary>
+        /// UVマップ画像のみを更新
+        /// </summary>
+        private void RefreshUVMapImage()
+        {
+            if (targetComponent?.UvMapTexture != null)
+            {
+                uvMapImage.style.backgroundImage = new StyleBackground(targetComponent.UvMapTexture);
+            }
+        }
+        
+        /// <summary>
+        /// UVマップクリックイベント（旧版・互換性のため残存）
         /// </summary>
         private void OnUVMapClick(MouseDownEvent evt)
         {
@@ -632,10 +1603,7 @@ namespace Deform.Masking.Editor
         private void RefreshUI()
         {
             // UVマップ画像を更新
-            if (targetComponent.UvMapTexture != null)
-            {
-                uvMapImage.style.backgroundImage = new StyleBackground(targetComponent.UvMapTexture);
-            }
+            RefreshUVMapImage();
             
             // リストビューを更新
             if (targetComponent.UVIslands != null)
@@ -643,6 +1611,9 @@ namespace Deform.Masking.Editor
                 islandListView.itemsSource = targetComponent.UVIslands;
                 islandListView.RefreshItems();
             }
+            
+            // 設定UIを更新
+            UpdateSettingsUI();
             
             // 選択数を更新
             var selectedCount = targetComponent.SelectedIslandIDs?.Count ?? 0;
@@ -652,6 +1623,10 @@ namespace Deform.Masking.Editor
             if (selectedCount > 0)
             {
                 statusLabel.text = $"{selectedCount} islands selected, {maskedVertexCount} vertices, {maskedFaceCount} faces masked";
+            }
+            else
+            {
+                statusLabel.text = $"Found {targetComponent.UVIslands?.Count ?? 0} UV islands";
             }
             
             // エクスポートボタンの有効/無効
@@ -678,7 +1653,8 @@ namespace Deform.Masking.Editor
         /// Deformerにエクスポート
         /// </summary>
         private void ExportToDeformer()
-        {
+	    {
+		    /*
             var uvIslandMask = targetComponent.GetComponent<UVIslandMask>();
             if (uvIslandMask == null)
             {
@@ -700,7 +1676,8 @@ namespace Deform.Masking.Editor
             EditorApplication.delayCall += () => 
             {
                 Selection.activeGameObject = targetComponent.gameObject;
-            };
+		    };
+		    */
         }
         
         /// <summary>
@@ -838,12 +1815,25 @@ namespace Deform.Masking.Editor
             
             Handles.color = Color.white;
             
+            // 適応的または手動設定の頂点球サイズを取得
+            float sphereSize = targetComponent.AdaptiveVertexSphereSize;
+            int drawnCount = 0;
+            int maxVertices = targetComponent.MaxDisplayVertices;
+            
             foreach (int vertexIndex in targetComponent.VertexMask)
             {
                 if (vertexIndex < vertices.Length)
                 {
                     var worldPos = transform.TransformPoint(vertices[vertexIndex]);
-                    Handles.SphereHandleCap(0, worldPos, Quaternion.identity, 0.01f, EventType.Repaint);
+                    Handles.SphereHandleCap(0, worldPos, Quaternion.identity, sphereSize, EventType.Repaint);
+                    
+                    drawnCount++;
+                    
+                    // パフォーマンス最適化：最大表示数に達したら停止
+                    if (targetComponent.EnablePerformanceOptimization && drawnCount >= maxVertices)
+                    {
+                        break;
+                    }
                 }
             }
         }
