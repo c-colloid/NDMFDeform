@@ -865,11 +865,9 @@ namespace Deform.Masking.Editor
                 selector.ToggleIslandSelection(islandID);
                 targetMask.SetSelectedIslands(selector.SelectedIslandIDs);
                 EditorUtility.SetDirty(targetMask);
-                if (selector?.AutoUpdatePreview ?? false)
-                {
-                    selector.GenerateUVMapTexture();
-                }
-                RefreshUI(true);
+                
+                // Use optimized refresh - texture update is deferred
+                RefreshUIFast();
             }
             else
             {
@@ -1045,6 +1043,14 @@ namespace Deform.Masking.Editor
                 else if (isDraggingUVMap)
                 {
                     isDraggingUVMap = false;
+                    
+                    // Update texture after mouse interaction ends
+                    if (selector?.AutoUpdatePreview ?? false)
+                    {
+                        selector?.UpdateTextureIfNeeded();
+                        RefreshUVMapImage();
+                    }
+                    
                     evt.StopPropagation();
                 }
             }
@@ -1158,6 +1164,29 @@ namespace Deform.Masking.Editor
             {
                 SceneView.RepaintAll();
             }
+        }
+        
+        // Fast UI refresh for frequent operations like selection changes
+        private void RefreshUIFast()
+        {
+            // Update texture only if needed (deferred)
+            if (selector?.AutoUpdatePreview ?? false)
+            {
+                selector?.UpdateTextureIfNeeded();
+            }
+            
+            // Only update essential UI elements
+            RefreshUVMapImage();
+            UpdateStatus();
+            
+            // Update list view selection state without full refresh
+            if (islandListView != null)
+            {
+                islandListView.RefreshItems();
+            }
+            
+            // Force scene repaint for selection highlighting
+            SceneView.RepaintAll();
         }
         
         private void RefreshUVMapImage()
@@ -1329,7 +1358,7 @@ namespace Deform.Masking.Editor
                 selector.ToggleIslandSelection(islandID);
                 targetMask.SetSelectedIslands(selector.SelectedIslandIDs);
                 EditorUtility.SetDirty(targetMask);
-                RefreshUI();
+                RefreshUIFast();
             }
         }
         
@@ -1353,7 +1382,7 @@ namespace Deform.Masking.Editor
             
             targetMask.SetSelectedIslands(selector.SelectedIslandIDs);
             EditorUtility.SetDirty(targetMask);
-            RefreshUI(false);
+            RefreshUIFast();
         }
         
         private void OnEnable()
