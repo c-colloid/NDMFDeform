@@ -45,6 +45,11 @@ namespace Deform.Masking.Editor
         private int[] vertexMask;
         private int[] triangleMask;
         
+        // Performance optimization
+        private bool textureNeedsUpdate = false;
+        private HashSet<int> vertexMaskSet = new HashSet<int>();
+        private List<int> triangleMaskList = new List<int>();
+        
         // Scene display
         private Transform targetTransform;
         
@@ -117,19 +122,22 @@ namespace Deform.Masking.Editor
         
         public void ToggleIslandSelection(int islandID)
         {
-            if (selectedIslandIDs.Contains(islandID))
+            bool wasSelected = selectedIslandIDs.Contains(islandID);
+            if (wasSelected)
             {
                 selectedIslandIDs.Remove(islandID);
+                RemoveIslandFromMasks(islandID);
             }
             else
             {
                 selectedIslandIDs.Add(islandID);
+                AddIslandToMasks(islandID);
             }
-            UpdateMasks();
             
+            // Mark texture as dirty instead of regenerating immediately
             if (autoUpdatePreview)
             {
-                GenerateUVMapTexture();
+                MarkTextureForUpdate();
             }
         }
         
@@ -358,8 +366,81 @@ namespace Deform.Masking.Editor
                 }
             }
             
-            vertexMask = maskedVertices.Distinct().ToArray();
-            triangleMask = maskedTriangles.ToArray();
+            vertexMaskSet = maskedVertices.ToHashSet();
+            triangleMaskList = maskedTriangles;
+            
+            vertexMask = vertexMaskSet.ToArray();
+            triangleMask = triangleMaskList.ToArray();
+        }
+        
+        // Optimized incremental mask updates
+        private void AddIslandToMasks(int islandID)
+        {
+            var island = uvIslands.FirstOrDefault(i => i.islandID == islandID);
+            if (island != null)
+            {
+                foreach (var vertIndex in island.vertexIndices)
+                {
+                    vertexMaskSet.Add(vertIndex);
+                }
+                triangleMaskList.AddRange(island.triangleIndices);
+                
+                // Update arrays
+                vertexMask = vertexMaskSet.ToArray();
+                triangleMask = triangleMaskList.ToArray();
+            }
+        }
+        
+        private void RemoveIslandFromMasks(int islandID)
+        {
+            var island = uvIslands.FirstOrDefault(i => i.islandID == islandID);
+            if (island != null)
+            {
+                foreach (var vertIndex in island.vertexIndices)
+                {
+                    // Only remove if no other selected islands contain this vertex
+                    bool vertexUsedElsewhere = false;
+                    foreach (var otherIslandID in selectedIslandIDs)
+                    {
+                        if (otherIslandID == islandID) continue;
+                        var otherIsland = uvIslands.FirstOrDefault(i => i.islandID == otherIslandID);
+                        if (otherIsland != null && otherIsland.vertexIndices.Contains(vertIndex))
+                        {
+                            vertexUsedElsewhere = true;
+                            break;
+                        }
+                    }
+                    if (!vertexUsedElsewhere)
+                    {
+                        vertexMaskSet.Remove(vertIndex);
+                    }
+                }
+                
+                // Remove triangles
+                foreach (var triIndex in island.triangleIndices)
+                {
+                    triangleMaskList.Remove(triIndex);
+                }
+                
+                // Update arrays
+                vertexMask = vertexMaskSet.ToArray();
+                triangleMask = triangleMaskList.ToArray();
+            }
+        }
+        
+        // Deferred texture update
+        private void MarkTextureForUpdate()
+        {
+            textureNeedsUpdate = true;
+        }
+        
+        public void UpdateTextureIfNeeded()
+        {
+            if (textureNeedsUpdate)
+            {
+                GenerateUVMapTexture();
+                textureNeedsUpdate = false;
+            }
         }
         
         // Simplified texture generation for preview only
