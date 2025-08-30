@@ -23,7 +23,7 @@ namespace Deform.Masking
             public List<Vector2> uvCoordinates = new List<Vector2>();
             public Bounds uvBounds;
             public Color maskColor = Color.red;
-            public int faceCount => triangleIndices.Count / 3;
+            public int faceCount => triangleIndices.Count;
         }
         
         /// <summary>
@@ -64,6 +64,9 @@ namespace Deform.Masking
                         
                     processedTriangles.Add(currentTriIndex);
                     
+                    // Add triangle index to island (not vertex indices!)
+                    island.triangleIndices.Add(currentTriIndex);
+                    
                     // Add triangle vertices to island
                     int triStart = currentTriIndex * 3;
                     for (int v = 0; v < 3; v++)
@@ -74,7 +77,6 @@ namespace Deform.Masking
                             island.vertexIndices.Add(vertIndex);
                             island.uvCoordinates.Add(uvs[vertIndex]);
                         }
-                        island.triangleIndices.Add(vertIndex);
                     }
                     
                     // Find adjacent triangles with shared UV coordinates
@@ -177,13 +179,25 @@ namespace Deform.Masking
         /// </summary>
         public static bool IsPointInUVIsland(Vector2 point, UVIsland island, Vector2[] uvs, int[] triangles)
         {
-            for (int i = 0; i < island.triangleIndices.Count; i += 3)
+            // island.triangleIndices contains triangle indices, not vertex indices
+            foreach (int triangleIndex in island.triangleIndices)
             {
-                if (i + 2 >= island.triangleIndices.Count) break;
+                int baseIndex = triangleIndex * 3;
                 
-                var uv0 = uvs[island.triangleIndices[i]];
-                var uv1 = uvs[island.triangleIndices[i + 1]];
-                var uv2 = uvs[island.triangleIndices[i + 2]];
+                // Safety check for array bounds
+                if (baseIndex + 2 >= triangles.Length) continue;
+                
+                // Get vertex indices from triangles array
+                int vertIndex0 = triangles[baseIndex];
+                int vertIndex1 = triangles[baseIndex + 1];
+                int vertIndex2 = triangles[baseIndex + 2];
+                
+                // Safety check for UV array bounds
+                if (vertIndex0 >= uvs.Length || vertIndex1 >= uvs.Length || vertIndex2 >= uvs.Length) continue;
+                
+                var uv0 = uvs[vertIndex0];
+                var uv1 = uvs[vertIndex1];
+                var uv2 = uvs[vertIndex2];
                 
                 if (IsPointInTriangle(point, uv0, uv1, uv2))
                     return true;

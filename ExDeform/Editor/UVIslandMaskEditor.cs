@@ -1386,11 +1386,28 @@ namespace Deform.Masking.Editor
         {
             if (selector == null || !selector.HasSelectedIslands) return;
             
-            // Set the transform for drawing
-            selector.TargetTransform = targetMask.transform;
+            // Use proper renderer transform for scene highlighting
+            var rendererTransform = GetRendererTransform();
+            if (rendererTransform != null)
+            {
+                selector.TargetTransform = rendererTransform;
+                selector.DrawSelectedFacesInScene();
+            }
+        }
+        
+        private Transform GetRendererTransform()
+        {
+            // Try to get cached renderer transform from the UVIslandMask component
+            if (targetMask?.CachedRendererTransform != null)
+            {
+                return targetMask.CachedRendererTransform;
+            }
             
-            // Draw selected faces in scene view
-            selector.DrawSelectedFacesInScene();
+            // Update renderer cache if not available
+            targetMask?.UpdateRendererCache();
+            
+            // Return the updated cached transform
+            return targetMask?.CachedRendererTransform;
         }
         
     }
