@@ -25,16 +25,29 @@ namespace Deform.Masking
         [System.NonSerialized] private bool maskDataReady = false;
         [System.NonSerialized] private Mesh cachedMesh;
         
+        // Cached renderer for editor access
+        [System.NonSerialized] private Renderer cachedRenderer;
+        [System.NonSerialized] private Transform cachedRendererTransform;
+        
         // Properties for editor access
         public List<int> SelectedIslandIDs => selectedIslandIDs;
         public bool InvertMask { get => invertMask; set => invertMask = value; }
 	    public float MaskStrength { get => maskStrength; set => maskStrength = Mathf.Clamp01(value); }
 	    public Mesh CachedMesh => cachedMesh;
+	    public Renderer CachedRenderer => cachedRenderer;
+	    public Transform CachedRendererTransform => cachedRendererTransform;
         
         public override DataFlags DataFlags => DataFlags.Vertices;
         
         public override JobHandle Process(MeshData data, JobHandle dependency = default)
         {
+            // Cache renderer information for editor access
+            if (cachedRenderer == null || cachedRendererTransform == null)
+            {
+                cachedRenderer = data.Target.GetRenderer();
+                cachedRendererTransform = cachedRenderer?.transform;
+            }
+            
             // Update mask data when mesh changes or no mask exists
             if (!maskDataReady || maskValues.Length != data.Length || data.Target.GetMesh() != cachedMesh)
             {
@@ -115,6 +128,19 @@ namespace Deform.Masking
         {
             selectedIslandIDs = islandIDs ?? new List<int>();
             maskDataReady = false;
+        }
+        
+        /// <summary>
+        /// Force update renderer cache from the Deformable component (for editor use)
+        /// </summary>
+        public void UpdateRendererCache()
+        {
+            var deformable = GetComponent<Deform.Deformable>();
+            if (deformable != null && deformable.HasTarget())
+            {
+                cachedRenderer = deformable.GetRenderer();
+                cachedRendererTransform = cachedRenderer?.transform;
+            }
         }
     }
     

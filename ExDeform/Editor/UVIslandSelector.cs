@@ -431,9 +431,10 @@ namespace Deform.Masking.Editor
         
         private void DrawUVIslands(Color[] pixels, int width, int height, Matrix4x4 transform)
         {
-            if (targetMesh == null || targetMesh.uv == null) return;
+            if (targetMesh == null || targetMesh.uv == null || targetMesh.triangles == null) return;
             
             var uvs = targetMesh.uv;
+            var triangles = targetMesh.triangles;
             
             foreach (var island in uvIslands)
             {
@@ -441,14 +442,25 @@ namespace Deform.Masking.Editor
                     new Color(island.maskColor.r, island.maskColor.g, island.maskColor.b, 0.7f) :
                     new Color(0.5f, 0.5f, 0.5f, 0.3f);
                 
-                // Draw island outline
-                for (int i = 0; i < island.triangleIndices.Count; i += 3)
+                // Draw island outline using triangle indices
+                foreach (int triangleIndex in island.triangleIndices)
                 {
-                    if (i + 2 >= island.triangleIndices.Count) break;
+                    int baseIndex = triangleIndex * 3;
                     
-                    var uv0 = uvs[island.triangleIndices[i]];
-                    var uv1 = uvs[island.triangleIndices[i + 1]];
-                    var uv2 = uvs[island.triangleIndices[i + 2]];
+                    // Safety check for array bounds
+                    if (baseIndex + 2 >= triangles.Length) continue;
+                    
+                    // Get vertex indices from triangles array
+                    int vertIndex0 = triangles[baseIndex];
+                    int vertIndex1 = triangles[baseIndex + 1];
+                    int vertIndex2 = triangles[baseIndex + 2];
+                    
+                    // Safety check for UV array bounds
+                    if (vertIndex0 >= uvs.Length || vertIndex1 >= uvs.Length || vertIndex2 >= uvs.Length) continue;
+                    
+                    var uv0 = uvs[vertIndex0];
+                    var uv1 = uvs[vertIndex1];
+                    var uv2 = uvs[vertIndex2];
                     
                     DrawTransformedLine(uv0, uv1, pixels, width, height, transform, color);
                     DrawTransformedLine(uv1, uv2, pixels, width, height, transform, color);
@@ -459,9 +471,10 @@ namespace Deform.Masking.Editor
         
         private void DrawMagnifyingContent(Color[] pixels, int width, int height, Vector2 centerUV, float radius)
         {
-            if (targetMesh == null || targetMesh.uv == null) return;
+            if (targetMesh == null || targetMesh.uv == null || targetMesh.triangles == null) return;
             
             var uvs = targetMesh.uv;
+            var triangles = targetMesh.triangles;
             var detailColor = new Color(1f, 1f, 1f, 0.8f);
             
             foreach (var island in uvIslands)
@@ -469,13 +482,24 @@ namespace Deform.Masking.Editor
                 var color = selectedIslandIDs.Contains(island.islandID) ? 
                     island.maskColor : new Color(0.7f, 0.7f, 0.7f, 0.6f);
                 
-                for (int i = 0; i < island.triangleIndices.Count; i += 3)
+                foreach (int triangleIndex in island.triangleIndices)
                 {
-                    if (i + 2 >= island.triangleIndices.Count) break;
+                    int baseIndex = triangleIndex * 3;
                     
-                    var uv0 = uvs[island.triangleIndices[i]];
-                    var uv1 = uvs[island.triangleIndices[i + 1]];
-                    var uv2 = uvs[island.triangleIndices[i + 2]];
+                    // Safety check for array bounds
+                    if (baseIndex + 2 >= triangles.Length) continue;
+                    
+                    // Get vertex indices from triangles array
+                    int vertIndex0 = triangles[baseIndex];
+                    int vertIndex1 = triangles[baseIndex + 1];
+                    int vertIndex2 = triangles[baseIndex + 2];
+                    
+                    // Safety check for UV array bounds
+                    if (vertIndex0 >= uvs.Length || vertIndex1 >= uvs.Length || vertIndex2 >= uvs.Length) continue;
+                    
+                    var uv0 = uvs[vertIndex0];
+                    var uv1 = uvs[vertIndex1];
+                    var uv2 = uvs[vertIndex2];
                     
                     // Check if triangle is within magnifying area
                     if (IsTriangleInRadius(uv0, uv1, uv2, centerUV, radius))
@@ -577,14 +601,19 @@ namespace Deform.Masking.Editor
             Handles.zTest = UnityEngine.Rendering.CompareFunction.Always;
             Handles.color = new Color(1f, 0.5f, 0f, 0.8f); // Orange with transparency
             
-            // Draw selected triangles
-            for (int i = 0; i < triangles.Length; i += 3)
+            // triangleMask contains triangle indices, not a boolean mask
+            // Draw selected triangles using triangle indices from mask
+            for (int maskIndex = 0; maskIndex < triangleMask.Length; maskIndex++)
             {
-                if (i / 3 < triangleMask.Length && triangleMask[i / 3] == 1)
+                int triangleIndex = triangleMask[maskIndex];
+                int baseIndex = triangleIndex * 3;
+                
+                // Safety check for array bounds
+                if (baseIndex + 2 < triangles.Length)
                 {
-                    var v0 = targetTransform.TransformPoint(vertices[triangles[i]]);
-                    var v1 = targetTransform.TransformPoint(vertices[triangles[i + 1]]);
-                    var v2 = targetTransform.TransformPoint(vertices[triangles[i + 2]]);
+                    var v0 = targetTransform.TransformPoint(vertices[triangles[baseIndex]]);
+                    var v1 = targetTransform.TransformPoint(vertices[triangles[baseIndex + 1]]);
+                    var v2 = targetTransform.TransformPoint(vertices[triangles[baseIndex + 2]]);
                     
                     // Draw triangle face
                     Handles.DrawAAConvexPolygon(v0, v1, v2);
@@ -593,13 +622,17 @@ namespace Deform.Masking.Editor
             
             // Draw wireframe
             Handles.color = new Color(1f, 0.3f, 0f, 1f); // Solid orange for wireframe
-            for (int i = 0; i < triangles.Length; i += 3)
+            for (int maskIndex = 0; maskIndex < triangleMask.Length; maskIndex++)
             {
-                if (i / 3 < triangleMask.Length && triangleMask[i / 3] == 1)
+                int triangleIndex = triangleMask[maskIndex];
+                int baseIndex = triangleIndex * 3;
+                
+                // Safety check for array bounds
+                if (baseIndex + 2 < triangles.Length)
                 {
-                    var v0 = targetTransform.TransformPoint(vertices[triangles[i]]);
-                    var v1 = targetTransform.TransformPoint(vertices[triangles[i + 1]]);
-                    var v2 = targetTransform.TransformPoint(vertices[triangles[i + 2]]);
+                    var v0 = targetTransform.TransformPoint(vertices[triangles[baseIndex]]);
+                    var v1 = targetTransform.TransformPoint(vertices[triangles[baseIndex + 1]]);
+                    var v2 = targetTransform.TransformPoint(vertices[triangles[baseIndex + 2]]);
                     
                     Handles.DrawLine(v0, v1);
                     Handles.DrawLine(v1, v2);
