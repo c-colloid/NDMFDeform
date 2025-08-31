@@ -20,6 +20,11 @@ namespace Deform.Masking
         [SerializeField] private bool invertMask = false;
         [SerializeField, Range(0f, 1f)] private float maskStrength = 1f;
         
+        // Cached UV Island data (serialized for performance)
+        [SerializeField, HideInInspector] private List<SerializableUVIsland> cachedIslands = new List<SerializableUVIsland>();
+        [SerializeField, HideInInspector] private string cachedMeshInstanceID = "";
+        [SerializeField, HideInInspector] private long cachedMeshModificationTime = 0;
+        
         // Runtime data
         [System.NonSerialized] private NativeArray<float> maskValues;
         [System.NonSerialized] private bool maskDataReady = false;
@@ -36,6 +41,10 @@ namespace Deform.Masking
 	    public Mesh CachedMesh => cachedMesh;
 	    public Renderer CachedRenderer => cachedRenderer;
 	    public Transform CachedRendererTransform => cachedRendererTransform;
+	    
+	    // Cached UV Island access for editor performance
+	    public List<SerializableUVIsland> CachedIslands => cachedIslands;
+	    public bool HasValidIslandCache => !string.IsNullOrEmpty(cachedMeshInstanceID) && cachedIslands.Count > 0;
         
         public override DataFlags DataFlags => DataFlags.Vertices;
         
@@ -142,6 +151,74 @@ namespace Deform.Masking
                 cachedRendererTransform = cachedRenderer?.transform;
             }
         }
+        
+        /// <summary>
+        /// Update cached UV island data for editor performance
+        /// エディタパフォーマンス向上のためのUVアイランドキャッシュ更新
+        /// </summary>
+        public void UpdateIslandCache(List<UVIslandAnalyzer.UVIsland> islands, Mesh originalMesh)
+        {
+            if (originalMesh == null || islands == null) return;
+            
+            // Use original mesh for stable caching, not dynamic mesh
+            cachedMeshInstanceID = originalMesh.GetInstanceID().ToString();
+            
+            #if UNITY_EDITOR
+            var assetPath = UnityEditor.AssetDatabase.GetAssetPath(originalMesh);
+            if (!string.IsNullOrEmpty(assetPath))
+            {
+                cachedMeshModificationTime = UnityEditor.AssetDatabase.GetAssetDependencyHash(assetPath).GetHashCode();
+            }
+            else
+            {
+                // For runtime meshes, use vertex count and triangle count as simple hash
+                cachedMeshModificationTime = (originalMesh.vertexCount * 31 + originalMesh.triangles.Length).GetHashCode();
+            }
+            #endif
+            
+            cachedIslands.Clear();
+            foreach (var island in islands)
+            {
+                cachedIslands.Add(SerializableUVIsland.FromUVIsland(island));
+            }
+            
+            
+            #if UNITY_EDITOR
+            UnityEditor.EditorUtility.SetDirty(this);
+            #endif
+        }
+        
+        /// <summary>
+        /// Check if cached island data is valid for current mesh
+        /// 現在のメッシュに対してキャッシュされたアイランドデータが有効かチェック
+        /// </summary>
+        public bool IsIslandCacheValid(Mesh mesh)
+        {
+            if (mesh == null)
+                return false;
+                
+            if (cachedIslands.Count == 0)
+                return false;
+                
+            if (string.IsNullOrEmpty(cachedMeshInstanceID))
+                return false;
+                
+            var currentMeshID = mesh.GetInstanceID().ToString();
+            if (cachedMeshInstanceID != currentMeshID)
+                return false;
+                
+            #if UNITY_EDITOR
+            var assetPath = UnityEditor.AssetDatabase.GetAssetPath(mesh);
+            if (string.IsNullOrEmpty(assetPath))
+                return true; // Runtime meshes don't have file paths, accept cache
+            
+            var currentModTime = UnityEditor.AssetDatabase.GetAssetDependencyHash(assetPath).GetHashCode();
+            if (currentModTime != cachedMeshModificationTime)
+                return false;
+            #endif
+            
+            return true;
+        }
     }
     
     [BurstCompile(CompileSynchronously = true)]
@@ -167,6 +244,50 @@ namespace Deform.Masking
             // Lerp between current vertex (deformed) and mask vertex (original)
             // t=0: keep deformation, t=1: revert to original (no deformation)
             currentVertices[index] = math.lerp(currentVertices[index], maskVertices[index], t);
+        }
+    }
+    
+    /// <summary>
+    /// Serializable UV Island data for caching performance
+    /// パフォーマンス向上のためのシリアライズ可能なUVアイランドデータ
+    /// </summary>
+    [System.Serializable]
+    public class SerializableUVIsland
+    {
+        public int islandID;
+        public List<int> vertexIndices = new List<int>();
+        public List<int> triangleIndices = new List<int>();
+        public List<Vector2> uvCoordinates = new List<Vector2>();
+        public Bounds uvBounds;
+        public Color maskColor = Color.red;
+        public int faceCount => triangleIndices.Count;
+        
+        // Convert from UVIslandAnalyzer.UVIsland
+        public static SerializableUVIsland FromUVIsland(UVIslandAnalyzer.UVIsland island)
+        {
+            return new SerializableUVIsland
+            {
+                islandID = island.islandID,
+                vertexIndices = new List<int>(island.vertexIndices),
+                triangleIndices = new List<int>(island.triangleIndices),
+                uvCoordinates = new List<Vector2>(island.uvCoordinates),
+                uvBounds = island.uvBounds,
+                maskColor = island.maskColor
+            };
+        }
+        
+        // Convert to UVIslandAnalyzer.UVIsland for compatibility
+        public UVIslandAnalyzer.UVIsland ToUVIsland()
+        {
+            return new UVIslandAnalyzer.UVIsland
+            {
+                islandID = this.islandID,
+                vertexIndices = new List<int>(this.vertexIndices),
+                triangleIndices = new List<int>(this.triangleIndices),
+                uvCoordinates = new List<Vector2>(this.uvCoordinates),
+                uvBounds = this.uvBounds,
+                maskColor = this.maskColor
+            };
         }
     }
 }
