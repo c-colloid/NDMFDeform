@@ -50,6 +50,8 @@ namespace Deform.Masking.Editor
         private HashSet<int> vertexMaskSet = new HashSet<int>();
         private List<int> triangleMaskList = new List<int>();
         
+        // Simplified for compatibility with MeshGenerationContext approach
+        
         // Scene display
         private Transform targetTransform;
         
@@ -88,6 +90,36 @@ namespace Deform.Masking.Editor
             SetMesh(mesh);
         }
         
+        // Constructor with cached island data for performance
+        public UVIslandSelector(Mesh mesh, UVIslandMask maskComponent)
+        {
+            targetMesh = mesh;
+            if (mesh != null)
+            {
+                CalculateAdaptiveVertexSphereSize();
+                
+                // Try to use cached data first
+                if (maskComponent?.IsIslandCacheValid(mesh) == true)
+                {
+                    // Use fast cached data
+                    UnityEngine.Debug.Log($"[UVIslandSelector] Using cached island data! Islands: {maskComponent.CachedIslands.Count}");
+                    uvIslands = maskComponent.CachedIslands.ConvertAll(island => island.ToUVIsland());
+                    UpdateMasks();
+                }
+                else
+                {
+                    // Fallback to regular analysis and update cache
+                    UnityEngine.Debug.Log($"[UVIslandSelector] Cache invalid or missing, performing full analysis. HasCache: {maskComponent?.CachedIslands?.Count > 0}");
+                    UpdateMeshData();
+                    if (maskComponent != null)
+                    {
+                        maskComponent.UpdateIslandCache(uvIslands, mesh);
+                        UnityEngine.Debug.Log($"[UVIslandSelector] Updated cache with {uvIslands.Count} islands");
+                    }
+                }
+            }
+        }
+        
         public void SetMesh(Mesh mesh)
         {
             targetMesh = mesh;
@@ -104,6 +136,8 @@ namespace Deform.Masking.Editor
             
             uvIslands = UVIslandAnalyzer.AnalyzeUVIslands(targetMesh);
             UpdateMasks();
+            
+            // Mark texture as dirty for compatibility
             
             if (autoUpdatePreview)
             {
@@ -134,7 +168,7 @@ namespace Deform.Masking.Editor
                 AddIslandToMasks(islandID);
             }
             
-            // Mark texture as dirty instead of regenerating immediately
+            // For compatibility with old system
             if (autoUpdatePreview)
             {
                 MarkTextureForUpdate();
@@ -148,7 +182,7 @@ namespace Deform.Masking.Editor
             
             if (autoUpdatePreview)
             {
-                GenerateUVMapTexture();
+                MarkTextureForUpdate();
             }
         }
         
@@ -159,6 +193,7 @@ namespace Deform.Masking.Editor
             
             if (autoUpdatePreview)
             {
+                // For batch selection changes, use full regeneration
                 GenerateUVMapTexture();
             }
         }
@@ -443,7 +478,7 @@ namespace Deform.Masking.Editor
             }
         }
         
-        // Simplified texture generation for preview only
+        // Simple texture generation for UV map preview
         public Texture2D GenerateUVMapTexture(int width = 512, int height = 512)
         {
             var texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
@@ -469,6 +504,46 @@ namespace Deform.Masking.Editor
             
             uvMapTexture = texture;
             return texture;
+        }
+        
+        private void DrawUVIslands(Color[] pixels, int width, int height, Matrix4x4 transform)
+        {
+            if (targetMesh == null || targetMesh.uv == null || targetMesh.triangles == null) return;
+            
+            var uvs = targetMesh.uv;
+            var triangles = targetMesh.triangles;
+            
+            foreach (var island in uvIslands)
+            {
+                var color = selectedIslandIDs.Contains(island.islandID) ? 
+                    new Color(island.maskColor.r, island.maskColor.g, island.maskColor.b, 0.7f) :
+                    new Color(0.5f, 0.5f, 0.5f, 0.3f);
+                
+                // Draw island outline using triangle indices
+                foreach (int triangleIndex in island.triangleIndices)
+                {
+                    int baseIndex = triangleIndex * 3;
+                    
+                    // Safety check for array bounds
+                    if (baseIndex + 2 >= triangles.Length) continue;
+                    
+                    // Get vertex indices from triangles array
+                    int vertIndex0 = triangles[baseIndex];
+                    int vertIndex1 = triangles[baseIndex + 1];
+                    int vertIndex2 = triangles[baseIndex + 2];
+                    
+                    // Safety check for UV array bounds
+                    if (vertIndex0 >= uvs.Length || vertIndex1 >= uvs.Length || vertIndex2 >= uvs.Length) continue;
+                    
+                    var uv0 = uvs[vertIndex0];
+                    var uv1 = uvs[vertIndex1];
+                    var uv2 = uvs[vertIndex2];
+                    
+                    DrawTransformedLine(uv0, uv1, pixels, width, height, transform, color);
+                    DrawTransformedLine(uv1, uv2, pixels, width, height, transform, color);
+                    DrawTransformedLine(uv2, uv0, pixels, width, height, transform, color);
+                }
+            }
         }
         
         // Magnifying glass texture generation
@@ -510,43 +585,63 @@ namespace Deform.Masking.Editor
             }
         }
         
-        private void DrawUVIslands(Color[] pixels, int width, int height, Matrix4x4 transform)
+        
+        // Draw all UV islands in unselected state (for base texture)
+        private void DrawUVIslandsUnselected(Color[] pixels, int width, int height, Matrix4x4 transform)
+        {
+            if (targetMesh == null || targetMesh.uv == null || targetMesh.triangles == null) return;
+            
+            var uvs = targetMesh.uv;
+            var triangles = targetMesh.triangles;
+            var unselectedColor = new Color(0.5f, 0.5f, 0.5f, 0.3f);
+            
+            foreach (var island in uvIslands)
+            {
+                DrawIslandOutlines(island, pixels, width, height, transform, unselectedColor, uvs, triangles);
+            }
+        }
+        
+        // Update pixels for a single island (optimized for incremental updates)
+        private void UpdateSingleIslandPixels(UVIslandAnalyzer.UVIsland island, bool isSelected, Color[] pixels, int width, int height, Matrix4x4 transform)
         {
             if (targetMesh == null || targetMesh.uv == null || targetMesh.triangles == null) return;
             
             var uvs = targetMesh.uv;
             var triangles = targetMesh.triangles;
             
-            foreach (var island in uvIslands)
+            // Determine the color for this island
+            var color = isSelected ? 
+                new Color(island.maskColor.r, island.maskColor.g, island.maskColor.b, 0.7f) :
+                new Color(0.5f, 0.5f, 0.5f, 0.3f);
+            
+            DrawIslandOutlines(island, pixels, width, height, transform, color, uvs, triangles);
+        }
+        
+        // Helper method to draw island outlines
+        private void DrawIslandOutlines(UVIslandAnalyzer.UVIsland island, Color[] pixels, int width, int height, Matrix4x4 transform, Color color, Vector2[] uvs, int[] triangles)
+        {
+            foreach (int triangleIndex in island.triangleIndices)
             {
-                var color = selectedIslandIDs.Contains(island.islandID) ? 
-                    new Color(island.maskColor.r, island.maskColor.g, island.maskColor.b, 0.7f) :
-                    new Color(0.5f, 0.5f, 0.5f, 0.3f);
+                int baseIndex = triangleIndex * 3;
                 
-                // Draw island outline using triangle indices
-                foreach (int triangleIndex in island.triangleIndices)
-                {
-                    int baseIndex = triangleIndex * 3;
-                    
-                    // Safety check for array bounds
-                    if (baseIndex + 2 >= triangles.Length) continue;
-                    
-                    // Get vertex indices from triangles array
-                    int vertIndex0 = triangles[baseIndex];
-                    int vertIndex1 = triangles[baseIndex + 1];
-                    int vertIndex2 = triangles[baseIndex + 2];
-                    
-                    // Safety check for UV array bounds
-                    if (vertIndex0 >= uvs.Length || vertIndex1 >= uvs.Length || vertIndex2 >= uvs.Length) continue;
-                    
-                    var uv0 = uvs[vertIndex0];
-                    var uv1 = uvs[vertIndex1];
-                    var uv2 = uvs[vertIndex2];
-                    
-                    DrawTransformedLine(uv0, uv1, pixels, width, height, transform, color);
-                    DrawTransformedLine(uv1, uv2, pixels, width, height, transform, color);
-                    DrawTransformedLine(uv2, uv0, pixels, width, height, transform, color);
-                }
+                // Safety check for array bounds
+                if (baseIndex + 2 >= triangles.Length) continue;
+                
+                // Get vertex indices from triangles array
+                int vertIndex0 = triangles[baseIndex];
+                int vertIndex1 = triangles[baseIndex + 1];
+                int vertIndex2 = triangles[baseIndex + 2];
+                
+                // Safety check for UV array bounds
+                if (vertIndex0 >= uvs.Length || vertIndex1 >= uvs.Length || vertIndex2 >= uvs.Length) continue;
+                
+                var uv0 = uvs[vertIndex0];
+                var uv1 = uvs[vertIndex1];
+                var uv2 = uvs[vertIndex2];
+                
+                DrawTransformedLine(uv0, uv1, pixels, width, height, transform, color);
+                DrawTransformedLine(uv1, uv2, pixels, width, height, transform, color);
+                DrawTransformedLine(uv2, uv0, pixels, width, height, transform, color);
             }
         }
         

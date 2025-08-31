@@ -74,7 +74,8 @@ namespace Deform.Masking.Editor
                 var meshData = GetMeshData();
                 if (meshData != null)
                 {
-                    selector = new UVIslandSelector(meshData);
+                    // Try to use cached island data first for performance
+                    selector = new UVIslandSelector(meshData, targetMask);
                     selector.SetSelectedIslands(targetMask.SelectedIslandIDs);
                     cachedSelectors[targetMask] = selector;
                     isInitialized = false;
@@ -855,18 +856,17 @@ namespace Deform.Masking.Editor
             );
             
             // Debug information
-            UnityEngine.Debug.Log($"[UVIslandMaskEditor] Click at local: {localPosition}, normalized: {normalizedPos}");
             
             int islandID = selector.GetIslandAtUVCoordinate(normalizedPos);
             
             if (islandID >= 0)
             {
                 Undo.RecordObject(targetMask, "Toggle UV Island Selection");
+                
                 selector.ToggleIslandSelection(islandID);
                 targetMask.SetSelectedIslands(selector.SelectedIslandIDs);
                 EditorUtility.SetDirty(targetMask);
                 
-                // Use optimized refresh - texture update is deferred
                 RefreshUIFast();
             }
             else
@@ -1083,17 +1083,7 @@ namespace Deform.Masking.Editor
         
         private Mesh GetMeshData()
         {
-            // Try to get mesh from Deformable component first
-	        if (targetMask?.CachedMesh != null)
-            {
-	            var mesh = targetMask.CachedMesh;
-                if (mesh != null)
-                {
-                    return mesh;
-                }
-            }
-            
-            // Fallback: try to get original mesh from mesh sources
+            // Always prefer ORIGINAL mesh for stable caching, not dynamic mesh
             var meshFilter = targetMask.GetComponent<MeshFilter>();
             if (meshFilter != null && meshFilter.sharedMesh != null)
             {
@@ -1104,6 +1094,16 @@ namespace Deform.Masking.Editor
             if (skinnedMeshRenderer != null && skinnedMeshRenderer.sharedMesh != null)
             {
                 return skinnedMeshRenderer.sharedMesh;
+            }
+            
+            // Fallback: try to get cached mesh from Deformable (but this may cause cache misses)
+	        if (targetMask?.CachedMesh != null)
+            {
+	            var mesh = targetMask.CachedMesh;
+                if (mesh != null)
+                {
+                    return mesh;
+                }
             }
             
             return null;
@@ -1169,24 +1169,29 @@ namespace Deform.Masking.Editor
         // Fast UI refresh for frequent operations like selection changes
         private void RefreshUIFast()
         {
-            // Update texture only if needed (deferred)
+            // Update texture
             if (selector?.AutoUpdatePreview ?? false)
             {
                 selector?.UpdateTextureIfNeeded();
             }
             
-            // Only update essential UI elements
             RefreshUVMapImage();
             UpdateStatus();
             
-            // Update list view selection state without full refresh
+            // Update list view selection state without full refresh (this is expensive)
             if (islandListView != null)
             {
                 islandListView.RefreshItems();
             }
             
-            // Force scene repaint for selection highlighting
-            SceneView.RepaintAll();
+            // Optimize scene repaint - only repaint if scene highlighting is actually visible
+            if (SceneView.sceneViews.Count > 0)
+            {
+                foreach (SceneView sceneView in SceneView.sceneViews)
+                {
+                    sceneView.Repaint();
+                }
+            }
         }
         
         private void RefreshUVMapImage()
@@ -1225,6 +1230,7 @@ namespace Deform.Masking.Editor
             selector.ClearSelection();
             targetMask.SetSelectedIslands(selector.SelectedIslandIDs);
             EditorUtility.SetDirty(targetMask);
+            
             RefreshUI(false);
         }
         
@@ -1440,4 +1446,5 @@ namespace Deform.Masking.Editor
         }
         
     }
+    
 }
