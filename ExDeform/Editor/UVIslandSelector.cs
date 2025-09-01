@@ -147,10 +147,8 @@ namespace Deform.Masking.Editor
             uvIslands = UVIslandAnalyzer.AnalyzeUVIslands(targetMesh);
             UpdateMasks();
             
-            if (autoUpdatePreview)
-            {
-                GenerateUVMapTexture();
-            }
+            // Always generate texture when mesh data is updated to ensure immediate visibility
+            GenerateUVMapTexture();
         }
         
         private void CalculateAdaptiveVertexSphereSize()
