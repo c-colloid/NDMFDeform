@@ -13,7 +13,8 @@ namespace Deform.Masking.Editor
     /// </summary>
     [CustomEditor(typeof(UVIslandMask))]
     public class UVIslandMaskEditor : UnityEditor.Editor
-    {
+	{
+    	#region variables
         private UVIslandMask targetMask;
         private UVIslandSelector selector;
         private VisualElement root;
@@ -67,7 +68,8 @@ namespace Deform.Masking.Editor
         // Texture generation control
         private bool textureInitialized = false;
         private float lastUpdateTime = 0f;
-        private const float TEXTURE_UPDATE_THROTTLE = 0.016f; // ~60fps limit
+		private const float TEXTURE_UPDATE_THROTTLE = 0.016f; // ~60fps limit
+        #endregion
         
         // EditorApplication callback management
         private EditorApplication.CallbackFunction pendingTextureUpdate;
