@@ -57,31 +57,51 @@ namespace Deform.Masking.Editor
         private UVIslandSelector cachedSelector;
         private UVIslandMask lastTargetMask;
         private bool isInitialized = false;
+        private Mesh lastCachedMesh;
+        private int lastMeshInstanceID = -1;
         
         public override VisualElement CreateInspectorGUI()
         {
             targetMask = target as UVIslandMask;
             
-            // Instance-based caching - check if we can reuse cached selector
+            // Enhanced caching - check if we can reuse cached selector
             if (cachedSelector != null && lastTargetMask == targetMask)
             {
-                // Verify cache validity by checking if mesh data is still current
+                // More robust cache validation using mesh instance ID
                 var currentMesh = GetMeshData();
-                if (cachedSelector.TargetMesh == currentMesh)
+                int currentMeshInstanceID = currentMesh != null ? currentMesh.GetInstanceID() : -1;
+                
+                if (currentMesh == lastCachedMesh && currentMeshInstanceID == lastMeshInstanceID)
                 {
+                    // Cache is still valid - reuse existing selector
                     selector = cachedSelector;
                     selector.SetSelectedIslands(targetMask.SelectedIslandIDs);
                     isInitialized = true;
                 }
                 else
                 {
-                    // Mesh changed, invalidate cache
-                    cachedSelector = null;
-                    lastTargetMask = null;
+                    // Mesh changed, but try to update existing selector instead of recreating
+                    if (currentMesh != null)
+                    {
+                        cachedSelector.SetMesh(currentMesh);
+                        cachedSelector.SetSelectedIslands(targetMask.SelectedIslandIDs);
+                        selector = cachedSelector;
+                        lastCachedMesh = currentMesh;
+                        lastMeshInstanceID = currentMeshInstanceID;
+                        isInitialized = true;
+                    }
+                    else
+                    {
+                        // No mesh available, invalidate cache
+                        cachedSelector = null;
+                        lastTargetMask = null;
+                        lastCachedMesh = null;
+                        lastMeshInstanceID = -1;
+                    }
                 }
             }
             
-            // Create new selector if cache is invalid or doesn't exist
+            // Create new selector only if cache is completely invalid
             if (cachedSelector == null)
             {
                 var meshData = GetMeshData();
@@ -90,6 +110,8 @@ namespace Deform.Masking.Editor
                     cachedSelector = new UVIslandSelector(meshData);
                     cachedSelector.SetSelectedIslands(targetMask.SelectedIslandIDs);
                     lastTargetMask = targetMask;
+                    lastCachedMesh = meshData;
+                    lastMeshInstanceID = meshData.GetInstanceID();
                     selector = cachedSelector;
                     isInitialized = false;
                 }
@@ -119,15 +141,19 @@ namespace Deform.Masking.Editor
             root.RegisterCallback<MouseMoveEvent>(OnRootMouseMove, TrickleDown.TrickleDown);
             root.RegisterCallback<MouseUpEvent>(OnRootMouseUp, TrickleDown.TrickleDown);
             
-            // Only refresh data if not already initialized
+            // Optimized initialization - avoid heavy operations when possible
             if (!isInitialized)
             {
-                RefreshData();
+                // Only perform full refresh if selector is newly created
+                if (selector != null)
+                {
+                    RefreshData();
+                }
             }
             else
             {
-                // Quick refresh without heavy computation
-                RefreshUI(false);
+                // Quick refresh for cached data - no heavy computation
+                RefreshUIFast();
             }
             
             return root;
@@ -868,8 +894,6 @@ namespace Deform.Masking.Editor
                 1f - (localPosition.y / UV_MAP_SIZE)
             );
             
-            // Debug information
-            
             int islandID = selector.GetIslandAtUVCoordinate(normalizedPos);
             
             if (islandID >= 0)
@@ -879,7 +903,7 @@ namespace Deform.Masking.Editor
                 targetMask.SetSelectedIslands(selector.SelectedIslandIDs);
                 EditorUtility.SetDirty(targetMask);
                 
-                // Use optimized refresh - texture update is deferred
+                // Use optimized immediate refresh for better responsiveness
                 RefreshUIFast();
             }
             else
@@ -1182,24 +1206,34 @@ namespace Deform.Masking.Editor
         // Fast UI refresh for frequent operations like selection changes
         private void RefreshUIFast()
         {
-            // Update texture only if needed (deferred)
-            if (selector?.AutoUpdatePreview ?? false)
-            {
-                selector?.UpdateTextureIfNeeded();
-            }
+            // Skip texture update for immediate UI refresh - defer to later
+            // Texture will be updated on next frame or user interaction
             
-            // Only update essential UI elements
-            RefreshUVMapImage();
+            // Only update essential UI elements immediately
             UpdateStatus();
             
             // Update list view selection state without full refresh
-            if (islandListView != null)
+            if (islandListView != null && selector?.UVIslands != null)
             {
+                // Only refresh if needed
+                if (islandListView.itemsSource != selector.UVIslands)
+                {
+                    islandListView.itemsSource = selector.UVIslands;
+                }
                 islandListView.RefreshItems();
             }
             
-            // Force scene repaint for selection highlighting
-            SceneView.RepaintAll();
+            // Defer texture update to avoid blocking UI thread
+            EditorApplication.delayCall += () =>
+            {
+                if (selector?.AutoUpdatePreview ?? false)
+                {
+                    selector?.UpdateTextureIfNeeded();
+                    RefreshUVMapImage();
+                }
+                // Force scene repaint after texture is ready
+                SceneView.RepaintAll();
+            };
         }
         
         private void RefreshUVMapImage()
@@ -1414,15 +1448,21 @@ namespace Deform.Masking.Editor
                 magnifyingGlassTexture = null;
             }
             
-            // Clean up cached selector
+            // Keep cached selector for reuse - only dispose when editor is destroyed
+            // cachedSelector will be reused for better performance
+            
+            Undo.undoRedoPerformed -= OnUndoRedo;
+            SceneView.duringSceneGui -= OnSceneGUI;
+        }
+        
+        private void OnDestroy()
+        {
+            // Clean up cached selector only when editor is destroyed
             if (cachedSelector != null)
             {
                 cachedSelector.Dispose();
                 cachedSelector = null;
             }
-            
-            Undo.undoRedoPerformed -= OnUndoRedo;
-            SceneView.duringSceneGui -= OnSceneGUI;
         }
         
         private void OnUndoRedo()
