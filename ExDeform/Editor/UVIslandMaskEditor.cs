@@ -70,7 +70,7 @@ namespace Deform.Masking.Editor
         private const float TEXTURE_UPDATE_THROTTLE = 0.016f; // ~60fps limit
         
         // EditorApplication callback management
-        private System.Action pendingTextureUpdate;
+        private EditorApplication.CallbackFunction pendingTextureUpdate;
         
         public override VisualElement CreateInspectorGUI()
         {
@@ -1338,7 +1338,7 @@ namespace Deform.Masking.Editor
             else if (pendingTextureUpdate == null)
             {
                 // Schedule single deferred update if throttled and none pending
-                pendingTextureUpdate = () =>
+                pendingTextureUpdate = new EditorApplication.CallbackFunction(() =>
                 {
                     if (selector != null)
                     {
@@ -1347,7 +1347,7 @@ namespace Deform.Masking.Editor
                         lastUpdateTime = Time.realtimeSinceStartup;
                     }
                     pendingTextureUpdate = null;
-                };
+                });
                 EditorApplication.delayCall += pendingTextureUpdate;
             }
             // If there's already a pending update, do nothing to avoid duplicates
