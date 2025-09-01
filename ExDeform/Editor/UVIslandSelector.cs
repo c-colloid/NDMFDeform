@@ -77,7 +77,8 @@ namespace Deform.Masking.Editor
         private List<int> triangleMaskList = new List<int>();
         
         // Scene display
-        private Transform targetTransform;
+	    private Transform targetTransform;
+        #endregion
         
         // Properties
         public List<UVIslandAnalyzer.UVIsland> UVIslands => uvIslands;
