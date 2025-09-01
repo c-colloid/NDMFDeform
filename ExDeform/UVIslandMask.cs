@@ -120,8 +120,21 @@ namespace Deform.Masking
         
         private void OnDestroy()
         {
+            DisposeMaskValues();
+        }
+        
+        private void OnDisable()
+        {
+            // Also dispose in OnDisable for editor scenarios
+            DisposeMaskValues();
+        }
+        
+        private void DisposeMaskValues()
+        {
             if (maskValues.IsCreated)
+            {
                 maskValues.Dispose();
+            }
         }
         
         public void SetSelectedIslands(List<int> islandIDs)
