@@ -35,6 +35,9 @@ namespace Deform.Masking
             if (mesh == null || mesh.uv == null || mesh.uv.Length == 0)
                 return new List<UVIsland>();
                 
+            if (mesh.triangles == null || mesh.triangles.Length == 0)
+                return new List<UVIsland>();
+                
             var uvs = mesh.uv;
             var triangles = mesh.triangles;
             var islands = new List<UVIsland>();
