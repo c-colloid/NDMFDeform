@@ -81,7 +81,8 @@ namespace Deform.Masking.Editor
         
         // Dynamic mesh support for highlighting
         private Mesh dynamicMesh;
-        private bool useDynamicMeshForHighlight = false;
+	    private bool useDynamicMeshForHighlight = false;
+        #endregion
         
         // Properties
         public List<UVIslandAnalyzer.UVIsland> UVIslands => uvIslands;
