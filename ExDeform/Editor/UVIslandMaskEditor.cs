@@ -1157,7 +1157,17 @@ namespace Deform.Masking.Editor
         }
         
         private Mesh GetOriginalMesh()
-        {
+	    {
+		    // Try to get mesh from Deformable component first
+		    if (targetMask?.OriginalMesh != null)
+		    {
+			    var mesh = targetMask.OriginalMesh;
+			    if (mesh != null)
+			    {
+				    return mesh;
+			    }
+		    }
+        	
             // Always get the original mesh for UV mapping and caching
             var meshFilter = targetMask.GetComponent<MeshFilter>();
             if (meshFilter != null && meshFilter.sharedMesh != null)

@@ -23,7 +23,8 @@ namespace Deform.Masking
         // Runtime data
         [System.NonSerialized] private NativeArray<float> maskValues;
         [System.NonSerialized] private bool maskDataReady = false;
-        [System.NonSerialized] private Mesh cachedMesh;
+	    [System.NonSerialized] private Mesh cachedMesh;
+	    [System.NonSerialized] private Mesh originalMesh;
         
         // Cached renderer for editor access
         [System.NonSerialized] private Renderer cachedRenderer;
@@ -34,6 +35,7 @@ namespace Deform.Masking
         public bool InvertMask { get => invertMask; set => invertMask = value; }
 	    public float MaskStrength { get => maskStrength; set => maskStrength = Mathf.Clamp01(value); }
 	    public Mesh CachedMesh => cachedMesh;
+	    public Mesh OriginalMesh => originalMesh;
 	    public Renderer CachedRenderer => cachedRenderer;
 	    public Transform CachedRendererTransform => cachedRendererTransform;
         
@@ -54,6 +56,11 @@ namespace Deform.Masking
 	            cachedMesh = data.DynamicMesh;
                 UpdateMaskData(data);
             }
+            
+	        if (!maskDataReady || maskValues.Length != data.Length || data.OriginalMesh != originalMesh)
+	        {
+		        originalMesh = data.OriginalMesh;
+	        }
             
             if (!maskValues.IsCreated || maskValues.Length == 0)
             {
