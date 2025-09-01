@@ -446,6 +446,13 @@ namespace Deform.Masking.Editor
         // Simplified texture generation for preview only
         public Texture2D GenerateUVMapTexture(int width = 512, int height = 512)
         {
+            // Properly dispose of old texture to prevent memory leaks
+            if (uvMapTexture != null)
+            {
+                Object.DestroyImmediate(uvMapTexture);
+                uvMapTexture = null;
+            }
+            
             var texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
             var pixels = new Color[width * height];
             
@@ -719,6 +726,18 @@ namespace Deform.Masking.Editor
                     Handles.DrawLine(v1, v2);
                     Handles.DrawLine(v2, v0);
                 }
+            }
+        }
+        
+        /// <summary>
+        /// Clean up resources to prevent memory leaks
+        /// </summary>
+        public void Dispose()
+        {
+            if (uvMapTexture != null)
+            {
+                Object.DestroyImmediate(uvMapTexture);
+                uvMapTexture = null;
             }
         }
     }

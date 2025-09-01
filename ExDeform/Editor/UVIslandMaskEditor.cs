@@ -53,30 +53,44 @@ namespace Deform.Masking.Editor
         private Texture2D magnifyingGlassTexture;
         private bool isRangeSelecting = false;
         
-        // Performance optimization
-        private static Dictionary<UVIslandMask, UVIslandSelector> cachedSelectors = new Dictionary<UVIslandMask, UVIslandSelector>();
+        // Instance-based caching to avoid serialization issues
+        private UVIslandSelector cachedSelector;
+        private UVIslandMask lastTargetMask;
         private bool isInitialized = false;
         
         public override VisualElement CreateInspectorGUI()
         {
             targetMask = target as UVIslandMask;
             
-            // Try to reuse cached selector first
-            if (cachedSelectors.ContainsKey(targetMask) && cachedSelectors[targetMask] != null)
+            // Instance-based caching - check if we can reuse cached selector
+            if (cachedSelector != null && lastTargetMask == targetMask)
             {
-                selector = cachedSelectors[targetMask];
-                selector.SetSelectedIslands(targetMask.SelectedIslandIDs);
-                isInitialized = true;
+                // Verify cache validity by checking if mesh data is still current
+                var currentMesh = GetMeshData();
+                if (cachedSelector.TargetMesh == currentMesh)
+                {
+                    selector = cachedSelector;
+                    selector.SetSelectedIslands(targetMask.SelectedIslandIDs);
+                    isInitialized = true;
+                }
+                else
+                {
+                    // Mesh changed, invalidate cache
+                    cachedSelector = null;
+                    lastTargetMask = null;
+                }
             }
-            else
+            
+            // Create new selector if cache is invalid or doesn't exist
+            if (cachedSelector == null)
             {
-                // Initialize new selector with mesh data
                 var meshData = GetMeshData();
                 if (meshData != null)
                 {
-                    selector = new UVIslandSelector(meshData);
-                    selector.SetSelectedIslands(targetMask.SelectedIslandIDs);
-                    cachedSelectors[targetMask] = selector;
+                    cachedSelector = new UVIslandSelector(meshData);
+                    cachedSelector.SetSelectedIslands(targetMask.SelectedIslandIDs);
+                    lastTargetMask = targetMask;
+                    selector = cachedSelector;
                     isInitialized = false;
                 }
                 else
@@ -1394,6 +1408,20 @@ namespace Deform.Masking.Editor
         
         private void OnDisable()
         {
+            // Clean up resources
+            if (magnifyingGlassTexture != null)
+            {
+                DestroyImmediate(magnifyingGlassTexture);
+                magnifyingGlassTexture = null;
+            }
+            
+            // Clean up cached selector
+            if (cachedSelector != null)
+            {
+                cachedSelector.Dispose();
+                cachedSelector = null;
+            }
+            
             Undo.undoRedoPerformed -= OnUndoRedo;
             SceneView.duringSceneGui -= OnSceneGUI;
         }
