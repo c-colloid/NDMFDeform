@@ -1,5 +1,4 @@
-﻿//using System;
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -34,14 +33,14 @@ namespace MeshModifier.NDMFDeform.NDMFPlugin
 				var MeshDic = new Dictionary<Deformable,Mesh>();
 				
 				target.ToList().ForEach(d => {
+					if (d?.gameObject == null) return;
+					
 					GOActiveDic.TryAdd(d.gameObject,d.gameObject.activeSelf);
-					//Debug.Log("GOActiveDicCount:"+GOActiveDic.Count);
 					d.gameObject.SetActive(true);
 					var parent = d.transform.parent;
 					while (parent != ctx.AvatarRootTransform && parent != null)
 					{
 						var tryAdd = GOActiveDic.TryAdd(parent.gameObject,parent.gameObject.activeSelf);
-						//Debug.Log($"{parent.gameObject}:{tryAdd}:{GOActiveDic.Count}");
 						if (!tryAdd) return;
 						parent.gameObject.SetActive(true);
 						parent = parent.parent;
@@ -49,12 +48,14 @@ namespace MeshModifier.NDMFDeform.NDMFPlugin
 				});
 				
 				target.ToList().ForEach(d => {
-					if (!d.enabled || d.CompareTag("EditorOnly")) return;
+					if (d == null || !d.enabled || d.CompareTag("EditorOnly")) return;
 					
-					var mesh = Object.Instantiate(d.GetCurrentMesh());
+					var currentMesh = d.GetCurrentMesh();
+					if (currentMesh == null) return;
+					
+					var mesh = Object.Instantiate(currentMesh);
 					mesh.name = System.Text.RegularExpressions.Regex.Replace(mesh.name,@"(\(Clone\)){1,}","(Generated)");
 					AssetDatabase.AddObjectToAsset(mesh,ctx.AssetContainer);
-					Debug.Log($"Generate {mesh.name} for {d.name} Mesh");
 					
 					MeshDic.TryAdd(d,mesh);
 				});
@@ -64,7 +65,11 @@ namespace MeshModifier.NDMFDeform.NDMFPlugin
 				});
 				
 				MeshDic.ToList().ForEach(d => {
-					d.Key.GetComponent<SkinnedMeshRenderer>().sharedMesh = d.Value;
+					var skinnedRenderer = d.Key.GetComponent<SkinnedMeshRenderer>();
+					if (skinnedRenderer != null)
+					{
+						skinnedRenderer.sharedMesh = d.Value;
+					}
 				});
 			})
 				.PreviewingWith(ConfigurePreview());
@@ -74,9 +79,17 @@ namespace MeshModifier.NDMFDeform.NDMFPlugin
 				if (target is null) return;
 				var defomers = new HashSet<Deformer>();
 				target.ToList().ForEach(d => {
+					if (d == null) return;
+					
 					d.assignOriginalMeshOnDisable = false;
 					
-					d.DeformerElements.ForEach(e => defomers.Add(e.Component));
+					if (d.DeformerElements != null)
+					{
+						d.DeformerElements.ForEach(e => {
+							if (e?.Component != null)
+								defomers.Add(e.Component);
+						});
+					}
 					Object.DestroyImmediate(d);
 				});
 				defomers.ToList().ForEach(d =>Object.DestroyImmediate(d?.gameObject));
@@ -136,14 +149,6 @@ namespace MeshModifier.NDMFDeform.NDMFPlugin
 			// Deformライブラリが自動アップデートするように設定
 			foreach (var deformable in Object.FindObjectsOfType<Deformable>())
 			{
-				/**
-				// Deformableコンポーネントの設定を保存
-				deformable.CanUpdate() = true;
-                
-				// メッシュデータの遅延更新を無効化して、即時更新を有効化する
-				// これにより、Jobsシステムの結果をすぐに反映できる
-				deformable.UpdateMode = UpdateMode.Auto;
-				**/
 			}
 		}
 

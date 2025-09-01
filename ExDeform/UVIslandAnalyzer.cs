@@ -43,10 +43,14 @@ namespace Deform.Masking
             var islands = new List<UVIsland>();
             var processedTriangles = new HashSet<int>();
             
+            // Pre-build vertex to triangle mapping for faster adjacency lookup
+            var vertexToTriangles = BuildVertexToTriangleMapping(triangles, uvs.Length);
+            
             // Group triangles by connected UV coordinates
             for (int i = 0; i < triangles.Length; i += 3)
             {
-                if (processedTriangles.Contains(i / 3))
+                int triIndex = i / 3;
+                if (processedTriangles.Contains(triIndex))
                     continue;
                     
                 var island = new UVIsland
@@ -57,7 +61,7 @@ namespace Deform.Masking
                 
                 // Flood fill to find all connected triangles
                 var trianglesToProcess = new Queue<int>();
-                trianglesToProcess.Enqueue(i / 3);
+                trianglesToProcess.Enqueue(triIndex);
                 
                 while (trianglesToProcess.Count > 0)
                 {
@@ -82,8 +86,9 @@ namespace Deform.Masking
                         }
                     }
                     
-                    // Find adjacent triangles with shared UV coordinates
-                    FindAdjacentTriangles(currentTriIndex, triangles, uvs, trianglesToProcess, processedTriangles);
+                    // Find adjacent triangles with shared UV coordinates using pre-built mapping
+                    FindAdjacentTrianglesOptimized(currentTriIndex, triangles, uvs, trianglesToProcess, 
+                        processedTriangles, vertexToTriangles);
                 }
                 
                 // Calculate UV bounds for the island
@@ -94,52 +99,78 @@ namespace Deform.Masking
             return islands;
         }
         
-        private static void FindAdjacentTriangles(int triangleIndex, int[] triangles, Vector2[] uvs, 
-            Queue<int> trianglesToProcess, HashSet<int> processedTriangles)
+        private static Dictionary<int, List<int>> BuildVertexToTriangleMapping(int[] triangles, int vertexCount)
         {
-            int triStart = triangleIndex * 3;
-            var currentUVs = new Vector2[]
-            {
-                uvs[triangles[triStart]],
-                uvs[triangles[triStart + 1]], 
-                uvs[triangles[triStart + 2]]
-            };
+            var mapping = new Dictionary<int, List<int>>();
             
-            // Check all other triangles for shared UV coordinates
             for (int i = 0; i < triangles.Length; i += 3)
             {
-                int otherTriIndex = i / 3;
-                if (processedTriangles.Contains(otherTriIndex))
-                    continue;
-                    
-                var otherUVs = new Vector2[]
-                {
-                    uvs[triangles[i]],
-                    uvs[triangles[i + 1]],
-                    uvs[triangles[i + 2]]
-                };
+                int triIndex = i / 3;
                 
-                // Check if triangles share UV coordinates (indicating connection)
-                bool hasSharedUV = false;
-                for (int u1 = 0; u1 < 3; u1++)
+                for (int j = 0; j < 3; j++)
                 {
-                    for (int u2 = 0; u2 < 3; u2++)
+                    int vertIndex = triangles[i + j];
+                    if (!mapping.ContainsKey(vertIndex))
                     {
-                        if (Vector2.Distance(currentUVs[u1], otherUVs[u2]) < 0.001f)
-                        {
-                            hasSharedUV = true;
-                            break;
-                        }
+                        mapping[vertIndex] = new List<int>();
                     }
-                    if (hasSharedUV) break;
-                }
-                
-                if (hasSharedUV)
-                {
-                    trianglesToProcess.Enqueue(otherTriIndex);
+                    mapping[vertIndex].Add(triIndex);
                 }
             }
+            
+            return mapping;
         }
+        
+        private static void FindAdjacentTrianglesOptimized(int triangleIndex, int[] triangles, Vector2[] uvs, 
+            Queue<int> trianglesToProcess, HashSet<int> processedTriangles, Dictionary<int, List<int>> vertexToTriangles)
+        {
+            int triStart = triangleIndex * 3;
+            var uvTolerance = 0.001f;
+            var adjacentTriangles = new HashSet<int>();
+            
+            // For each vertex in the current triangle
+            for (int i = 0; i < 3; i++)
+            {
+                int vertIndex = triangles[triStart + i];
+                var currentUV = uvs[vertIndex];
+                
+                // Only check triangles that share this vertex index (much faster)
+                if (vertexToTriangles.ContainsKey(vertIndex))
+                {
+                    foreach (var otherTriIndex in vertexToTriangles[vertIndex])
+                    {
+                        if (processedTriangles.Contains(otherTriIndex) || otherTriIndex == triangleIndex)
+                            continue;
+                        
+                        // Check if this triangle has vertices with similar UV coordinates
+                        int otherTriStart = otherTriIndex * 3;
+                        bool hasSharedUV = false;
+                        
+                        for (int j = 0; j < 3; j++)
+                        {
+                            var otherVertIndex = triangles[otherTriStart + j];
+                            if (Vector2.Distance(currentUV, uvs[otherVertIndex]) < uvTolerance)
+                            {
+                                hasSharedUV = true;
+                                break;
+                            }
+                        }
+                        
+                        if (hasSharedUV)
+                        {
+                            adjacentTriangles.Add(otherTriIndex);
+                        }
+                    }
+                }
+            }
+            
+            // Add all adjacent triangles to processing queue
+            foreach (var adjTri in adjacentTriangles)
+            {
+                trianglesToProcess.Enqueue(adjTri);
+            }
+        }
+        
         
         private static Bounds CalculateUVBounds(List<Vector2> uvCoordinates)
         {

@@ -92,17 +92,9 @@ namespace Deform.Masking.Editor
                 // Update target transform for dynamic mesh highlighting
                 selector.TargetTransform = GetRendererTransform();
                 
-                // Ensure texture is generated if not already available
-                if (selector.UvMapTexture == null)
-                {
-                    isInitialized = false; // Force refresh to generate texture
-                    textureInitialized = false;
-                }
-                else
-                {
-                    isInitialized = true; // Use existing texture
-                    textureInitialized = true;
-                }
+                // Always regenerate texture for cached selector to ensure freshness
+                isInitialized = false;
+                textureInitialized = false;
             }
             else if (originalMesh != null)
             {
@@ -151,19 +143,27 @@ namespace Deform.Masking.Editor
             root.RegisterCallback<MouseMoveEvent>(OnRootMouseMove, TrickleDown.TrickleDown);
             root.RegisterCallback<MouseUpEvent>(OnRootMouseUp, TrickleDown.TrickleDown);
             
-            // Optimized initialization - avoid heavy operations when possible
-            if (!isInitialized)
+            // Force initialization to ensure texture is generated immediately
+            if (selector != null)
             {
-                // Only perform full refresh if selector is newly created
-                if (selector != null)
+                if (!isInitialized)
                 {
-                    RefreshData();
+                    // Force immediate texture generation on first load
+                    RefreshDataWithImmediteTexture();
+                }
+                else
+                {
+                    // Quick refresh for cached data - no heavy computation
+                    RefreshUIFast();
                 }
             }
             else
             {
-                // Quick refresh for cached data - no heavy computation
-                RefreshUIFast();
+                // Show status when no mesh data is available
+                if (statusLabel != null)
+                {
+                    statusLabel.text = "No mesh data available - please assign a mesh to the GameObject";
+                }
             }
             
             return root;
@@ -1258,6 +1258,62 @@ namespace Deform.Masking.Editor
             }
         }
         
+        /// <summary>
+        /// Force immediate data refresh with texture generation - used for initial load
+        /// </summary>
+        private void RefreshDataWithImmediteTexture()
+        {
+            if (selector == null) 
+            {
+                if (statusLabel != null)
+                {
+                    statusLabel.text = "No mesh data available";
+                }
+                return;
+            }
+            
+            if (statusLabel != null)
+            {
+                statusLabel.text = UVIslandLocalization.Get("status_refreshing");
+            }
+            
+            try 
+            {
+                // Force mesh data update
+                selector.UpdateMeshData();
+                
+                // Always generate texture immediately on first load
+                selector.GenerateUVMapTexture();
+                textureInitialized = true;
+                isInitialized = true;
+                
+                // Immediate UI refresh
+                RefreshUVMapImage();
+                
+                if (selector?.UVIslands != null)
+                {
+                    islandListView.itemsSource = selector.UVIslands;
+                    islandListView.RefreshItems();
+                }
+                
+                UpdateStatus();
+                
+                int islandCount = selector.UVIslands?.Count ?? 0;
+                if (statusLabel != null)
+                {
+                    statusLabel.text = UVIslandLocalization.Get("status_islands_found", islandCount);
+                }
+            }
+            catch (System.Exception ex)
+            {
+                if (statusLabel != null)
+                {
+                    statusLabel.text = $"Error: {ex.Message}";
+                }
+                Debug.LogError($"[UVIslandMaskEditor] Error refreshing data: {ex}");
+            }
+        }
+        
         private void RefreshUI(bool forceSceneRepaint = false)
         {
             // Always refresh the texture when UI updates
@@ -1350,7 +1406,7 @@ namespace Deform.Masking.Editor
             else if (pendingTextureUpdate == null)
             {
                 // Schedule single deferred update if throttled and none pending
-                pendingTextureUpdate = new EditorApplication.CallbackFunction(() =>
+                pendingTextureUpdate = () =>
                 {
                     if (selector != null)
                     {
@@ -1359,7 +1415,7 @@ namespace Deform.Masking.Editor
                         lastUpdateTime = Time.realtimeSinceStartup;
                     }
                     pendingTextureUpdate = null;
-                });
+                };
                 EditorApplication.delayCall += pendingTextureUpdate;
             }
             // If there's already a pending update, do nothing to avoid duplicates

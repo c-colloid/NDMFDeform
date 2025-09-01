@@ -23,6 +23,7 @@ namespace Deform.Masking
         // Runtime data
         [System.NonSerialized] private NativeArray<float> maskValues;
         [System.NonSerialized] private bool maskDataReady = false;
+        [System.NonSerialized] private bool isDisposing = false;
 	    [System.NonSerialized] private Mesh cachedMesh;
 	    [System.NonSerialized] private Mesh originalMesh;
         
@@ -82,15 +83,31 @@ namespace Deform.Masking
         
         private void UpdateMaskData(MeshData data)
         {
-            if (maskValues.IsCreated)
-                maskValues.Dispose();
+            // Safely dispose existing mask values
+            if (maskValues.IsCreated && !isDisposing)
+            {
+                try
+                {
+                    maskValues.Dispose();
+                }
+                catch (System.ObjectDisposedException)
+                {
+                    // Already disposed, continue
+                }
+            }
                 
-            maskValues = new NativeArray<float>(data.Length, Allocator.Persistent);
+            if (!isDisposing)
+            {
+                maskValues = new NativeArray<float>(data.Length, Allocator.Persistent);
+            }
             
             // Initialize all vertices to masked (1.0 = revert to original, no deformation)
-            for (int i = 0; i < maskValues.Length; i++)
+            if (maskValues.IsCreated && !isDisposing)
             {
-                maskValues[i] = 1f;
+                for (int i = 0; i < maskValues.Length; i++)
+                {
+                    maskValues[i] = 1f;
+                }
             }
             
             // Apply deformation only to selected islands
@@ -127,21 +144,44 @@ namespace Deform.Masking
         
         private void OnDestroy()
         {
-            DisposeMaskValues();
+            if (!isDisposing)
+            {
+                DisposeMaskValues();
+            }
         }
         
         private void OnDisable()
         {
-            // Also dispose in OnDisable for editor scenarios
-            DisposeMaskValues();
+            // Only dispose in OnDisable for editor scenarios if not already disposing
+            if (!isDisposing && Application.isEditor)
+            {
+                DisposeMaskValues();
+            }
         }
         
         private void DisposeMaskValues()
         {
+            if (isDisposing) return;
+            
+            isDisposing = true;
+            
             if (maskValues.IsCreated)
             {
-                maskValues.Dispose();
+                try
+                {
+                    maskValues.Dispose();
+                }
+                catch (System.ObjectDisposedException)
+                {
+                    // Already disposed, ignore
+                }
+                catch (System.InvalidOperationException)
+                {
+                    // Invalid state, ignore
+                }
             }
+            
+            maskDataReady = false;
         }
         
         public void SetSelectedIslands(List<int> islandIDs)
