@@ -64,6 +64,14 @@ namespace Deform.Masking.Editor
         private static Dictionary<string, UVIslandSelector> persistentCache = new Dictionary<string, UVIslandSelector>();
         private string currentCacheKey;
         
+        // Texture generation control
+        private bool textureInitialized = false;
+        private float lastUpdateTime = 0f;
+        private const float TEXTURE_UPDATE_THROTTLE = 0.016f; // ~60fps limit
+        
+        // EditorApplication callback management
+        private System.Action pendingTextureUpdate;
+        
         public override VisualElement CreateInspectorGUI()
         {
             targetMask = target as UVIslandMask;
@@ -81,7 +89,18 @@ namespace Deform.Masking.Editor
                 
                 // Update target transform for dynamic mesh highlighting
                 selector.TargetTransform = GetRendererTransform();
-                isInitialized = true;
+                
+                // Ensure texture is generated if not already available
+                if (selector.UvMapTexture == null)
+                {
+                    isInitialized = false; // Force refresh to generate texture
+                    textureInitialized = false;
+                }
+                else
+                {
+                    isInitialized = true; // Use existing texture
+                    textureInitialized = true;
+                }
             }
             else if (originalMesh != null)
             {
@@ -96,11 +115,13 @@ namespace Deform.Masking.Editor
                     persistentCache[currentCacheKey] = selector;
                 }
                 isInitialized = false;
+                textureInitialized = false;
             }
             else
             {
                 selector = null;
                 isInitialized = false;
+                textureInitialized = false;
             }
             
             // Update references for instance-based caching (legacy)
@@ -351,8 +372,7 @@ namespace Deform.Masking.Editor
                     selector.SetZoomLevel(evt.newValue);
                     if (selector.AutoUpdatePreview)
                     {
-                        selector.GenerateUVMapTexture();
-                        RefreshUVMapImage();
+                        UpdateTextureWithThrottle(); // Immediate feedback with throttling
                     }
                 }
             });
@@ -364,7 +384,10 @@ namespace Deform.Masking.Editor
                     selector.ResetViewTransform();
                     zoomSlider.value = 1f;
                     if (selector.AutoUpdatePreview)
+                    {
+                        selector.GenerateUVMapTexture(); // Immediate update for reset button
                         RefreshUVMapImage();
+                    }
                 }
             })
             {
@@ -890,6 +913,9 @@ namespace Deform.Masking.Editor
                 targetMask.SetSelectedIslands(selector.SelectedIslandIDs);
                 EditorUtility.SetDirty(targetMask);
                 
+                // Mark texture for update when selection changes
+                textureInitialized = false;
+                
                 // Use optimized immediate refresh for better responsiveness
                 RefreshUIFast();
             }
@@ -935,8 +961,7 @@ namespace Deform.Masking.Editor
                 
                 if (selector.AutoUpdatePreview)
                 {
-                    selector.GenerateUVMapTexture();
-                    RefreshUVMapImage();
+                    UpdateTextureWithThrottle(); // Immediate feedback for pan with throttling
                 }
                 
                 evt.StopPropagation();
@@ -984,8 +1009,7 @@ namespace Deform.Masking.Editor
             
             if (selector.AutoUpdatePreview)
             {
-                selector.GenerateUVMapTexture();
-                RefreshUVMapImage();
+                UpdateTextureWithThrottle(); // Immediate feedback for wheel zoom
             }
             
             evt.StopPropagation();
@@ -1043,8 +1067,7 @@ namespace Deform.Masking.Editor
                 
                 if (selector.AutoUpdatePreview)
                 {
-                    selector.GenerateUVMapTexture();
-                    RefreshUVMapImage();
+                    UpdateTextureWithThrottle(); // Immediate feedback for pan with throttling
                 }
                 
                 evt.StopPropagation();
@@ -1228,7 +1251,7 @@ namespace Deform.Masking.Editor
             // Always refresh the texture when UI updates
             if (selector?.AutoUpdatePreview ?? false)
             {
-                selector.GenerateUVMapTexture();
+                selector.UpdateTextureIfNeeded(); // Use deferred update instead of direct generation
             }
             
             RefreshUVMapImage();
@@ -1250,10 +1273,7 @@ namespace Deform.Masking.Editor
         // Fast UI refresh for frequent operations like selection changes
         private void RefreshUIFast()
         {
-            // Skip texture update for immediate UI refresh - defer to later
-            // Texture will be updated on next frame or user interaction
-            
-            // Only update essential UI elements immediately
+            // Update essential UI elements immediately
             UpdateStatus();
             
             // Update list view selection state without full refresh
@@ -1267,17 +1287,26 @@ namespace Deform.Masking.Editor
                 islandListView.RefreshItems();
             }
             
-            // Defer texture update to avoid blocking UI thread
-            EditorApplication.delayCall += () =>
+            // Only handle texture generation if not already initialized
+            if (selector != null && !textureInitialized)
             {
-                if (selector?.AutoUpdatePreview ?? false)
+                if (selector.UvMapTexture == null)
                 {
-                    selector?.UpdateTextureIfNeeded();
-                    RefreshUVMapImage();
+                    // Generate texture only once during initialization
+                    selector.GenerateUVMapTexture();
+                    textureInitialized = true;
                 }
-                // Force scene repaint after texture is ready
-                SceneView.RepaintAll();
-            };
+                RefreshUVMapImage();
+            }
+            else if (selector?.AutoUpdatePreview == true)
+            {
+                // Only update texture if auto update is enabled and changes are pending
+                selector.UpdateTextureIfNeeded();
+                RefreshUVMapImage();
+            }
+            
+            // Force scene repaint for selection highlighting
+            SceneView.RepaintAll();
         }
         
         private void RefreshUVMapImage()
@@ -1286,6 +1315,42 @@ namespace Deform.Masking.Editor
             {
                 uvMapImage.style.backgroundImage = new StyleBackground(selector.UvMapTexture);
             }
+            else
+            {
+                // Clear image if texture is not available
+                uvMapImage.style.backgroundImage = StyleKeyword.None;
+            }
+        }
+        
+        // Throttled immediate texture update for interactive operations
+        private void UpdateTextureWithThrottle()
+        {
+            if (selector == null) return;
+            
+            float currentTime = Time.realtimeSinceStartup;
+            if (currentTime - lastUpdateTime >= TEXTURE_UPDATE_THROTTLE)
+            {
+                // Immediate update if enough time has passed
+                selector.GenerateUVMapTexture();
+                RefreshUVMapImage();
+                lastUpdateTime = currentTime;
+            }
+            else if (pendingTextureUpdate == null)
+            {
+                // Schedule single deferred update if throttled and none pending
+                pendingTextureUpdate = () =>
+                {
+                    if (selector != null)
+                    {
+                        selector.GenerateUVMapTexture();
+                        RefreshUVMapImage();
+                        lastUpdateTime = Time.realtimeSinceStartup;
+                    }
+                    pendingTextureUpdate = null;
+                };
+                EditorApplication.delayCall += pendingTextureUpdate;
+            }
+            // If there's already a pending update, do nothing to avoid duplicates
         }
         
         private void UpdateStatus()
