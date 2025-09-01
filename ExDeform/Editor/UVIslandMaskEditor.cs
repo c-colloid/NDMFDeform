@@ -869,7 +869,6 @@ namespace Deform.Masking.Editor
             );
             
             // Debug information
-            UnityEngine.Debug.Log($"[UVIslandMaskEditor] Click at local: {localPosition}, normalized: {normalizedPos}");
             
             int islandID = selector.GetIslandAtUVCoordinate(normalizedPos);
             
