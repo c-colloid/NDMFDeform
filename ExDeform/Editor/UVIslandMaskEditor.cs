@@ -60,67 +60,54 @@ namespace Deform.Masking.Editor
         private Mesh lastCachedMesh;
         private int lastMeshInstanceID = -1;
         
+        // Persistent cache system based on original mesh
+        private static Dictionary<string, UVIslandSelector> persistentCache = new Dictionary<string, UVIslandSelector>();
+        private string currentCacheKey;
+        
         public override VisualElement CreateInspectorGUI()
         {
             targetMask = target as UVIslandMask;
             
-            // Enhanced caching - check if we can reuse cached selector
-            if (cachedSelector != null && lastTargetMask == targetMask)
+            // Get original mesh for UV mapping and cache key generation
+            var originalMesh = GetOriginalMesh();
+            currentCacheKey = GenerateCacheKey(originalMesh);
+            
+            // Try to get selector from persistent cache first
+            if (currentCacheKey != null && persistentCache.TryGetValue(currentCacheKey, out var cachedSelector))
             {
-                // More robust cache validation using mesh instance ID
-                var currentMesh = GetMeshData();
-                int currentMeshInstanceID = currentMesh != null ? currentMesh.GetInstanceID() : -1;
+                // Reuse cached selector with UV data
+                selector = cachedSelector;
+                selector.SetSelectedIslands(targetMask.SelectedIslandIDs);
                 
-                if (currentMesh == lastCachedMesh && currentMeshInstanceID == lastMeshInstanceID)
+                // Update target transform for dynamic mesh highlighting
+                selector.TargetTransform = GetRendererTransform();
+                isInitialized = true;
+            }
+            else if (originalMesh != null)
+            {
+                // Create new selector based on original mesh
+                selector = new UVIslandSelector(originalMesh);
+                selector.SetSelectedIslands(targetMask.SelectedIslandIDs);
+                selector.TargetTransform = GetRendererTransform();
+                
+                // Cache the selector for future use
+                if (currentCacheKey != null)
                 {
-                    // Cache is still valid - reuse existing selector
-                    selector = cachedSelector;
-                    selector.SetSelectedIslands(targetMask.SelectedIslandIDs);
-                    isInitialized = true;
+                    persistentCache[currentCacheKey] = selector;
                 }
-                else
-                {
-                    // Mesh changed, but try to update existing selector instead of recreating
-                    if (currentMesh != null)
-                    {
-                        cachedSelector.SetMesh(currentMesh);
-                        cachedSelector.SetSelectedIslands(targetMask.SelectedIslandIDs);
-                        selector = cachedSelector;
-                        lastCachedMesh = currentMesh;
-                        lastMeshInstanceID = currentMeshInstanceID;
-                        isInitialized = true;
-                    }
-                    else
-                    {
-                        // No mesh available, invalidate cache
-                        cachedSelector = null;
-                        lastTargetMask = null;
-                        lastCachedMesh = null;
-                        lastMeshInstanceID = -1;
-                    }
-                }
+                isInitialized = false;
+            }
+            else
+            {
+                selector = null;
+                isInitialized = false;
             }
             
-            // Create new selector only if cache is completely invalid
-            if (cachedSelector == null)
-            {
-                var meshData = GetMeshData();
-                if (meshData != null)
-                {
-                    cachedSelector = new UVIslandSelector(meshData);
-                    cachedSelector.SetSelectedIslands(targetMask.SelectedIslandIDs);
-                    lastTargetMask = targetMask;
-                    lastCachedMesh = meshData;
-                    lastMeshInstanceID = meshData.GetInstanceID();
-                    selector = cachedSelector;
-                    isInitialized = false;
-                }
-                else
-                {
-                    selector = null;
-                    isInitialized = false;
-                }
-            }
+            // Update references for instance-based caching (legacy)
+            cachedSelector = selector;
+            lastTargetMask = targetMask;
+            lastCachedMesh = originalMesh;
+            lastMeshInstanceID = originalMesh?.GetInstanceID() ?? -1;
             
             root = new VisualElement();
             root.style.paddingTop = 10;
@@ -1146,6 +1133,63 @@ namespace Deform.Masking.Editor
             return null;
         }
         
+        private Mesh GetOriginalMesh()
+        {
+            // Always get the original mesh for UV mapping and caching
+            var meshFilter = targetMask.GetComponent<MeshFilter>();
+            if (meshFilter != null && meshFilter.sharedMesh != null)
+            {
+                return meshFilter.sharedMesh;
+            }
+            
+            var skinnedMeshRenderer = targetMask.GetComponent<SkinnedMeshRenderer>();
+            if (skinnedMeshRenderer != null && skinnedMeshRenderer.sharedMesh != null)
+            {
+                return skinnedMeshRenderer.sharedMesh;
+            }
+            
+            return null;
+        }
+        
+        private Mesh GetDynamicMesh()
+        {
+            // Get the current dynamic mesh for highlighting
+            if (targetMask?.CachedMesh != null)
+            {
+                return targetMask.CachedMesh;
+            }
+            
+            // Fallback to original mesh if dynamic mesh is not available
+            return GetOriginalMesh();
+        }
+        
+        private string GenerateCacheKey(Mesh originalMesh)
+        {
+            if (originalMesh == null) return null;
+            
+            // Use original mesh instance ID and UV hash for cache key
+            int meshID = originalMesh.GetInstanceID();
+            int uvHash = CalculateUVHash(originalMesh.uv);
+            return $"{meshID}_{uvHash}";
+        }
+        
+        private int CalculateUVHash(Vector2[] uvs)
+        {
+            if (uvs == null || uvs.Length == 0) return 0;
+            
+            unchecked
+            {
+                int hash = 17;
+                // Sample every 10th UV coordinate to balance performance and accuracy
+                int step = Mathf.Max(1, uvs.Length / 100);
+                for (int i = 0; i < uvs.Length; i += step)
+                {
+                    hash = hash * 31 + uvs[i].GetHashCode();
+                }
+                return hash;
+            }
+        }
+        
         // UI update methods
         private void RefreshData()
         {
@@ -1465,6 +1509,37 @@ namespace Deform.Masking.Editor
             }
         }
         
+        // Clean up persistent cache when domain reloads
+        [UnityEditor.Callbacks.DidReloadScripts]
+        private static void OnScriptsReloaded()
+        {
+            // Clear persistent cache on domain reload to prevent stale data
+            if (persistentCache != null)
+            {
+                foreach (var kvp in persistentCache)
+                {
+                    kvp.Value?.Dispose();
+                }
+                persistentCache.Clear();
+            }
+        }
+        
+        // Clean up on editor shutdown
+        static UVIslandMaskEditor()
+        {
+            EditorApplication.quitting += () =>
+            {
+                if (persistentCache != null)
+                {
+                    foreach (var kvp in persistentCache)
+                    {
+                        kvp.Value?.Dispose();
+                    }
+                    persistentCache.Clear();
+                }
+            };
+        }
+        
         private void OnUndoRedo()
         {
             RefreshUI(false);
@@ -1487,6 +1562,11 @@ namespace Deform.Masking.Editor
             if (rendererTransform != null)
             {
                 selector.TargetTransform = rendererTransform;
+                
+                // Set dynamic mesh for highlighting if available
+                var dynamicMesh = GetDynamicMesh();
+                selector.DynamicMesh = dynamicMesh;
+                
                 selector.DrawSelectedFacesInScene();
             }
         }

@@ -77,8 +77,11 @@ namespace Deform.Masking.Editor
         private List<int> triangleMaskList = new List<int>();
         
         // Scene display
-	    private Transform targetTransform;
-        #endregion
+        private Transform targetTransform;
+        
+        // Dynamic mesh support for highlighting
+        private Mesh dynamicMesh;
+        private bool useDynamicMeshForHighlight = false;
         
         // Properties
         public List<UVIslandAnalyzer.UVIsland> UVIslands => uvIslands;
@@ -89,6 +92,7 @@ namespace Deform.Masking.Editor
         public int[] TriangleMask => triangleMask;
         public Transform TargetTransform { get => targetTransform; set => targetTransform = value; }
         public int[] VertexMask => vertexMask;
+        public Mesh DynamicMesh { get => dynamicMesh; set { dynamicMesh = value; useDynamicMeshForHighlight = value != null; } }
         
         // Display properties
         public bool UseAdaptiveVertexSize { get => useAdaptiveVertexSize; set => useAdaptiveVertexSize = value; }
@@ -543,16 +547,23 @@ namespace Deform.Masking.Editor
         
         
         /// <summary>
-        /// Draw selected faces in scene view
-        /// 選択された面をシーンビューで描画
+        /// Draw selected faces in scene view using dynamic mesh if available
+        /// 動的メッシュが利用可能な場合はそれを使用してシーンビューで選択された面を描画
         /// </summary>
         public void DrawSelectedFacesInScene()
         {
-            if (targetMesh == null || triangleMask == null || targetTransform == null) return;
+            if (triangleMask == null || targetTransform == null) return;
             if (!HasSelectedIslands) return;
             
-            var vertices = targetMesh.vertices;
-            var triangles = targetMesh.triangles;
+            // Use dynamic mesh for highlighting if available, otherwise fallback to original mesh
+            Mesh meshForHighlight = useDynamicMeshForHighlight && dynamicMesh != null ? dynamicMesh : targetMesh;
+            if (meshForHighlight == null) return;
+            
+            var vertices = meshForHighlight.vertices;
+            var triangles = meshForHighlight.triangles;
+            
+            // Validate that triangle mask is compatible with current mesh
+            if (triangles.Length == 0) return;
             
             // Set up handles for drawing
             Handles.zTest = UnityEngine.Rendering.CompareFunction.Always;
