@@ -69,6 +69,12 @@ namespace Deform.Masking.Editor
         private bool textureInitialized = false;
         private float lastUpdateTime = 0f;
 		private const float TEXTURE_UPDATE_THROTTLE = 0.016f; // ~60fps limit
+        
+        // Low-resolution UV preview cache for quick loading
+        private static Dictionary<string, Texture2D> lowResUVCache = new Dictionary<string, Texture2D>();
+        private Texture2D currentLowResTexture;
+        private bool isLoadingFromCache = false;
+        private const int LOW_RES_TEXTURE_SIZE = 128; // Small size for quick display
         #endregion
         
         // EditorApplication callback management
@@ -91,6 +97,9 @@ namespace Deform.Masking.Editor
                 
                 // Update target transform for dynamic mesh highlighting
                 selector.TargetTransform = GetRendererTransform();
+                
+                // Load low-resolution cached texture for immediate display
+                LoadLowResTextureFromCache();
                 
                 // Always regenerate texture for cached selector to ensure freshness
                 isInitialized = false;
@@ -900,13 +909,10 @@ namespace Deform.Masking.Editor
         
         private void HandleIslandSelection(Vector2 localPosition)
         {
-            // Use the same coordinate conversion as the old working code
-            var normalizedPos = new Vector2(
-                localPosition.x / UV_MAP_SIZE,
-                1f - (localPosition.y / UV_MAP_SIZE)
-            );
+            // Use proper coordinate transformation that accounts for zoom and pan
+            var uvCoordinate = LocalPosToUV(localPosition);
             
-            int islandID = selector.GetIslandAtUVCoordinate(normalizedPos);
+            int islandID = selector.GetIslandAtUVCoordinate(uvCoordinate);
             
             if (islandID >= 0)
             {
@@ -917,6 +923,9 @@ namespace Deform.Masking.Editor
                 
                 // Mark texture for update when selection changes
                 textureInitialized = false;
+                
+                // Save low-res texture to cache after selection changes
+                SaveLowResTextureToCache();
                 
                 // Use optimized immediate refresh for better responsiveness
                 RefreshUIFast();
@@ -1286,6 +1295,7 @@ namespace Deform.Masking.Editor
                 selector.GenerateUVMapTexture();
                 textureInitialized = true;
                 isInitialized = true;
+                isLoadingFromCache = false; // Clear cache loading flag since full texture is ready
                 
                 // Immediate UI refresh
                 RefreshUVMapImage();
@@ -1383,6 +1393,11 @@ namespace Deform.Masking.Editor
             {
                 uvMapImage.style.backgroundImage = new StyleBackground(selector.UvMapTexture);
             }
+            else if (currentLowResTexture != null && isLoadingFromCache)
+            {
+                // Show low-resolution cached texture while loading
+                uvMapImage.style.backgroundImage = new StyleBackground(currentLowResTexture);
+            }
             else
             {
                 // Clear image if texture is not available
@@ -1456,22 +1471,18 @@ namespace Deform.Masking.Editor
         // Range selection methods (simplified)
         private void StartRangeSelection(Vector2 localPos)
         {
-            var normalizedPos = new Vector2(
-                localPos.x / UV_MAP_SIZE,
-                1f - (localPos.y / UV_MAP_SIZE)
-            );
-            selector.StartRangeSelection(normalizedPos);
+            // Use proper coordinate transformation that accounts for zoom and pan
+            var uvCoordinate = LocalPosToUV(localPos);
+            selector.StartRangeSelection(uvCoordinate);
             isRangeSelecting = true;
             UpdateRangeSelectionVisual();
         }
         
         private void UpdateRangeSelection(Vector2 localPos)
         {
-            var normalizedPos = new Vector2(
-                localPos.x / UV_MAP_SIZE,
-                1f - (localPos.y / UV_MAP_SIZE)
-            );
-            selector.UpdateRangeSelection(normalizedPos);
+            // Use proper coordinate transformation that accounts for zoom and pan
+            var uvCoordinate = LocalPosToUV(localPos);
+            selector.UpdateRangeSelection(uvCoordinate);
             UpdateRangeSelectionVisual();
         }
         
@@ -1569,12 +1580,10 @@ namespace Deform.Masking.Editor
         
         private void HandleMagnifyingGlassClick(MouseUpEvent evt)
         {
-            var normalizedPos = new Vector2(
-                currentMagnifyingMousePos.x / UV_MAP_SIZE,
-                1f - (currentMagnifyingMousePos.y / UV_MAP_SIZE)
-            );
+            // Use proper coordinate transformation that accounts for zoom and pan
+            var uvCoordinate = LocalPosToUV(currentMagnifyingMousePos);
             
-            int islandID = selector.GetIslandAtUVCoordinate(normalizedPos);
+            int islandID = selector.GetIslandAtUVCoordinate(uvCoordinate);
             
             if (islandID >= 0)
             {
@@ -1640,6 +1649,13 @@ namespace Deform.Masking.Editor
                 cachedSelector.Dispose();
                 cachedSelector = null;
             }
+            
+            // Clean up current low-res texture
+            if (currentLowResTexture != null)
+            {
+                UnityEngine.Object.DestroyImmediate(currentLowResTexture);
+                currentLowResTexture = null;
+            }
         }
         
         // Clean up persistent cache when domain reloads
@@ -1654,6 +1670,19 @@ namespace Deform.Masking.Editor
                     kvp.Value?.Dispose();
                 }
                 persistentCache.Clear();
+            }
+            
+            // Clear low-res texture cache
+            if (lowResUVCache != null)
+            {
+                foreach (var kvp in lowResUVCache)
+                {
+                    if (kvp.Value != null)
+                    {
+                        UnityEngine.Object.DestroyImmediate(kvp.Value);
+                    }
+                }
+                lowResUVCache.Clear();
             }
         }
         
@@ -1717,6 +1746,46 @@ namespace Deform.Masking.Editor
             
             // Return the updated cached transform
             return targetMask?.CachedRendererTransform;
+        }
+        
+        /// <summary>
+        /// Load low-resolution UV texture from cache for immediate display while full texture loads
+        /// </summary>
+        private void LoadLowResTextureFromCache()
+        {
+            if (currentCacheKey != null && lowResUVCache.TryGetValue(currentCacheKey, out var cachedTexture))
+            {
+                currentLowResTexture = cachedTexture;
+                isLoadingFromCache = true;
+            }
+        }
+        
+        /// <summary>
+        /// Save low-resolution UV texture to cache when selection changes
+        /// </summary>
+        private void SaveLowResTextureToCache()
+        {
+            if (currentCacheKey == null || selector == null) return;
+            
+            // Only create low-res cache when selection changes (color changes)
+            if (selector.HasSelectedIslands)
+            {
+                // Clean up existing cached texture for this key
+                if (lowResUVCache.TryGetValue(currentCacheKey, out var existingTexture))
+                {
+                    if (existingTexture != null)
+                    {
+                        UnityEngine.Object.DestroyImmediate(existingTexture);
+                    }
+                }
+                
+                // Generate low-resolution texture for caching
+                var lowResTexture = selector.GenerateUVMapTexture(LOW_RES_TEXTURE_SIZE, LOW_RES_TEXTURE_SIZE);
+                if (lowResTexture != null)
+                {
+                    lowResUVCache[currentCacheKey] = lowResTexture;
+                }
+            }
         }
         
     }
