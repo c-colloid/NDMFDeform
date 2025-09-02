@@ -1228,6 +1228,7 @@ namespace Deform.Masking.Editor
             return GetOriginalMesh();
         }
         
+		/*
         private string GenerateCacheKey(Mesh originalMesh)
         {
             if (originalMesh == null) return null;
@@ -1253,7 +1254,8 @@ namespace Deform.Masking.Editor
                 }
                 return hash;
             }
-        }
+		}
+		*/
         
         // UI update methods
         private void RefreshData()
@@ -1691,6 +1693,7 @@ namespace Deform.Masking.Editor
             }
         }
         
+		/*
         // Clean up persistent cache when domain reloads
         [UnityEditor.Callbacks.DidReloadScripts]
         private static void OnScriptsReloaded()
@@ -1717,7 +1720,8 @@ namespace Deform.Masking.Editor
                 }
                 lowResUVCache.Clear();
             }
-        }
+		}
+		*/
         
         // Clean up on editor shutdown
         static UVIslandMaskEditor()
