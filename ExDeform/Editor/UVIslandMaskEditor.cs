@@ -69,6 +69,9 @@ namespace Deform.Masking.Editor
         // Static initialization flag to ensure proper cache restoration across Unity restarts
         private static bool isCacheSystemInitialized = false;
         
+        // Static tracking to prevent multiple editor instances for same target
+        private static Dictionary<int, UVIslandMaskEditor> activeEditors = new Dictionary<int, UVIslandMaskEditor>();
+        
         // Texture generation control
         private bool textureInitialized = false;
         private float lastUpdateTime = 0f;
@@ -91,6 +94,17 @@ namespace Deform.Masking.Editor
         public override VisualElement CreateInspectorGUI()
         {
             targetMask = target as UVIslandMask;
+            int targetID = targetMask != null ? targetMask.GetInstanceID() : 0;
+            
+            // Log CreateInspectorGUI calls for debugging
+            LogCacheOperation($"CreateInspectorGUI called for target {targetID}, existing root: {(root != null)}, same target: {lastTargetMask == targetMask}");
+            
+            // Prevent multiple UI creation for the same target
+            if (root != null && lastTargetMask == targetMask)
+            {
+                LogCacheOperation($"Reusing existing UI for target {targetID}");
+                return root;
+            }
             
             // Lightweight cache system initialization - only when UI is created
             InitializeCacheSystem();
@@ -1740,12 +1754,42 @@ namespace Deform.Masking.Editor
         private void OnEnable()
         {
             targetMask = target as UVIslandMask;
+            
+            // Track active editor instances to prevent duplicates
+            int targetID = targetMask != null ? targetMask.GetInstanceID() : 0;
+            if (targetID != 0)
+            {
+                if (activeEditors.ContainsKey(targetID))
+                {
+                    // Another editor instance exists for this target, dispose the old one
+                    var oldEditor = activeEditors[targetID];
+                    if (oldEditor != this && oldEditor != null)
+                    {
+                        Debug.Log($"[UVIslandMaskEditor] Replacing duplicate editor instance for target {targetID}");
+                        oldEditor.CleanupEditor();
+                    }
+                }
+                activeEditors[targetID] = this;
+            }
+            
             Undo.undoRedoPerformed += OnUndoRedo;
             SceneView.duringSceneGui += OnSceneGUI;
         }
         
         private void OnDisable()
         {
+            CleanupEditor();
+        }
+        
+        private void CleanupEditor()
+        {
+            // Remove from active editors tracking
+            int targetID = targetMask != null ? targetMask.GetInstanceID() : 0;
+            if (targetID != 0 && activeEditors.ContainsKey(targetID) && activeEditors[targetID] == this)
+            {
+                activeEditors.Remove(targetID);
+            }
+            
             // Clean up resources
             if (magnifyingGlassTexture != null)
             {
@@ -1831,6 +1875,17 @@ namespace Deform.Masking.Editor
         {
             EditorApplication.quitting += () =>
             {
+                // Clean up all active editors
+                if (activeEditors != null)
+                {
+                    foreach (var kvp in activeEditors)
+                    {
+                        kvp.Value?.CleanupEditor();
+                    }
+                    activeEditors.Clear();
+                }
+                
+                // Clean up persistent cache
                 if (persistentCache != null)
                 {
                     foreach (var kvp in persistentCache)
