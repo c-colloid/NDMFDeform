@@ -91,8 +91,11 @@ namespace Deform.Masking.Editor
         
         #region Initialization
         
-        [InitializeOnLoadMethod]
-        private static void Initialize()
+        /// <summary>
+        /// Lazy initialization - called only when cache operations are needed
+        /// 遅延初期化 - キャッシュ操作が必要な時のみ呼び出し
+        /// </summary>
+        private static void EnsureInitialized()
         {
             if (s_isInitialized) return;
             
@@ -103,7 +106,7 @@ namespace Deform.Masking.Editor
                 SchedulePeriodicCleanup();
                 s_isInitialized = true;
                 
-                LogInfo("Cache system initialized successfully");
+                LogInfo("Cache system initialized on demand");
             }
             catch (Exception e)
             {
@@ -137,6 +140,9 @@ namespace Deform.Masking.Editor
         /// </summary>
         public static bool SaveTexture(string key, Texture2D texture)
         {
+            // Ensure cache system is initialized
+            EnsureInitialized();
+            
             // Null safety checks
             if (string.IsNullOrWhiteSpace(key))
             {
@@ -165,6 +171,9 @@ namespace Deform.Masking.Editor
         /// </summary>
         public static Texture2D LoadTexture(string key)
         {
+            // Ensure cache system is initialized
+            EnsureInitialized();
+            
             if (string.IsNullOrWhiteSpace(key))
             {
                 LogWarning("LoadTexture called with null or empty key");
@@ -181,6 +190,9 @@ namespace Deform.Masking.Editor
         /// </summary>
         public static bool HasCache(string key)
         {
+            // Ensure cache system is initialized
+            EnsureInitialized();
+            
             if (string.IsNullOrWhiteSpace(key)) return false;
             
             var startTime = DateTime.UtcNow;
@@ -231,6 +243,9 @@ namespace Deform.Masking.Editor
         /// </summary>
         public static CacheStatistics GetCacheStatistics()
         {
+            // Ensure cache system is initialized
+            EnsureInitialized();
+            
             lock (s_lock)
             {
                 var stats = new CacheStatistics();
