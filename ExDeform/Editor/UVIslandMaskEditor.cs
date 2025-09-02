@@ -70,11 +70,15 @@ namespace Deform.Masking.Editor
         private float lastUpdateTime = 0f;
 		private const float TEXTURE_UPDATE_THROTTLE = 0.016f; // ~60fps limit
         
-        // Low-resolution UV preview cache for quick loading
-        private static Dictionary<string, Texture2D> lowResUVCache = new Dictionary<string, Texture2D>();
+        // Robust caching system integration
         private Texture2D currentLowResTexture;
         private bool isLoadingFromCache = false;
+        private bool shouldShowLowResUntilInteraction = false; // Flag to show low-res until user interaction
         private const int LOW_RES_TEXTURE_SIZE = 128; // Small size for quick display
+        
+        // Cache health monitoring
+        private static DateTime lastCacheHealthCheck = DateTime.MinValue;
+        private const double CACHE_HEALTH_CHECK_INTERVAL_HOURS = 1.0;
         #endregion
         
         // EditorApplication callback management
@@ -152,18 +156,23 @@ namespace Deform.Masking.Editor
             root.RegisterCallback<MouseMoveEvent>(OnRootMouseMove, TrickleDown.TrickleDown);
             root.RegisterCallback<MouseUpEvent>(OnRootMouseUp, TrickleDown.TrickleDown);
             
-            // Force initialization to ensure texture is generated immediately
+            // Initialize with low-res cache if available, full-res only on user interaction
             if (selector != null)
             {
-                if (!isInitialized)
+                // Load low-res texture from cache for immediate display
+                LoadLowResTextureFromCache();
+                
+                if (currentLowResTexture != null)
                 {
-                    // Force immediate texture generation on first load
-                    RefreshDataWithImmediteTexture();
+                    // Show cached low-res texture until user interaction
+                    shouldShowLowResUntilInteraction = true;
+                    isLoadingFromCache = true;
+                    RefreshUIFast(); // Quick UI update with low-res
                 }
                 else
                 {
-                    // Quick refresh for cached data - no heavy computation
-                    RefreshUIFast();
+                    // No cache available, generate full texture immediately
+                    RefreshDataWithImmediteTexture();
                 }
             }
             else
@@ -879,6 +888,9 @@ namespace Deform.Masking.Editor
         {
             if (selector == null) return;
             
+            // Any mouse interaction should trigger full resolution mode
+            OnUserInteraction();
+            
             var localPosition = evt.localMousePosition;
             
             if (evt.button == 0) // Left click
@@ -916,18 +928,24 @@ namespace Deform.Masking.Editor
             
             if (islandID >= 0)
             {
+                // User interaction detected - switch to full resolution mode
+                OnUserInteraction();
+                
                 Undo.RecordObject(targetMask, "Toggle UV Island Selection");
                 selector.ToggleIslandSelection(islandID);
                 targetMask.SetSelectedIslands(selector.SelectedIslandIDs);
                 EditorUtility.SetDirty(targetMask);
                 
-                // Mark texture for update when selection changes
-                textureInitialized = false;
+                // Generate full texture and update display
+                if (selector.AutoUpdatePreview)
+                {
+                    selector.GenerateUVMapTexture();
+                    RefreshUVMapImage();
+                }
                 
                 // Save low-res texture to cache after selection changes
                 SaveLowResTextureToCache();
                 
-                // Use optimized immediate refresh for better responsiveness
                 RefreshUIFast();
             }
             else
@@ -1010,6 +1028,9 @@ namespace Deform.Masking.Editor
         private void OnUVMapWheel(WheelEvent evt)
         {
             if (selector == null) return;
+            
+            // Zoom interaction should trigger full resolution mode
+            OnUserInteraction();
             
             var localPosition = evt.localMousePosition;
             var zoomPoint = LocalPosToUV(localPosition);
@@ -1365,23 +1386,18 @@ namespace Deform.Masking.Editor
                 islandListView.RefreshItems();
             }
             
-            // Only handle texture generation if not already initialized
-            if (selector != null && !textureInitialized)
+            // Only generate texture if needed and not showing low-res until interaction
+            if (selector != null && !shouldShowLowResUntilInteraction)
             {
                 if (selector.UvMapTexture == null)
                 {
-                    // Generate texture only once during initialization
                     selector.GenerateUVMapTexture();
                     textureInitialized = true;
                 }
-                RefreshUVMapImage();
             }
-            else if (selector?.AutoUpdatePreview == true)
-            {
-                // Only update texture if auto update is enabled and changes are pending
-                selector.UpdateTextureIfNeeded();
-                RefreshUVMapImage();
-            }
+            
+            // Always refresh image (may show low-res or full-res based on state)
+            RefreshUVMapImage();
             
             // Force scene repaint for selection highlighting
             SceneView.RepaintAll();
@@ -1389,20 +1405,37 @@ namespace Deform.Masking.Editor
         
         private void RefreshUVMapImage()
         {
-            if (selector?.UvMapTexture != null)
+            if (selector?.UvMapTexture != null && !shouldShowLowResUntilInteraction)
             {
+                // Show full resolution texture
                 uvMapImage.style.backgroundImage = new StyleBackground(selector.UvMapTexture);
+                ClearLowResDisplayState();
             }
-            else if (currentLowResTexture != null && isLoadingFromCache)
+            else if (currentLowResTexture != null && (isLoadingFromCache || shouldShowLowResUntilInteraction))
             {
-                // Show low-resolution cached texture while loading
+                // Show low-resolution cached texture until user interaction
                 uvMapImage.style.backgroundImage = new StyleBackground(currentLowResTexture);
+            }
+            else if (selector?.UvMapTexture != null)
+            {
+                // Fallback to full texture if low-res is not available
+                uvMapImage.style.backgroundImage = new StyleBackground(selector.UvMapTexture);
+                ClearLowResDisplayState();
             }
             else
             {
-                // Clear image if texture is not available
+                // Clear image if no texture is available
                 uvMapImage.style.backgroundImage = StyleKeyword.None;
             }
+        }
+        
+        /// <summary>
+        /// Centralized method to clear low-res display state
+        /// </summary>
+        private void ClearLowResDisplayState()
+        {
+            isLoadingFromCache = false;
+            shouldShowLowResUntilInteraction = false;
         }
         
         // Throttled immediate texture update for interactive operations
@@ -1749,44 +1782,264 @@ namespace Deform.Masking.Editor
         }
         
         /// <summary>
-        /// Load low-resolution UV texture from cache for immediate display while full texture loads
+        /// Centralized handler for user interactions that should trigger full-resolution mode
         /// </summary>
-        private void LoadLowResTextureFromCache()
+        private void OnUserInteraction()
         {
-            if (currentCacheKey != null && lowResUVCache.TryGetValue(currentCacheKey, out var cachedTexture))
+            if (shouldShowLowResUntilInteraction)
             {
-                currentLowResTexture = cachedTexture;
-                isLoadingFromCache = true;
+                shouldShowLowResUntilInteraction = false;
+                
+                // Generate full texture when user interacts
+                if (selector != null && selector.UvMapTexture == null)
+                {
+                    selector.GenerateUVMapTexture();
+                    textureInitialized = true;
+                }
+                
+                RefreshUVMapImage();
             }
         }
         
         /// <summary>
-        /// Save low-resolution UV texture to cache when selection changes
+        /// Load low-resolution UV texture from robust cache system
+        /// 堅牢なキャッシュシステムから低解像度UVテクスチャを読み込み
+        /// </summary>
+        private void LoadLowResTextureFromCache()
+        {
+            if (string.IsNullOrEmpty(currentCacheKey))
+            {
+                LogCacheOperation("LoadLowResTextureFromCache called with null cache key", isError: true);
+                return;
+            }
+            
+            try
+            {
+                currentLowResTexture = RobustUVCache.LoadTexture(currentCacheKey);
+                isLoadingFromCache = (currentLowResTexture != null && selector?.UvMapTexture == null);
+                
+                if (currentLowResTexture != null)
+                {
+                    LogCacheOperation($"Successfully loaded low-res texture for key: {currentCacheKey}");
+                }
+                else
+                {
+                    LogCacheOperation($"No cached texture found for key: {currentCacheKey}");
+                }
+                
+                // Periodic cache health check
+                CheckCacheHealth();
+            }
+            catch (System.Exception e)
+            {
+                LogCacheOperation($"Failed to load cached texture: {e.Message}", isError: true);
+                currentLowResTexture = null;
+                isLoadingFromCache = false;
+            }
+        }
+        
+        /// <summary>
+        /// Save low-resolution UV texture to robust cache system
+        /// 堅牢なキャッシュシステムに低解像度UVテクスチャを保存
         /// </summary>
         private void SaveLowResTextureToCache()
         {
-            if (currentCacheKey == null || selector == null) return;
+            if (string.IsNullOrEmpty(currentCacheKey))
+            {
+                LogCacheOperation("SaveLowResTextureToCache called with null cache key", isError: true);
+                return;
+            }
+            
+            if (selector == null)
+            {
+                LogCacheOperation("SaveLowResTextureToCache called with null selector", isError: true);
+                return;
+            }
             
             // Only create low-res cache when selection changes (color changes)
             if (selector.HasSelectedIslands)
             {
-                // Clean up existing cached texture for this key
-                if (lowResUVCache.TryGetValue(currentCacheKey, out var existingTexture))
+                try
                 {
-                    if (existingTexture != null)
+                    var lowResTexture = selector.GenerateUVMapTexture(LOW_RES_TEXTURE_SIZE, LOW_RES_TEXTURE_SIZE);
+                    if (lowResTexture != null)
                     {
-                        UnityEngine.Object.DestroyImmediate(existingTexture);
+                        bool saveSuccess = RobustUVCache.SaveTexture(currentCacheKey, lowResTexture);
+                        
+                        if (saveSuccess)
+                        {
+                            LogCacheOperation($"Successfully cached low-res texture for key: {currentCacheKey}");
+                        }
+                        else
+                        {
+                            LogCacheOperation($"Failed to cache texture for key: {currentCacheKey}", isError: true);
+                        }
+                        
+                        // Clean up temporary texture
+                        UnityEngine.Object.DestroyImmediate(lowResTexture);
+                    }
+                    else
+                    {
+                        LogCacheOperation($"Failed to generate low-res texture for key: {currentCacheKey}", isError: true);
                     }
                 }
-                
-                // Generate low-resolution texture for caching
-                var lowResTexture = selector.GenerateUVMapTexture(LOW_RES_TEXTURE_SIZE, LOW_RES_TEXTURE_SIZE);
-                if (lowResTexture != null)
+                catch (System.Exception e)
                 {
-                    lowResUVCache[currentCacheKey] = lowResTexture;
+                    LogCacheOperation($"Exception in SaveLowResTextureToCache: {e.Message}", isError: true);
+                }
+            }
+            else
+            {
+                LogCacheOperation($"No selected islands, skipping cache save for key: {currentCacheKey}");
+            }
+        }
+        
+        #region Cache Management and Health Monitoring
+        
+        /// <summary>
+        /// Log cache operations for debugging and monitoring
+        /// デバッグと監視のためのキャッシュ操作ログ
+        /// </summary>
+        private void LogCacheOperation(string message, bool isError = false)
+        {
+            var logMessage = $"[UVIslandCache] {message}";
+            
+            if (isError)
+            {
+                Debug.LogError(logMessage);
+            }
+            else
+            {
+                // Only log in debug mode to avoid spam
+                if (Debug.isDebugBuild)
+                {
+                    Debug.Log(logMessage);
                 }
             }
         }
+        
+        /// <summary>
+        /// Periodic cache health check to ensure optimal performance
+        /// 最適なパフォーマンスを確保するための定期的キャッシュヘルスチェック
+        /// </summary>
+        private void CheckCacheHealth()
+        {
+            var now = DateTime.UtcNow;
+            if ((now - lastCacheHealthCheck).TotalHours >= CACHE_HEALTH_CHECK_INTERVAL_HOURS)
+            {
+                lastCacheHealthCheck = now;
+                
+                try
+                {
+                    var stats = RobustUVCache.GetCacheStatistics();
+                    
+                    // Log performance metrics
+                    LogCacheOperation($"Cache Health Check: {stats}");
+                    
+                    // Check for performance issues
+                    if (stats.overallHitRate < 0.5f && stats.totalHitCount + stats.totalMissCount > 10)
+                    {
+                        LogCacheOperation($"Low cache hit rate detected: {stats.overallHitRate:P1} - Consider investigating cache key generation", isError: true);
+                    }
+                    
+                    if (stats.averageReadTime > 5.0f)
+                    {
+                        LogCacheOperation($"Slow cache read performance: {stats.averageReadTime:F2}ms average - Consider cache cleanup", isError: true);
+                    }
+                    
+                    // Automatic cleanup for large caches
+                    if (stats.totalSizeBytes > 100 * 1024 * 1024) // 100MB
+                    {
+                        LogCacheOperation("Cache size exceeding 100MB, scheduling cleanup...");
+                        EditorApplication.delayCall += () => RobustUVCache.CleanupCache();
+                    }
+                }
+                catch (System.Exception e)
+                {
+                    LogCacheOperation($"Cache health check failed: {e.Message}", isError: true);
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Enhanced cache key generation with null safety
+        /// Null安全性を備えた拡張キャッシュキー生成
+        /// </summary>
+        private new string GenerateCacheKey(Mesh originalMesh)
+        {
+            if (originalMesh == null) 
+            {
+                LogCacheOperation("GenerateCacheKey called with null mesh", isError: true);
+                return null;
+            }
+            
+            try
+            {
+                // Use original mesh instance ID and UV hash for cache key
+                int meshID = originalMesh.GetInstanceID();
+                int uvHash = CalculateUVHash(originalMesh.uv);
+                var key = $"{meshID}_{uvHash}";
+                
+                // Validate cache key
+                if (string.IsNullOrEmpty(key) || key.Length < 3)
+                {
+                    LogCacheOperation($"Invalid cache key generated: '{key}'", isError: true);
+                    return null;
+                }
+                
+                return key;
+            }
+            catch (System.Exception e)
+            {
+                LogCacheOperation($"Failed to generate cache key: {e.Message}", isError: true);
+                return null;
+            }
+        }
+        
+        /// <summary>
+        /// Safe UV hash calculation with proper null handling
+        /// 適切なNull処理を備えた安全なUVハッシュ計算
+        /// </summary>
+        private new int CalculateUVHash(Vector2[] uvs)
+        {
+            if (uvs == null) 
+            {
+                LogCacheOperation("CalculateUVHash called with null UV array");
+                return 0;
+            }
+            
+            if (uvs.Length == 0)
+            {
+                LogCacheOperation("CalculateUVHash called with empty UV array");
+                return 1; // Return distinct value for empty array
+            }
+            
+            try
+            {
+                unchecked
+                {
+                    int hash = 17;
+                    // Sample every 10th UV coordinate to balance performance and accuracy
+                    int step = Mathf.Max(1, uvs.Length / 100);
+                    int sampleCount = 0;
+                    
+                    for (int i = 0; i < uvs.Length && sampleCount < 100; i += step)
+                    {
+                        hash = hash * 31 + uvs[i].GetHashCode();
+                        sampleCount++;
+                    }
+                    
+                    return hash;
+                }
+            }
+            catch (System.Exception e)
+            {
+                LogCacheOperation($"Exception in CalculateUVHash: {e.Message}", isError: true);
+                return uvs.Length.GetHashCode(); // Fallback hash
+            }
+        }
+        
+        #endregion
         
     }
 }
