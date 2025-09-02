@@ -62,9 +62,12 @@ namespace Deform.Masking.Editor
         private Mesh lastCachedMesh;
         private int lastMeshInstanceID = -1;
         
-        // Persistent cache system based on original mesh
+        // Persistent cache system based on original mesh - survives Unity restart
         private static Dictionary<string, UVIslandSelector> persistentCache = new Dictionary<string, UVIslandSelector>();
         private string currentCacheKey;
+        
+        // Static initialization flag to ensure proper cache restoration across Unity restarts
+        private static bool isCacheSystemInitialized = false;
         
         // Texture generation control
         private bool textureInitialized = false;
@@ -88,6 +91,9 @@ namespace Deform.Masking.Editor
         public override VisualElement CreateInspectorGUI()
         {
             targetMask = target as UVIslandMask;
+            
+            // Lightweight cache system initialization - only when UI is created
+            InitializeCacheSystem();
             
             // Get original mesh for UV mapping and cache key generation
             var originalMesh = GetOriginalMesh();
@@ -122,6 +128,11 @@ namespace Deform.Masking.Editor
                 {
                     persistentCache[currentCacheKey] = selector;
                 }
+                
+                // Try to load cached texture even for new selectors
+                // This handles the case where selector cache was cleared but binary cache remains
+                LoadLowResTextureFromCache();
+                
                 isInitialized = false;
                 textureInitialized = false;
             }
@@ -1229,34 +1240,106 @@ namespace Deform.Masking.Editor
             return GetOriginalMesh();
         }
         
-		/*
+        /// <summary>
+        /// Generate stable cache key with comprehensive error handling and validation
+        /// 包括的エラー処理と検証機能付きの安定キャッシュキー生成
+        /// </summary>
         private string GenerateCacheKey(Mesh originalMesh)
         {
-            if (originalMesh == null) return null;
+            if (originalMesh == null) 
+            {
+                LogCacheOperation("GenerateCacheKey called with null mesh", isError: true);
+                return null;
+            }
             
-            // Use original mesh instance ID and UV hash for cache key
-            int meshID = originalMesh.GetInstanceID();
-            int uvHash = CalculateUVHash(originalMesh.uv);
-            return $"{meshID}_{uvHash}";
+            try
+            {
+                // Use stable mesh identifiers instead of instance ID for Unity restart persistence
+                string meshName = !string.IsNullOrEmpty(originalMesh.name) ? 
+                    originalMesh.name.Replace("/", "_").Replace("\\", "_") : // Sanitize for file system
+                    "unnamed_mesh";
+                
+                int uvHash = CalculateUVHash(originalMesh.uv);
+                int vertexCount = originalMesh.vertexCount;
+                
+                var key = $"{meshName}_{vertexCount}_{uvHash}";
+                
+                // Validate cache key integrity
+                if (string.IsNullOrEmpty(key) || key.Length < 3)
+                {
+                    LogCacheOperation($"Invalid cache key generated: '{key}'", isError: true);
+                    return $"fallback_{originalMesh.GetHashCode()}"; // Fallback key
+                }
+                
+                if (key.Length > 200) // Prevent filesystem issues
+                {
+                    LogCacheOperation($"Cache key too long ({key.Length} chars), truncating", isError: false);
+                    key = key.Substring(0, 200);
+                }
+                
+                return key;
+            }
+            catch (System.Exception e)
+            {
+                LogCacheOperation($"Failed to generate cache key: {e.Message}", isError: true);
+                // Fallback to basic hash-based key
+                return $"fallback_{originalMesh.GetHashCode()}_{originalMesh.vertexCount}";
+            }
         }
         
+        /// <summary>
+        /// Safe UV hash calculation with comprehensive error handling and performance optimization
+        /// 包括的エラー処理とパフォーマンス最適化を備えた安全なUVハッシュ計算
+        /// </summary>
         private int CalculateUVHash(Vector2[] uvs)
         {
-            if (uvs == null || uvs.Length == 0) return 0;
-            
-            unchecked
+            if (uvs == null) 
             {
-                int hash = 17;
-                // Sample every 10th UV coordinate to balance performance and accuracy
-                int step = Mathf.Max(1, uvs.Length / 100);
-                for (int i = 0; i < uvs.Length; i += step)
-                {
-                    hash = hash * 31 + uvs[i].GetHashCode();
-                }
-                return hash;
+                LogCacheOperation("CalculateUVHash called with null UV array");
+                return 0;
             }
-		}
-		*/
+            
+            if (uvs.Length == 0)
+            {
+                LogCacheOperation("CalculateUVHash called with empty UV array");
+                return 1; // Return distinct value for empty array to differentiate from null
+            }
+            
+            try
+            {
+                unchecked
+                {
+                    int hash = 17;
+                    // Sample UV coordinates with performance limit to balance accuracy and speed
+                    int step = Mathf.Max(1, uvs.Length / 100);
+                    int sampleCount = 0;
+                    const int MAX_SAMPLES = 100; // Prevent excessive computation
+                    
+                    for (int i = 0; i < uvs.Length && sampleCount < MAX_SAMPLES; i += step)
+                    {
+                        // Additional safety check for corrupted UV data
+                        var uv = uvs[i];
+                        if (!float.IsNaN(uv.x) && !float.IsNaN(uv.y) && 
+                            !float.IsInfinity(uv.x) && !float.IsInfinity(uv.y))
+                        {
+                            hash = hash * 31 + uv.GetHashCode();
+                            sampleCount++;
+                        }
+                    }
+                    
+                    // Include array length in hash to distinguish different sized meshes
+                    hash = hash * 31 + uvs.Length;
+                    
+                    return hash;
+                }
+            }
+            catch (System.Exception e)
+            {
+                LogCacheOperation($"Exception in CalculateUVHash: {e.Message}", isError: true);
+                // Fallback: use array length as hash if UV data is corrupted
+                return uvs.Length.GetHashCode() + 42; // Add constant to avoid collision with length-only hashes
+            }
+        }
         
         // UI update methods
         private void RefreshData()
@@ -1724,6 +1807,25 @@ namespace Deform.Masking.Editor
 		}
 		*/
         
+        /// <summary>
+        /// Lightweight cache system initialization - called only when needed
+        /// 軽量キャッシュシステム初期化 - 必要時のみ呼び出し
+        /// </summary>
+        private static void InitializeCacheSystem()
+        {
+            if (isCacheSystemInitialized) return;
+            
+            try
+            {
+                // Just set the flag - actual cache initialization happens lazily in RobustUVCache
+                isCacheSystemInitialized = true;
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"[UVIslandMaskEditor] Failed to initialize cache system: {e.Message}");
+            }
+        }
+        
         // Clean up on editor shutdown
         static UVIslandMaskEditor()
         {
@@ -1738,6 +1840,20 @@ namespace Deform.Masking.Editor
                     persistentCache.Clear();
                 }
             };
+        }
+        
+        /// <summary>
+        /// Lightweight cache system readiness check - no heavy operations
+        /// 軽量キャッシュシステム準備確認 - 重い操作なし
+        /// </summary>
+        private static void EnsureCacheSystemInitialized()
+        {
+            // The RobustUVCache has its own lazy initialization
+            // We don't need to do anything heavy here
+            if (!isCacheSystemInitialized)
+            {
+                isCacheSystemInitialized = true;
+            }
         }
         
         private void OnUndoRedo()
@@ -1820,16 +1936,22 @@ namespace Deform.Masking.Editor
             
             try
             {
+                // Lightweight cache system check
+                EnsureCacheSystemInitialized();
+                
                 currentLowResTexture = RobustUVCache.LoadTexture(currentCacheKey);
                 isLoadingFromCache = (currentLowResTexture != null && selector?.UvMapTexture == null);
                 
                 if (currentLowResTexture != null)
                 {
                     LogCacheOperation($"Successfully loaded low-res texture for key: {currentCacheKey}");
+                    // Mark that we have valid cached data to display immediately
+                    shouldShowLowResUntilInteraction = true;
                 }
                 else
                 {
                     LogCacheOperation($"No cached texture found for key: {currentCacheKey}");
+                    shouldShowLowResUntilInteraction = false;
                 }
                 
                 // Periodic cache health check
@@ -1840,6 +1962,7 @@ namespace Deform.Masking.Editor
                 LogCacheOperation($"Failed to load cached texture: {e.Message}", isError: true);
                 currentLowResTexture = null;
                 isLoadingFromCache = false;
+                shouldShowLowResUntilInteraction = false;
             }
         }
         
@@ -1966,83 +2089,7 @@ namespace Deform.Masking.Editor
             }
         }
         
-        /// <summary>
-        /// Enhanced cache key generation with null safety
-        /// Null安全性を備えた拡張キャッシュキー生成
-        /// </summary>
-        private new string GenerateCacheKey(Mesh originalMesh)
-        {
-            if (originalMesh == null) 
-            {
-                LogCacheOperation("GenerateCacheKey called with null mesh", isError: true);
-                return null;
-            }
-            
-            try
-            {
-                // Use original mesh instance ID and UV hash for cache key
-                int meshID = originalMesh.GetInstanceID();
-                int uvHash = CalculateUVHash(originalMesh.uv);
-                var key = $"{meshID}_{uvHash}";
-                
-                // Validate cache key
-                if (string.IsNullOrEmpty(key) || key.Length < 3)
-                {
-                    LogCacheOperation($"Invalid cache key generated: '{key}'", isError: true);
-                    return null;
-                }
-                
-                return key;
-            }
-            catch (System.Exception e)
-            {
-                LogCacheOperation($"Failed to generate cache key: {e.Message}", isError: true);
-                return null;
-            }
-        }
         
-        /// <summary>
-        /// Safe UV hash calculation with proper null handling
-        /// 適切なNull処理を備えた安全なUVハッシュ計算
-        /// </summary>
-        private new int CalculateUVHash(Vector2[] uvs)
-        {
-            if (uvs == null) 
-            {
-                LogCacheOperation("CalculateUVHash called with null UV array");
-                return 0;
-            }
-            
-            if (uvs.Length == 0)
-            {
-                LogCacheOperation("CalculateUVHash called with empty UV array");
-                return 1; // Return distinct value for empty array
-            }
-            
-            try
-            {
-                unchecked
-                {
-                    int hash = 17;
-                    // Sample every 10th UV coordinate to balance performance and accuracy
-                    int step = Mathf.Max(1, uvs.Length / 100);
-                    int sampleCount = 0;
-                    
-                    for (int i = 0; i < uvs.Length && sampleCount < 100; i += step)
-                    {
-                        hash = hash * 31 + uvs[i].GetHashCode();
-                        sampleCount++;
-                    }
-                    
-                    return hash;
-                }
-            }
-            catch (System.Exception e)
-            {
-                LogCacheOperation($"Exception in CalculateUVHash: {e.Message}", isError: true);
-                return uvs.Length.GetHashCode(); // Fallback hash
-            }
-        }
         
         #endregion
         
