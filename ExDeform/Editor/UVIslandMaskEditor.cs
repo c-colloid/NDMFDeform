@@ -62,8 +62,9 @@ namespace ExDeform.Editor
         private Mesh lastCachedMesh;
         private int lastMeshInstanceID = -1;
         
-        // Cache service integration
+        // Service integration
         private readonly IEditorCacheService cacheService = EditorCacheService.Instance;
+        private readonly IUIBuilderService uiBuilderService = new UIBuilderService();
         private string currentCacheKey;
         
         // Static tracking to prevent multiple editor instances for same target
@@ -169,14 +170,7 @@ namespace ExDeform.Editor
             root.style.paddingLeft = 10;
             root.style.paddingRight = 10;
             
-            CreateLanguageSelector();
-            CreateHeader();
-            CreateMaskSettings();
-            CreateDisplaySettings();
-            CreateUVMapArea();
-            CreateIslandList();
-            CreateControlButtons();
-            CreateStatusArea();
+            CreateUIWithService();
             
             // Register global mouse events
             root.RegisterCallback<MouseMoveEvent>(OnRootMouseMove, TrickleDown.TrickleDown);
@@ -213,507 +207,186 @@ namespace ExDeform.Editor
             return root;
         }
         
-        private void CreateLanguageSelector()
+        private void CreateUIWithService()
         {
-            var languageContainer = new VisualElement
+            // Create language selector using service
+            var languageSelector = uiBuilderService.CreateLanguageSelector(OnLanguageChanged);
+            root.Add(languageSelector);
+            
+            // Create header using service
+            var header = uiBuilderService.CreateHeader();
+            root.Add(header);
+            
+            // Create mask settings using service
+            var maskSettings = uiBuilderService.CreateMaskSettings(targetMask);
+            root.Add(maskSettings);
+            
+            // Create display settings using service
+            var displaySettings = uiBuilderService.CreateDisplaySettings(selector);
+            root.Add(displaySettings);
+            
+            // Create UV map area using service
+            var uvMapConfig = new UVMapConfig
             {
-                style = { 
-                    flexDirection = FlexDirection.Row,
-                    alignItems = Align.Center,
-                    marginBottom = 10,
-                    paddingTop = 5,
-                    paddingBottom = 5,
-                    backgroundColor = new Color(0.3f, 0.3f, 0.4f, 0.2f)
-                }
+                MapSize = UV_MAP_SIZE,
+                Selector = selector,
+                MouseHandlers = CreateMouseHandlers()
             };
+            var uvMapComponents = uiBuilderService.CreateUVMapArea(uvMapConfig);
             
-            var languageLabel = new Label("Language / 言語:");
-            languageLabel.style.marginRight = 10;
-            languageLabel.style.fontSize = 11;
+            // Store references to important UI components
+            uvMapContainer = uvMapComponents.Container;
+            uvMapImage = uvMapComponents.ImageElement;
+            autoUpdateToggle = uvMapComponents.AutoUpdateToggle;
+            zoomSlider = uvMapComponents.ZoomSlider;
+            resetZoomButton = uvMapComponents.ResetZoomButton;
+            magnifyingToggle = uvMapComponents.MagnifyingToggle;
+            magnifyingSizeSlider = uvMapComponents.MagnifyingSizeSlider;
             
-            languageField = new EnumField(UVIslandLocalization.CurrentLanguage);
-            languageField.style.width = 100;
-            languageField.RegisterValueChangedCallback(evt =>
+            root.Add(uvMapComponents.Container);
+            
+            // Create overlays using service
+            rangeSelectionOverlay = uiBuilderService.CreateRangeSelectionOverlay();
+            var magnifyingComponents = uiBuilderService.CreateMagnifyingGlassOverlay();
+            magnifyingGlassOverlay = magnifyingComponents.Overlay;
+            magnifyingGlassImage = magnifyingComponents.ImageElement;
+            magnifyingGlassLabel = magnifyingComponents.InfoLabel;
+            
+            // Add overlays to UV map container (find the actual container with the image)
+            var actualUVContainer = FindUVMapImageContainer(uvMapComponents.Container);
+            if (actualUVContainer != null)
             {
-                UVIslandLocalization.CurrentLanguage = (UVIslandLocalization.Language)evt.newValue;
-                RefreshUIText();
-            });
+                actualUVContainer.Add(rangeSelectionOverlay);
+                actualUVContainer.Add(magnifyingGlassOverlay);
+            }
             
-            languageContainer.Add(languageLabel);
-            languageContainer.Add(languageField);
-            root.Add(languageContainer);
-        }
-        
-        private void CreateHeader()
-        {
-            var headerLabel = new Label(UVIslandLocalization.Get("header_selection"))
+            // Create island list using service
+            var listConfig = new IslandListConfig
+            {
+                MakeItem = CreateIslandListItem,
+                BindItem = BindIslandListItem,
+                OnSelectionChanged = OnIslandListSelectionChanged,
+                Height = 120
+            };
+            islandListView = uiBuilderService.CreateIslandList(listConfig);
+            
+            var listLabel = new Label("UV Islands")
             {
                 style = {
-                    fontSize = 16,
+                    fontSize = 14,
                     unityFontStyleAndWeight = FontStyle.Bold,
-                    marginBottom = 10
-                }
-            };
-            root.Add(headerLabel);
-            
-            var description = new Label("UV Island based mask for mesh deformation")
-            {
-                style = {
-                    fontSize = 11,
-                    color = Color.gray,
-                    marginBottom = 15,
-                    whiteSpace = WhiteSpace.Normal
-                }
-            };
-            root.Add(description);
-        }
-        
-        private void CreateMaskSettings()
-        {
-            var maskContainer = CreateSection("Mask Settings / マスク設定");
-            
-            // Invert mask toggle
-            var invertMaskToggle = new Toggle("Invert Mask / マスク反転")
-            {
-                value = targetMask.InvertMask
-            };
-            invertMaskToggle.tooltip = "反転したマスクを適用します";
-            invertMaskToggle.RegisterValueChangedCallback(evt =>
-            {
-                Undo.RecordObject(targetMask, "Toggle Invert Mask");
-                targetMask.InvertMask = evt.newValue;
-                EditorUtility.SetDirty(targetMask);
-            });
-            
-            // Mask strength slider
-            var maskStrengthSlider = new Slider("Mask Strength / マスク強度", 0f, 1f)
-            {
-                value = targetMask.MaskStrength
-            };
-            maskStrengthSlider.tooltip = "マスクの強度を調整します (0 = 効果なし, 1 = 完全なマスク)";
-            maskStrengthSlider.RegisterValueChangedCallback(evt =>
-            {
-                Undo.RecordObject(targetMask, "Change Mask Strength");
-                targetMask.MaskStrength = evt.newValue;
-                EditorUtility.SetDirty(targetMask);
-            });
-            
-            maskContainer.Add(invertMaskToggle);
-            maskContainer.Add(maskStrengthSlider);
-            root.Add(maskContainer);
-        }
-        
-        private void CreateDisplaySettings()
-        {
-            var settingsContainer = CreateSection(UVIslandLocalization.Get("header_display"));
-            
-            // Adaptive vertex size
-            adaptiveVertexSizeToggle = new Toggle()
-            {
-                value = selector?.UseAdaptiveVertexSize ?? true
-            };
-            SetLocalizedContent(adaptiveVertexSizeToggle, "adaptive_vertex_size", "tooltip_adaptive_size");
-            adaptiveVertexSizeToggle.RegisterValueChangedCallback(evt =>
-            {
-                if (selector != null)
-                {
-                    selector.UseAdaptiveVertexSize = evt.newValue;
-                    vertexSizeSlider.SetEnabled(!evt.newValue);
-                    adaptiveMultiplierSlider.SetEnabled(evt.newValue);
-                    SceneView.RepaintAll();
-                }
-            });
-            
-            // Manual vertex size
-            vertexSizeSlider = new Slider("", 0.001f, 0.1f)
-            {
-                value = selector?.ManualVertexSphereSize ?? 0.01f
-            };
-            SetLocalizedContent(vertexSizeSlider, "manual_vertex_size", "tooltip_manual_size");
-            vertexSizeSlider.RegisterValueChangedCallback(evt =>
-            {
-                if (selector != null)
-                {
-                    selector.ManualVertexSphereSize = evt.newValue;
-                    SceneView.RepaintAll();
-                }
-            });
-            
-            // Adaptive multiplier
-            adaptiveMultiplierSlider = new Slider("", 0.001f, 0.02f)
-            {
-                value = selector?.AdaptiveSizeMultiplier ?? 0.007f
-            };
-            SetLocalizedContent(adaptiveMultiplierSlider, "size_multiplier", "tooltip_size_multiplier");
-            adaptiveMultiplierSlider.RegisterValueChangedCallback(evt =>
-            {
-                if (selector != null)
-                {
-                    selector.AdaptiveSizeMultiplier = evt.newValue;
-                    SceneView.RepaintAll();
-                }
-            });
-            
-            settingsContainer.Add(adaptiveVertexSizeToggle);
-            settingsContainer.Add(vertexSizeSlider);
-            settingsContainer.Add(adaptiveMultiplierSlider);
-            root.Add(settingsContainer);
-        }
-        
-        private void CreateUVMapArea()
-        {
-            var uvMapLabel = new Label();
-            SetLocalizedContent(uvMapLabel, "header_preview");
-            uvMapLabel.style.fontSize = 14;
-            uvMapLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
-            uvMapLabel.style.marginBottom = 5;
-            root.Add(uvMapLabel);
-            
-            // UV map preview settings
-            var previewSettings = new VisualElement
-            {
-                style = { 
-                    flexDirection = FlexDirection.Row,
-                    alignItems = Align.Center,
                     marginBottom = 5
                 }
             };
-            
-            autoUpdateToggle = new Toggle()
-            {
-                value = selector?.AutoUpdatePreview ?? true
-            };
-            SetLocalizedContent(autoUpdateToggle, "auto_update", "tooltip_auto_update");
-            autoUpdateToggle.RegisterValueChangedCallback(evt =>
-            {
-                if (selector != null)
-                {
-                    selector.AutoUpdatePreview = evt.newValue;
-                    if (evt.newValue)
-                    {
-                        RefreshUVMapImage();
-                    }
-                }
-            });
-            
-            var zoomContainer = new VisualElement 
-            { 
-                style = { 
-                    flexDirection = FlexDirection.Row,
-                    alignItems = Align.Center,
-                    marginLeft = 15
-                } 
-            };
-            
-            zoomSlider = new Slider("", 1f, 8f)
-            {
-                value = selector?.UvMapZoom ?? 1f,
-                style = { flexGrow = 1, marginRight = 10, width = 100 }
-            };
-            SetLocalizedContent(zoomSlider, "zoom_level", "tooltip_zoom");
-            zoomSlider.RegisterValueChangedCallback(evt =>
-            {
-                if (selector != null)
-                {
-                    selector.SetZoomLevel(evt.newValue);
-                    if (selector.AutoUpdatePreview)
-                    {
-                        UpdateTextureWithThrottle(); // Immediate feedback with throttling
-                    }
-                }
-            });
-            
-            resetZoomButton = new Button(() => 
-            {
-                if (selector != null)
-                {
-                    selector.ResetViewTransform();
-                    zoomSlider.value = 1f;
-                    if (selector.AutoUpdatePreview)
-                    {
-                        selector.GenerateUVMapTexture(); // Immediate update for reset button
-                        RefreshUVMapImage();
-                    }
-                }
-            })
-            {
-                style = { width = 50 }
-            };
-            SetLocalizedContent(resetZoomButton, "reset");
-            
-            zoomContainer.Add(zoomSlider);
-            zoomContainer.Add(resetZoomButton);
-            
-            previewSettings.Add(autoUpdateToggle);
-            previewSettings.Add(zoomContainer);
-            root.Add(previewSettings);
-            
-            // Magnifying glass settings
-            var magnifyingSettings = new VisualElement
-            {
-                style = { 
-                    flexDirection = FlexDirection.Row,
-                    alignItems = Align.Center,
-                    marginBottom = 5
-                }
-            };
-            
-            magnifyingToggle = new Toggle()
-            {
-                value = selector?.EnableMagnifyingGlass ?? true
-            };
-            SetLocalizedContent(magnifyingToggle, "magnifying_glass", "tooltip_magnifying");
-            magnifyingToggle.RegisterValueChangedCallback(evt =>
-            {
-                if (selector != null)
-                {
-                    selector.EnableMagnifyingGlass = evt.newValue;
-                    magnifyingSizeSlider.SetEnabled(evt.newValue);
-                }
-            });
-            
-            var magnifyingContainer = new VisualElement 
-            { 
-                style = { 
-                    flexDirection = FlexDirection.Row,
-                    alignItems = Align.Center,
-                    marginLeft = 15
-                } 
-            };
-            
-            // Replace slider with buttons for x2, x4, x8, x16 zoom
-            var zoomButtonContainer = new VisualElement 
-            { 
-                style = { 
-                    flexDirection = FlexDirection.Row,
-                    alignItems = Align.Center
-                } 
-            };
-            
-            var zoom2xButton = new Button(() => SetMagnifyingZoom(2f)) { text = "x2" };
-            var zoom4xButton = new Button(() => SetMagnifyingZoom(4f)) { text = "x4" };
-            var zoom8xButton = new Button(() => SetMagnifyingZoom(8f)) { text = "x8" };
-            var zoom16xButton = new Button(() => SetMagnifyingZoom(16f)) { text = "x16" };
-            
-            zoom2xButton.style.marginRight = 2;
-            zoom4xButton.style.marginRight = 2;
-            zoom8xButton.style.marginRight = 2;
-            zoom16xButton.style.marginRight = 2;
-            
-            zoomButtonContainer.Add(zoom2xButton);
-            zoomButtonContainer.Add(zoom4xButton);
-            zoomButtonContainer.Add(zoom8xButton);
-            zoomButtonContainer.Add(zoom16xButton);
-            
-            magnifyingSizeSlider = new Slider("", 80f, 150f)
-            {
-                value = selector?.MagnifyingGlassSize ?? 100f,
-                style = { flexGrow = 1, marginRight = 10, width = 80 }
-            };
-            SetLocalizedContent(magnifyingSizeSlider, "magnifying_size", "tooltip_magnifying_size");
-            magnifyingSizeSlider.RegisterValueChangedCallback(evt =>
-            {
-                if (selector != null)
-                {
-                    selector.MagnifyingGlassSize = evt.newValue;
-                }
-            });
-            
-            magnifyingContainer.Add(zoomButtonContainer);
-            magnifyingContainer.Add(magnifyingSizeSlider);
-            magnifyingSettings.Add(magnifyingToggle);
-            magnifyingSettings.Add(magnifyingContainer);
-            root.Add(magnifyingSettings);
-            
-            // UV map container
-            uvMapContainer = new VisualElement
-            {
-                style = {
-                    width = UV_MAP_SIZE,
-                    height = UV_MAP_SIZE,
-                    backgroundColor = Color.white,
-                    borderBottomColor = Color.gray,
-                    borderBottomWidth = 1,
-                    borderTopColor = Color.gray,
-                    borderTopWidth = 1,
-                    borderLeftColor = Color.gray,
-                    borderLeftWidth = 1,
-                    borderRightColor = Color.gray,
-                    borderRightWidth = 1,
-                    marginBottom = 15,
-                    alignSelf = Align.Center
-                }
-            };
-            
-            uvMapImage = new VisualElement
-            {
-                style = {
-                    width = UV_MAP_SIZE,
-                    height = UV_MAP_SIZE,
-                    backgroundImage = null
-                }
-            };
-            
-            // Register mouse events
-            uvMapImage.RegisterCallback<MouseDownEvent>(OnUVMapMouseDown, TrickleDown.TrickleDown);
-            uvMapImage.RegisterCallback<MouseMoveEvent>(OnUVMapMouseMove, TrickleDown.TrickleDown);
-            uvMapImage.RegisterCallback<MouseUpEvent>(OnUVMapMouseUp, TrickleDown.TrickleDown);
-            uvMapImage.RegisterCallback<WheelEvent>(OnUVMapWheel, TrickleDown.TrickleDown);
-            
-            uvMapContainer.RegisterCallback<MouseMoveEvent>(OnUVMapContainerMouseMove, TrickleDown.TrickleDown);
-            uvMapContainer.RegisterCallback<MouseUpEvent>(OnUVMapContainerMouseUp, TrickleDown.TrickleDown);
-            
-            SetLocalizedTooltip(uvMapImage, "controls_uv_map");
-            
-            uvMapContainer.Add(uvMapImage);
-            
-            // Create overlays
-            CreateRangeSelectionOverlay();
-            CreateMagnifyingGlassOverlay();
-            
-            uvMapContainer.Add(rangeSelectionOverlay);
-            uvMapContainer.Add(magnifyingGlassOverlay);
-            
-            root.Add(uvMapContainer);
-        }
-        
-        private void CreateRangeSelectionOverlay()
-        {
-            rangeSelectionOverlay = new VisualElement
-            {
-                style = {
-                    position = Position.Absolute,
-                    left = 0,
-                    top = 0,
-                    right = 0,
-                    bottom = 0,
-                    backgroundColor = new Color(0.3f, 0.5f, 0.8f, 0.3f),
-                    borderLeftColor = new Color(0.3f, 0.5f, 0.8f, 0.8f),
-                    borderRightColor = new Color(0.3f, 0.5f, 0.8f, 0.8f),
-                    borderTopColor = new Color(0.3f, 0.5f, 0.8f, 0.8f),
-                    borderBottomColor = new Color(0.3f, 0.5f, 0.8f, 0.8f),
-                    borderLeftWidth = 2,
-                    borderRightWidth = 2,
-                    borderTopWidth = 2,
-                    borderBottomWidth = 2,
-                    display = DisplayStyle.None
-                }
-            };
-        }
-        
-        private void CreateMagnifyingGlassOverlay()
-        {
-            magnifyingGlassOverlay = new VisualElement
-            {
-                style = {
-                    position = Position.Absolute,
-                    width = 120,
-                    height = 140,
-                    backgroundColor = new Color(0.2f, 0.2f, 0.2f, 0.95f),
-                    borderLeftColor = Color.white,
-                    borderRightColor = Color.white,
-                    borderTopColor = Color.white,
-                    borderBottomColor = Color.white,
-                    borderLeftWidth = 2,
-                    borderRightWidth = 2,
-                    borderTopWidth = 2,
-                    borderBottomWidth = 2,
-                    borderTopLeftRadius = 8,
-                    borderTopRightRadius = 8,
-                    borderBottomLeftRadius = 8,
-                    borderBottomRightRadius = 8,
-                    display = DisplayStyle.None,
-                    paddingTop = 5,
-                    paddingBottom = 5,
-                    paddingLeft = 5,
-                    paddingRight = 5
-                }
-            };
-            
-            magnifyingGlassLabel = new Label
-            {
-                style = {
-                    fontSize = 10,
-                    color = Color.white,
-                    unityTextAlign = TextAnchor.MiddleCenter,
-                    height = 15,
-                    marginBottom = 3
-                }
-            };
-            
-            magnifyingGlassImage = new VisualElement
-            {
-                style = {
-                    flexGrow = 1,
-                    backgroundColor = Color.black,
-                    position = Position.Relative
-                }
-            };
-            
-            CreateMagnifyingGlassReticle();
-            
-            magnifyingGlassOverlay.Add(magnifyingGlassLabel);
-            magnifyingGlassOverlay.Add(magnifyingGlassImage);
-        }
-        
-        private void CreateMagnifyingGlassReticle()
-        {
-            // Vertical line
-            var verticalLine = new VisualElement
-            {
-                style = {
-                    position = Position.Absolute,
-                    left = new StyleLength(new Length(50, LengthUnit.Percent)),
-                    top = new StyleLength(new Length(20, LengthUnit.Percent)),
-                    bottom = new StyleLength(new Length(20, LengthUnit.Percent)),
-                    width = 2,
-                    backgroundColor = Color.red,
-                    marginLeft = -1
-                }
-            };
-            
-            // Horizontal line
-            var horizontalLine = new VisualElement
-            {
-                style = {
-                    position = Position.Absolute,
-                    top = new StyleLength(new Length(50, LengthUnit.Percent)),
-                    left = new StyleLength(new Length(20, LengthUnit.Percent)),
-                    right = new StyleLength(new Length(20, LengthUnit.Percent)),
-                    height = 2,
-                    backgroundColor = Color.red,
-                    marginTop = -1
-                }
-            };
-            
-            magnifyingGlassImage.Add(verticalLine);
-            magnifyingGlassImage.Add(horizontalLine);
-        }
-        
-        private void CreateIslandList()
-        {
-            var listLabel = new Label("UV Islands");
-            listLabel.style.fontSize = 14;
-            listLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
-            listLabel.style.marginBottom = 5;
             root.Add(listLabel);
-            
-            islandListView = new ListView
-            {
-                style = {
-                    height = 120,
-                    marginBottom = 10
-                },
-                selectionType = SelectionType.Multiple,
-                reorderable = false
-            };
-            
-            islandListView.makeItem = () => CreateIslandListItem();
-            islandListView.bindItem = (element, index) => BindIslandListItem(element, index);
-            islandListView.onSelectionChange += OnIslandListSelectionChanged;
-            
             root.Add(islandListView);
+            
+            // Create control buttons using service
+            var controlButtons = uiBuilderService.CreateControlButtons(RefreshData, ClearSelection);
+            root.Add(controlButtons);
+            
+            // Create status area using service
+            var statusComponents = uiBuilderService.CreateStatusArea();
+            statusLabel = statusComponents.statusLabel;
+            root.Add(statusComponents.container);
+            
+            // Setup additional event handlers
+            SetupAdditionalEventHandlers();
         }
+        
+        private void OnLanguageChanged(UVIslandLocalization.Language newLanguage)
+        {
+            RefreshUIText();
+        }
+        
+        private UVMapMouseHandlers CreateMouseHandlers()
+        {
+            return new UVMapMouseHandlers
+            {
+                OnMouseDown = OnUVMapMouseDown,
+                OnMouseMove = OnUVMapMouseMove,
+                OnMouseUp = OnUVMapMouseUp,
+                OnWheel = OnUVMapWheel,
+                OnContainerMouseMove = OnUVMapContainerMouseMove,
+                OnContainerMouseUp = OnUVMapContainerMouseUp
+            };
+        }
+        
+        private VisualElement FindUVMapImageContainer(VisualElement uvMapArea)
+        {
+            // Find the actual UV map container that contains the image element
+            // This is a simplified approach - in a real implementation, you might want to
+            // structure this differently or use userData/names to identify elements
+            return uvMapArea.Q<VisualElement>(null, \"uv-map-container\") ?? 
+                   uvMapArea.Children().FirstOrDefault(child => 
+                       child.style.backgroundColor.value.Equals(Color.white) &&
+                       child.style.borderBottomWidth.value.value > 0);
+        }
+        
+        private void SetupAdditionalEventHandlers()
+        {
+            // Register global mouse events
+            root.RegisterCallback<MouseMoveEvent>(OnRootMouseMove, TrickleDown.TrickleDown);
+            root.RegisterCallback<MouseUpEvent>(OnRootMouseUp, TrickleDown.TrickleDown);
+            
+            // Setup zoom slider callback
+            if (zoomSlider != null)
+            {
+                zoomSlider.RegisterValueChangedCallback(evt =>
+                {
+                    if (selector != null)
+                    {
+                        selector.SetZoomLevel(evt.newValue);
+                        if (selector.AutoUpdatePreview)
+                        {
+                            UpdateTextureWithThrottle(); // Immediate feedback with throttling
+                        }
+                    }
+                });
+            }
+            
+            // Setup reset zoom button callback
+            if (resetZoomButton != null)
+            {
+                resetZoomButton.clicked += () => 
+                {
+                    if (selector != null)
+                    {
+                        selector.ResetViewTransform();
+                        if (zoomSlider != null) zoomSlider.value = 1f;
+                        if (selector.AutoUpdatePreview)
+                        {
+                            selector.GenerateUVMapTexture(); // Immediate update for reset button
+                            RefreshUVMapImage();
+                        }
+                    }
+                };
+            }
+            
+            // Setup auto update toggle callback
+            if (autoUpdateToggle != null)
+            {
+                autoUpdateToggle.RegisterValueChangedCallback(evt =>
+                {
+                    if (selector != null)
+                    {
+                        selector.AutoUpdatePreview = evt.newValue;
+                        if (evt.newValue)
+                        {
+                            RefreshUVMapImage();
+                        }
+                    }
+                });
+            }
+        }
+        
+        
+        
+        
+        
+        
+        
+        
         
         private VisualElement CreateIslandListItem()
         {
@@ -804,79 +477,8 @@ namespace ExDeform.Editor
             }
         }
         
-        private void CreateControlButtons()
-        {
-            var buttonContainer = new VisualElement
-            {
-                style = {
-                    flexDirection = FlexDirection.Row,
-                    marginBottom = 10
-                }
-            };
-            
-            refreshButton = new Button(() => RefreshData())
-            {
-                style = {
-                    flexGrow = 1,
-                    marginRight = 5
-                }
-            };
-            SetLocalizedContent(refreshButton, "refresh");
-            
-            clearSelectionButton = new Button(() => ClearSelection())
-            {
-                style = {
-                    flexGrow = 1,
-                    marginLeft = 5
-                }
-            };
-            SetLocalizedContent(clearSelectionButton, "clear_selection");
-            
-            buttonContainer.Add(refreshButton);
-            buttonContainer.Add(clearSelectionButton);
-            root.Add(buttonContainer);
-            
-        }
         
-        private void CreateStatusArea()
-        {
-            statusLabel = new Label(UVIslandLocalization.Get("status_ready"))
-            {
-                style = {
-                    fontSize = 11,
-                    color = Color.gray,
-                    marginTop = 10
-                }
-            };
-            root.Add(statusLabel);
-        }
         
-        private VisualElement CreateSection(string title)
-        {
-            var section = new VisualElement
-            {
-                style = {
-                    backgroundColor = new Color(0.2f, 0.2f, 0.3f, 0.3f),
-                    paddingTop = 10,
-                    paddingBottom = 10,
-                    paddingLeft = 10,
-                    paddingRight = 10,
-                    marginBottom = 15
-                }
-            };
-            
-            var titleLabel = new Label(title)
-            {
-                style = {
-                    fontSize = 14,
-                    unityFontStyleAndWeight = FontStyle.Bold,
-                    marginBottom = 10
-                }
-            };
-            section.Add(titleLabel);
-            
-            return section;
-        }
         
         private void SetLocalizedContent(VisualElement element, string textKey, string tooltipKey = null)
         {
