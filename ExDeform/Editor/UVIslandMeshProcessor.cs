@@ -1,5 +1,10 @@
 using UnityEngine;
 using UnityEditor;
+using ExDeform.Runtime.Deformers;
+
+#if EXDEFORM_DEFORM_AVAILABLE
+using Deform;
+#endif
 
 namespace ExDeform.Editor
 {

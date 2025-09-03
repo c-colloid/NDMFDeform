@@ -4,6 +4,13 @@ using UnityEditor;
 using UnityEditor.UIElements;
 using ExDeform.Runtime.Data;
 using ExDeform.Runtime.Cache.Interfaces;
+using ExDeform.Runtime.Deformers;
+using IslandSelector = ExDeform.Editor.UVIslandSelector;
+using UVMapRenderer = ExDeform.Editor.UVTextureRenderer;
+
+#if EXDEFORM_DEFORM_AVAILABLE
+using Deform;
+#endif
 
 namespace ExDeform.Editor.Inspector
 {

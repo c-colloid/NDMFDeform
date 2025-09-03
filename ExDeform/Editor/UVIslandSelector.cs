@@ -2,6 +2,7 @@
 using UnityEngine;
 using UnityEditor;
 using System.Linq;
+using ExDeform.Runtime;
 
 namespace ExDeform.Editor
 {

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using ExDeform.Runtime.Data;
+using ExDeform.Runtime.Cache;
 
 namespace ExDeform.Editor
 {

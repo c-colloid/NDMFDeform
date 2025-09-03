@@ -3,6 +3,7 @@
     "rootNamespace": "ExDeform.Editor",
     "references": [
         "ExDeform.Runtime",
+        "ExDeform.UVMask.Runtime",
         "Unity.Burst",
         "Unity.Collections",
         "Unity.Mathematics"

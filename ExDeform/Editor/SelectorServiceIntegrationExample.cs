@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEditor;
+using ExDeform.Runtime.Deformers;
 
 namespace ExDeform.Editor
 {

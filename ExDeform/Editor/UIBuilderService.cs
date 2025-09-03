@@ -3,6 +3,7 @@ using UnityEngine;
 using UnityEngine.UIElements;
 using UnityEditor;
 using UnityEditor.UIElements;
+using ExDeform.Runtime.Deformers;
 
 namespace ExDeform.Editor
 {

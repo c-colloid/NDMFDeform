@@ -144,6 +144,49 @@ namespace ExDeform.Editor
             }
         }
 
+        // IUVCache implementation
+        public bool CacheUVData(string meshKey, Texture2D uvTexture, UVIslandData[] islandData, int[] selectedIslands)
+        {
+            // Simple implementation - just refresh the cache
+            RefreshCache();
+            return isValid;
+        }
+
+        public UVCacheData LoadUVData(string meshKey)
+        {
+            return new UVCacheData
+            {
+                uvTexture = null, // Not stored in this simple implementation
+                islands = new UVIslandData[0],
+                selectedIslandIDs = new int[0],
+                meshHash = targetMesh?.GetInstanceID() ?? 0,
+                timestamp = DateTime.Now.Ticks
+            };
+        }
+
+        public Texture2D GetPreviewTexture(string meshKey, int resolution = 128)
+        {
+            return null; // Not implemented in this simple cache
+        }
+
+        public bool IsValidCache(string meshKey, int meshHash)
+        {
+            return isValid && targetMesh != null && targetMesh.GetInstanceID() == meshHash;
+        }
+
+        public void InvalidateCache(string meshKey)
+        {
+            InvalidateCache();
+        }
+
+        public void OptimizeMemoryUsage()
+        {
+            if (!isValid)
+            {
+                cachedUVs = null;
+            }
+        }
+
         public void Dispose()
         {
             InvalidateCache();

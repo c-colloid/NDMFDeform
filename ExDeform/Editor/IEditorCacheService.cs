@@ -39,7 +39,7 @@ namespace ExDeform.Editor
         /// Invalidate all cache entries matching a pattern
         /// </summary>
         /// <param name="keyPattern">Pattern to match cache keys (supports wildcards)</param>
-        void InvalidateCache(string keyPattern);
+        void InvalidateCachePattern(string keyPattern);
 
         /// <summary>
         /// Clear all cached data

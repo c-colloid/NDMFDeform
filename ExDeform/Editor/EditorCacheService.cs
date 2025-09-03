@@ -150,7 +150,7 @@ namespace ExDeform.Editor
         /// <summary>
         /// Invalidate all cache entries matching a pattern
         /// </summary>
-        public void InvalidateCache(string keyPattern)
+        public void InvalidateCachePattern(string keyPattern)
         {
             if (string.IsNullOrEmpty(keyPattern))
             {

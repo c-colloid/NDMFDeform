@@ -5,6 +5,7 @@ using UnityEditor;
 using UnityEditor.UIElements;
 using System.Linq;
 using System.Collections.Generic;
+using ExDeform.Runtime.Deformers;
 
 namespace ExDeform.Editor
 {
