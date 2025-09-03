@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace Deform.Masking.Editor
+namespace ExDeform.Editor
 {
     /// <summary>
     /// Helper class for rendering UV textures and drawing operations

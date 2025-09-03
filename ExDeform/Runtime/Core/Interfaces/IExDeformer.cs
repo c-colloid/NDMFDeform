@@ -1,7 +1,7 @@
 using Unity.Jobs;
 using UnityEngine;
 
-namespace ExDeform.Core.Interfaces
+namespace ExDeform.Runtime.Core.Interfaces
 {
     /// <summary>
     /// ExDeform拡張Deformer統一インターフェース

@@ -2,10 +2,10 @@ using UnityEngine;
 using UnityEngine.UIElements;
 using UnityEditor;
 using UnityEditor.UIElements;
-using Deform.Masking.Data;
-using Deform.Masking.Cache.Interfaces;
+using ExDeform.Runtime.Data;
+using ExDeform.Runtime.Cache.Interfaces;
 
-namespace Deform.Masking.Editor.Inspector
+namespace ExDeform.Editor.Inspector
 {
     /// <summary>
     /// UVIslandMask専用インスペクターUI

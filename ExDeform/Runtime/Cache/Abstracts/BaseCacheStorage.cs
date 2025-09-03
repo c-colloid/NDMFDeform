@@ -1,9 +1,9 @@
 using System;
 using UnityEngine;
-using Deform.Masking.Core.Interfaces;
-using Deform.Masking.Core.Constants;
+using ExDeform.Runtime.Core.Interfaces;
+using ExDeform.Runtime.Core.Constants;
 
-namespace Deform.Masking.Cache.Abstracts
+namespace ExDeform.Runtime.Cache.Abstracts
 {
     /// <summary>
     /// キャッシュストレージの基底クラス

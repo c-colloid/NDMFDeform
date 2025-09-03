@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 using Unity.Jobs;
-using ExDeform.Core.Interfaces;
+using ExDeform.Runtime.Core.Interfaces;
 
-namespace ExDeform.Core.Extensions
+namespace ExDeform.Runtime.Core.Extensions
 {
     /// <summary>
     /// 外部Deform拡張との統合を行う拡張メソッド群

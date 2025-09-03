@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace ExDeform.Core.Interfaces
+namespace ExDeform.Runtime.Core.Interfaces
 {
     /// <summary>
     /// キャッシュストレージの統一インターフェース

@@ -4,8 +4,9 @@ using Unity.Jobs;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Mathematics;
+using ExDeform.Runtime.Data;
 
-namespace Deform.Masking
+namespace ExDeform.Runtime
 {
     /// <summary>
     /// UV Island based mask for deformation

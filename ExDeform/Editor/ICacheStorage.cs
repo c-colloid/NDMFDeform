@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace Deform.Masking.Editor
+namespace ExDeform.Editor
 {
     /// <summary>
     /// Common interface for all caching implementations

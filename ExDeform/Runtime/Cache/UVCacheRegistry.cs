@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
-using ExDeform.Cache.Implementations;
-using ExDeform.Cache.Interfaces;
-using ExDeform.Data;
+using ExDeform.Runtime.Cache.Implementations;
+using ExDeform.Runtime.Cache.Interfaces;
+using ExDeform.Runtime.Data;
 
-namespace ExDeform.Cache
+namespace ExDeform.Runtime.Cache
 {
     /// <summary>
     /// ExDeform統合キャッシュレジストリ

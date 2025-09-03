@@ -1,7 +1,7 @@
 using System;
 using UnityEditor;
 using UnityEngine;
-using ExDeform.Core.Interfaces;
+using ExDeform.Runtime.Core.Interfaces;
 
 namespace ExDeform.Editor
 {
