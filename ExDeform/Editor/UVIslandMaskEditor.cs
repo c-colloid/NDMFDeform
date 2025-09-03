@@ -317,7 +317,7 @@ namespace ExDeform.Editor
             // Find the actual UV map container that contains the image element
             // This is a simplified approach - in a real implementation, you might want to
             // structure this differently or use userData/names to identify elements
-            return uvMapArea.Q<VisualElement>(null, \"uv-map-container\") ?? 
+            return uvMapArea.Q<VisualElement>(null, "uv-map-container") ?? 
                    uvMapArea.Children().FirstOrDefault(child => 
                        child.style.backgroundColor.value.Equals(Color.white) &&
                        child.style.borderBottomWidth.value.value > 0);
