@@ -8,6 +8,8 @@ using ExDeform.Core.Interfaces;
 using ExDeform.Core.Extensions;
 using ExDeform.Runtime.Cache;
 using ExDeform.Runtime.Data;
+using ExDeform.Editor;
+using ExDeform.Runtime;
 
 namespace ExDeform.Runtime.Deformers
 {
@@ -55,7 +57,7 @@ namespace ExDeform.Runtime.Deformers
         // モジュール化されたコンポーネント
         [System.NonSerialized] private UVCacheManager cacheManager;
         [System.NonSerialized] private UVMaskProcessor maskProcessor;
-        [System.NonSerialized] private UVIslandAnalyzer islandAnalyzer;
+        // UVIslandAnalyzer is a static utility class
         
         // 外部Deform統合
         [System.NonSerialized] private object externalDeformable;
@@ -164,10 +166,7 @@ namespace ExDeform.Runtime.Deformers
                 maskProcessor = new UVMaskProcessor(useJobSystem, useBurstCompilation);
             }
             
-            if (islandAnalyzer == null)
-            {
-                islandAnalyzer = new UVIslandAnalyzer();
-            }
+            // UVIslandAnalyzer is a static utility class - no instantiation needed
         }
         
         private void TryIntegrateWithExternalDeform()
@@ -227,7 +226,7 @@ namespace ExDeform.Runtime.Deformers
             {
                 // キャッシュから島データを取得または解析
                 var islands = cacheManager?.GetCachedIslands(mesh) ?? 
-                             islandAnalyzer.AnalyzeUVIslands(mesh);
+                             UVIslandAnalyzer.AnalyzeUVIslands(mesh);
                 
                 // 選択された島の頂点を変形許可に設定
                 foreach (var islandID in selectedIslandIDs)
