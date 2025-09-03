@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using ExDeform.Runtime;
 using ExDeform.Runtime.Cache.Interfaces;
 using ExDeform.Runtime.Data;
 
@@ -61,7 +62,7 @@ namespace ExDeform.Editor
         /// Get cached UV islands for the given mesh
         /// 指定されたメッシュのキャッシュされたUVアイランドを取得
         /// </summary>
-        public List<ExDeform.Runtime.UVIslandAnalyzer.UVIsland> GetCachedIslands(Mesh mesh)
+        public List<UVIslandAnalyzer.UVIsland> GetCachedIslands(Mesh mesh)
         {
             // For now, return null to force fresh analysis
             // In a full implementation, this would cache analyzed islands
