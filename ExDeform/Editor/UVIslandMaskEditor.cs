@@ -62,12 +62,9 @@ namespace ExDeform.Editor
         private Mesh lastCachedMesh;
         private int lastMeshInstanceID = -1;
         
-        // Persistent cache system based on original mesh - survives Unity restart
-        private static Dictionary<string, UVIslandSelector> persistentCache = new Dictionary<string, UVIslandSelector>();
+        // Cache service integration
+        private readonly IEditorCacheService cacheService = EditorCacheService.Instance;
         private string currentCacheKey;
-        
-        // Static initialization flag to ensure proper cache restoration across Unity restarts
-        private static bool isCacheSystemInitialized = false;
         
         // Static tracking to prevent multiple editor instances for same target
         private static Dictionary<int, UVIslandMaskEditor> activeEditors = new Dictionary<int, UVIslandMaskEditor>();
@@ -106,49 +103,52 @@ namespace ExDeform.Editor
                 return root;
             }
             
-            // Lightweight cache system initialization - only when UI is created
-            InitializeCacheSystem();
-            
             // Get original mesh for UV mapping and cache key generation
             var originalMesh = GetOriginalMesh();
-            currentCacheKey = GenerateCacheKey(originalMesh);
+            currentCacheKey = UVIslandCacheManager.GenerateCacheKey(originalMesh);
             
-            // Try to get selector from persistent cache first
-            if (currentCacheKey != null && persistentCache.TryGetValue(currentCacheKey, out var cachedSelector))
+            // Try to get selector from cache service
+            if (currentCacheKey != null)
             {
-                // Reuse cached selector with UV data
-                selector = cachedSelector;
-                selector.SetSelectedIslands(targetMask.SelectedIslandIDs);
-                
-                // Update target transform for dynamic mesh highlighting
-                selector.TargetTransform = GetRendererTransform();
-                
-                // Load low-resolution cached texture for immediate display
-                LoadLowResTextureFromCache();
-                
-                // Always regenerate texture for cached selector to ensure freshness
-                isInitialized = false;
-                textureInitialized = false;
-            }
-            else if (originalMesh != null)
-            {
-                // Create new selector based on original mesh
-                selector = new UVIslandSelector(originalMesh);
-                selector.SetSelectedIslands(targetMask.SelectedIslandIDs);
-                selector.TargetTransform = GetRendererTransform();
-                
-                // Cache the selector for future use
-                if (currentCacheKey != null)
+                var cachedSelector = UVIslandCacheManager.GetCachedSelector(currentCacheKey);
+                if (cachedSelector != null)
                 {
-                    persistentCache[currentCacheKey] = selector;
+                    // Reuse cached selector with UV data
+                    selector = cachedSelector;
+                    selector.SetSelectedIslands(targetMask.SelectedIslandIDs);
+                    
+                    // Update target transform for dynamic mesh highlighting
+                    selector.TargetTransform = GetRendererTransform();
+                    
+                    // Load low-resolution cached texture for immediate display
+                    LoadLowResTextureFromCache();
+                    
+                    // Always regenerate texture for cached selector to ensure freshness
+                    isInitialized = false;
+                    textureInitialized = false;
                 }
-                
-                // Try to load cached texture even for new selectors
-                // This handles the case where selector cache was cleared but binary cache remains
-                LoadLowResTextureFromCache();
-                
-                isInitialized = false;
-                textureInitialized = false;
+                else if (originalMesh != null)
+                {
+                    // Create new selector based on original mesh
+                    selector = new UVIslandSelector(originalMesh);
+                    selector.SetSelectedIslands(targetMask.SelectedIslandIDs);
+                    selector.TargetTransform = GetRendererTransform();
+                    
+                    // Cache the selector for future use
+                    UVIslandCacheManager.CacheSelector(currentCacheKey, selector);
+                    
+                    // Try to load cached texture even for new selectors
+                    LoadLowResTextureFromCache();
+                    
+                    isInitialized = false;
+                    textureInitialized = false;
+                }
+                else
+                {
+                    selector = null;
+                    isInitialized = false;
+                    textureInitialized = false;
+                }
             }
             else
             {
@@ -1254,106 +1254,6 @@ namespace ExDeform.Editor
             return GetOriginalMesh();
         }
         
-        /// <summary>
-        /// Generate stable cache key with comprehensive error handling and validation
-        /// 包括的エラー処理と検証機能付きの安定キャッシュキー生成
-        /// </summary>
-        private string GenerateCacheKey(Mesh originalMesh)
-        {
-            if (originalMesh == null) 
-            {
-                LogCacheOperation("GenerateCacheKey called with null mesh", isError: true);
-                return null;
-            }
-            
-            try
-            {
-                // Use stable mesh identifiers instead of instance ID for Unity restart persistence
-                string meshName = !string.IsNullOrEmpty(originalMesh.name) ? 
-                    originalMesh.name.Replace("/", "_").Replace("\\", "_") : // Sanitize for file system
-                    "unnamed_mesh";
-                
-                int uvHash = CalculateUVHash(originalMesh.uv);
-                int vertexCount = originalMesh.vertexCount;
-                
-                var key = $"{meshName}_{vertexCount}_{uvHash}";
-                
-                // Validate cache key integrity
-                if (string.IsNullOrEmpty(key) || key.Length < 3)
-                {
-                    LogCacheOperation($"Invalid cache key generated: '{key}'", isError: true);
-                    return $"fallback_{originalMesh.GetHashCode()}"; // Fallback key
-                }
-                
-                if (key.Length > 200) // Prevent filesystem issues
-                {
-                    LogCacheOperation($"Cache key too long ({key.Length} chars), truncating", isError: false);
-                    key = key.Substring(0, 200);
-                }
-                
-                return key;
-            }
-            catch (System.Exception e)
-            {
-                LogCacheOperation($"Failed to generate cache key: {e.Message}", isError: true);
-                // Fallback to basic hash-based key
-                return $"fallback_{originalMesh.GetHashCode()}_{originalMesh.vertexCount}";
-            }
-        }
-        
-        /// <summary>
-        /// Safe UV hash calculation with comprehensive error handling and performance optimization
-        /// 包括的エラー処理とパフォーマンス最適化を備えた安全なUVハッシュ計算
-        /// </summary>
-        private int CalculateUVHash(Vector2[] uvs)
-        {
-            if (uvs == null) 
-            {
-                LogCacheOperation("CalculateUVHash called with null UV array");
-                return 0;
-            }
-            
-            if (uvs.Length == 0)
-            {
-                LogCacheOperation("CalculateUVHash called with empty UV array");
-                return 1; // Return distinct value for empty array to differentiate from null
-            }
-            
-            try
-            {
-                unchecked
-                {
-                    int hash = 17;
-                    // Sample UV coordinates with performance limit to balance accuracy and speed
-                    int step = Mathf.Max(1, uvs.Length / 100);
-                    int sampleCount = 0;
-                    const int MAX_SAMPLES = 100; // Prevent excessive computation
-                    
-                    for (int i = 0; i < uvs.Length && sampleCount < MAX_SAMPLES; i += step)
-                    {
-                        // Additional safety check for corrupted UV data
-                        var uv = uvs[i];
-                        if (!float.IsNaN(uv.x) && !float.IsNaN(uv.y) && 
-                            !float.IsInfinity(uv.x) && !float.IsInfinity(uv.y))
-                        {
-                            hash = hash * 31 + uv.GetHashCode();
-                            sampleCount++;
-                        }
-                    }
-                    
-                    // Include array length in hash to distinguish different sized meshes
-                    hash = hash * 31 + uvs.Length;
-                    
-                    return hash;
-                }
-            }
-            catch (System.Exception e)
-            {
-                LogCacheOperation($"Exception in CalculateUVHash: {e.Message}", isError: true);
-                // Fallback: use array length as hash if UV data is corrupted
-                return uvs.Length.GetHashCode() + 42; // Add constant to avoid collision with length-only hashes
-            }
-        }
         
         // UI update methods
         private void RefreshData()
@@ -1755,22 +1655,9 @@ namespace ExDeform.Editor
         {
             targetMask = target as UVIslandMask;
             
-            // Track active editor instances to prevent duplicates
+            // Track active editor instances to prevent duplicates using cache manager
             int targetID = targetMask != null ? targetMask.GetInstanceID() : 0;
-            if (targetID != 0)
-            {
-                if (activeEditors.ContainsKey(targetID))
-                {
-                    // Another editor instance exists for this target, dispose the old one
-                    var oldEditor = activeEditors[targetID];
-                    if (oldEditor != this && oldEditor != null)
-                    {
-                        Debug.Log($"[UVIslandMaskEditor] Replacing duplicate editor instance for target {targetID}");
-                        oldEditor.CleanupEditor();
-                    }
-                }
-                activeEditors[targetID] = this;
-            }
+            UVIslandCacheManager.RegisterActiveEditor(targetID, this);
             
             Undo.undoRedoPerformed += OnUndoRedo;
             SceneView.duringSceneGui += OnSceneGUI;
@@ -1781,14 +1668,11 @@ namespace ExDeform.Editor
             CleanupEditor();
         }
         
-        private void CleanupEditor()
+        public void CleanupEditor()
         {
-            // Remove from active editors tracking
+            // Remove from active editors tracking using cache manager
             int targetID = targetMask != null ? targetMask.GetInstanceID() : 0;
-            if (targetID != 0 && activeEditors.ContainsKey(targetID) && activeEditors[targetID] == this)
-            {
-                activeEditors.Remove(targetID);
-            }
+            UVIslandCacheManager.UnregisterActiveEditor(targetID, this);
             
             // Clean up resources
             if (magnifyingGlassTexture != null)
@@ -1851,65 +1735,6 @@ namespace ExDeform.Editor
 		}
 		*/
         
-        /// <summary>
-        /// Lightweight cache system initialization - called only when needed
-        /// 軽量キャッシュシステム初期化 - 必要時のみ呼び出し
-        /// </summary>
-        private static void InitializeCacheSystem()
-        {
-            if (isCacheSystemInitialized) return;
-            
-            try
-            {
-                // Just set the flag - actual cache initialization happens lazily in RobustUVCache
-                isCacheSystemInitialized = true;
-            }
-            catch (System.Exception e)
-            {
-                Debug.LogError($"[UVIslandMaskEditor] Failed to initialize cache system: {e.Message}");
-            }
-        }
-        
-        // Clean up on editor shutdown
-        static UVIslandMaskEditor()
-        {
-            EditorApplication.quitting += () =>
-            {
-                // Clean up all active editors
-                if (activeEditors != null)
-                {
-                    foreach (var kvp in activeEditors)
-                    {
-                        kvp.Value?.CleanupEditor();
-                    }
-                    activeEditors.Clear();
-                }
-                
-                // Clean up persistent cache
-                if (persistentCache != null)
-                {
-                    foreach (var kvp in persistentCache)
-                    {
-                        kvp.Value?.Dispose();
-                    }
-                    persistentCache.Clear();
-                }
-            };
-        }
-        
-        /// <summary>
-        /// Lightweight cache system readiness check - no heavy operations
-        /// 軽量キャッシュシステム準備確認 - 重い操作なし
-        /// </summary>
-        private static void EnsureCacheSystemInitialized()
-        {
-            // The RobustUVCache has its own lazy initialization
-            // We don't need to do anything heavy here
-            if (!isCacheSystemInitialized)
-            {
-                isCacheSystemInitialized = true;
-            }
-        }
         
         private void OnUndoRedo()
         {
@@ -1978,8 +1803,7 @@ namespace ExDeform.Editor
         }
         
         /// <summary>
-        /// Load low-resolution UV texture from robust cache system
-        /// 堅牢なキャッシュシステムから低解像度UVテクスチャを読み込み
+        /// Load low-resolution UV texture from cache manager
         /// </summary>
         private void LoadLowResTextureFromCache()
         {
@@ -1991,10 +1815,7 @@ namespace ExDeform.Editor
             
             try
             {
-                // Lightweight cache system check
-                EnsureCacheSystemInitialized();
-                
-                currentLowResTexture = RobustUVCache.LoadTexture(currentCacheKey);
+                currentLowResTexture = UVIslandCacheManager.LoadLowResTextureFromCache(currentCacheKey);
                 isLoadingFromCache = (currentLowResTexture != null && selector?.UvMapTexture == null);
                 
                 if (currentLowResTexture != null)
@@ -2008,9 +1829,6 @@ namespace ExDeform.Editor
                     LogCacheOperation($"No cached texture found for key: {currentCacheKey}");
                     shouldShowLowResUntilInteraction = false;
                 }
-                
-                // Periodic cache health check
-                CheckCacheHealth();
             }
             catch (System.Exception e)
             {
@@ -2022,59 +1840,16 @@ namespace ExDeform.Editor
         }
         
         /// <summary>
-        /// Save low-resolution UV texture to robust cache system
-        /// 堅牢なキャッシュシステムに低解像度UVテクスチャを保存
+        /// Save low-resolution UV texture to cache manager
         /// </summary>
         private void SaveLowResTextureToCache()
         {
-            if (string.IsNullOrEmpty(currentCacheKey))
+            if (string.IsNullOrEmpty(currentCacheKey) || selector == null)
             {
-                LogCacheOperation("SaveLowResTextureToCache called with null cache key", isError: true);
                 return;
             }
             
-            if (selector == null)
-            {
-                LogCacheOperation("SaveLowResTextureToCache called with null selector", isError: true);
-                return;
-            }
-            
-            // Only create low-res cache when selection changes (color changes)
-            if (selector.HasSelectedIslands)
-            {
-                try
-                {
-                    var lowResTexture = selector.GenerateUVMapTexture(LOW_RES_TEXTURE_SIZE, LOW_RES_TEXTURE_SIZE);
-                    if (lowResTexture != null)
-                    {
-                        bool saveSuccess = RobustUVCache.SaveTexture(currentCacheKey, lowResTexture);
-                        
-                        if (saveSuccess)
-                        {
-                            LogCacheOperation($"Successfully cached low-res texture for key: {currentCacheKey}");
-                        }
-                        else
-                        {
-                            LogCacheOperation($"Failed to cache texture for key: {currentCacheKey}", isError: true);
-                        }
-                        
-                        // Clean up temporary texture
-                        UnityEngine.Object.DestroyImmediate(lowResTexture);
-                    }
-                    else
-                    {
-                        LogCacheOperation($"Failed to generate low-res texture for key: {currentCacheKey}", isError: true);
-                    }
-                }
-                catch (System.Exception e)
-                {
-                    LogCacheOperation($"Exception in SaveLowResTextureToCache: {e.Message}", isError: true);
-                }
-            }
-            else
-            {
-                LogCacheOperation($"No selected islands, skipping cache save for key: {currentCacheKey}");
-            }
+            UVIslandCacheManager.SaveLowResTextureToCache(currentCacheKey, selector);
         }
         
         #region Cache Management and Health Monitoring
@@ -2100,51 +1875,6 @@ namespace ExDeform.Editor
                 }
             }
         }
-        
-        /// <summary>
-        /// Periodic cache health check to ensure optimal performance
-        /// 最適なパフォーマンスを確保するための定期的キャッシュヘルスチェック
-        /// </summary>
-        private void CheckCacheHealth()
-        {
-            var now = DateTime.UtcNow;
-            if ((now - lastCacheHealthCheck).TotalHours >= CACHE_HEALTH_CHECK_INTERVAL_HOURS)
-            {
-                lastCacheHealthCheck = now;
-                
-                try
-                {
-                    var stats = RobustUVCache.GetCacheStatistics();
-                    
-                    // Log performance metrics
-                    LogCacheOperation($"Cache Health Check: {stats}");
-                    
-                    // Check for performance issues
-                    if (stats.overallHitRate < 0.5f && stats.totalHitCount + stats.totalMissCount > 10)
-                    {
-                        LogCacheOperation($"Low cache hit rate detected: {stats.overallHitRate:P1} - Consider investigating cache key generation", isError: true);
-                    }
-                    
-                    if (stats.averageReadTime > 5.0f)
-                    {
-                        LogCacheOperation($"Slow cache read performance: {stats.averageReadTime:F2}ms average - Consider cache cleanup", isError: true);
-                    }
-                    
-                    // Automatic cleanup for large caches
-                    if (stats.totalSizeBytes > 100 * 1024 * 1024) // 100MB
-                    {
-                        LogCacheOperation("Cache size exceeding 100MB, scheduling cleanup...");
-                        EditorApplication.delayCall += () => RobustUVCache.CleanupCache();
-                    }
-                }
-                catch (System.Exception e)
-                {
-                    LogCacheOperation($"Cache health check failed: {e.Message}", isError: true);
-                }
-            }
-        }
-        
-        
         
         #endregion
         
