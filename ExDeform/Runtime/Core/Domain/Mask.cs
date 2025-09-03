@@ -281,7 +281,7 @@ namespace ExDeform.Runtime.Core.Domain
             {
                 var targetIslands = islands.Where(i => _targetIslandIDs.Contains(i.IslandID)).ToList();
                 stats.TotalUVArea = targetIslands.Sum(i => i.UVArea);
-                stats.AverageIslandSize = targetIslands.Count > 0 ? targetIslands.Average(i => i.VertexCount) : 0;
+                stats.AverageIslandSize = targetIslands.Count > 0 ? (float)targetIslands.Average(i => i.VertexCount) : 0;
             }
 
             return stats;

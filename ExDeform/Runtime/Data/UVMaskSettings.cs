@@ -15,7 +15,7 @@ namespace ExDeform.Runtime.Data
         #region Deform統合設定
         [Header("Deform Integration")]
         [Tooltip("このマスクが適用されるDeformableコンポーネント")]
-        public Deformable targetDeformable;
+        public Component targetDeformable;
         
         [Tooltip("他のDeformerとの処理優先順位")]
         [Range(-100, 100)]
@@ -128,7 +128,8 @@ namespace ExDeform.Runtime.Data
             }
             
             // メッシュの存在確認
-            var mesh = targetDeformable.GetMesh();
+            var getMeshMethod = targetDeformable.GetType().GetMethod("GetMesh");
+            var mesh = getMeshMethod?.Invoke(targetDeformable, null) as Mesh;
             if (mesh == null)
             {
                 Debug.LogWarning("[UVMaskSettings] Target mesh is null");
@@ -158,7 +159,9 @@ namespace ExDeform.Runtime.Data
             // Deformable側に変更を通知
             if (targetDeformable != null)
             {
-                targetDeformable.SetDirty();
+                // SetDirty メソッドがある場合のみ呼び出し
+                var setDirtyMethod = targetDeformable.GetType().GetMethod("SetDirty");
+                setDirtyMethod?.Invoke(targetDeformable, null);
             }
         }
         

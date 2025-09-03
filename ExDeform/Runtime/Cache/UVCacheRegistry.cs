@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
-//using ExDeform.Runtime.Cache.Implementations;
+using ExDeform.Runtime.Cache.Implementations;
 using ExDeform.Runtime.Cache.Interfaces;
 using ExDeform.Runtime.Data;
 
@@ -269,9 +269,7 @@ namespace ExDeform.Runtime.Cache
             {
                 totalProviders = cacheProviders.Count,
                 activeMeshMappings = meshToProviderMap.Count,
-                // Performance monitoring disabled in runtime
-                overallPerformance = default, // performanceMonitor.GetOverallStatistics(),
-                providerPerformance = null // performanceMonitor.GetProviderStatistics()
+                // Performance monitoring disabled in runtime - commented out fields
             };
         }
         #endregion

@@ -296,7 +296,7 @@ namespace ExDeform.Runtime.Core.Domain
             var vertexCounts = _islands.Select(i => i.VertexCount).ToList();
             return new IslandStatistics
             {
-                AverageSize = vertexCounts.Average(),
+                AverageSize = (float)vertexCounts.Average(),
                 LargestSize = vertexCounts.Max(),
                 SmallestSize = vertexCounts.Min()
             };
