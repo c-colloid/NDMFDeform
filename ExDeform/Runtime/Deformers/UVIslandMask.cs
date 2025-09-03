@@ -230,7 +230,7 @@ namespace ExDeform.Runtime.Deformers
                 // キャッシュから島データを取得または解析 (Editor-only cache disabled)
                 // var islands = cacheManager?.GetCachedIslands(mesh) ?? 
                 //              UVIslandAnalyzer.AnalyzeUVIslands(mesh);
-                var islands = UVIslandAnalyzer.AnalyzeUVIslands(mesh);
+                var islands = ExDeform.Runtime.UVIslandAnalyzer.AnalyzeUVIslands(mesh);
                 
                 // 選択された島の頂点を変形許可に設定
                 foreach (var islandID in selectedIslandIDs)

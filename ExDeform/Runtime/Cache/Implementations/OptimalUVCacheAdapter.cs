@@ -27,13 +27,8 @@ namespace ExDeform.Runtime.Cache.Implementations
         {
             try
             {
-#if UNITY_EDITOR
-                // エディタ環境でのみOptimalUVCacheを使用
-                return ExDeform.Editor.OptimalUVCache.SaveTexture(meshKey, uvTexture);
-#else
-                // ランタイムではフォールバック使用
+                // ランタイムではフォールバック使用（エディタキャッシュは利用不可）
                 return fallbackCache.CacheUVData(meshKey, uvTexture, islandData, selectedIslands);
-#endif
             }
             catch (Exception e)
             {
@@ -46,28 +41,8 @@ namespace ExDeform.Runtime.Cache.Implementations
         {
             try
             {
-#if UNITY_EDITOR
-                // エディタ環境でのみOptimalUVCacheを使用
-                var texture = ExDeform.Editor.OptimalUVCache.LoadTexture(meshKey);
-                if (texture != null)
-                {
-                    return new UVCacheData
-                    {
-                        uvTexture = texture,
-                        previewTexture = CreatePreviewTexture(texture, 128),
-                        islands = new UVIslandData[0], // OptimalUVCacheはテクスチャのみ
-                        selectedIslandIDs = new int[0],
-                        meshHash = meshKey.GetHashCode(),
-                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                        zoomLevel = 1.0f,
-                        panOffset = Vector2.zero
-                    };
-                }
-                return default;
-#else
-                // ランタイムではフォールバック使用
+                // ランタイムではフォールバック使用（エディタキャッシュは利用不可）
                 return fallbackCache.LoadUVData(meshKey);
-#endif
             }
             catch (Exception e)
             {
@@ -80,16 +55,8 @@ namespace ExDeform.Runtime.Cache.Implementations
         {
             try
             {
-#if UNITY_EDITOR
-                var texture = ExDeform.Editor.OptimalUVCache.LoadTexture(meshKey);
-                if (texture != null)
-                {
-                    return CreatePreviewTexture(texture, resolution);
-                }
-                return null;
-#else
+                // ランタイムではフォールバック使用（エディタキャッシュは利用不可）
                 return fallbackCache.GetPreviewTexture(meshKey, resolution);
-#endif
             }
             catch (Exception e)
             {
@@ -102,11 +69,8 @@ namespace ExDeform.Runtime.Cache.Implementations
         {
             try
             {
-#if UNITY_EDITOR
-                return ExDeform.Editor.OptimalUVCache.HasValidCache(meshKey);
-#else
+                // ランタイムではフォールバック使用（エディタキャッシュは利用不可）
                 return fallbackCache.IsValidCache(meshKey, meshHash);
-#endif
             }
             catch (Exception e)
             {
@@ -119,9 +83,7 @@ namespace ExDeform.Runtime.Cache.Implementations
         {
             try
             {
-#if UNITY_EDITOR
-                ExDeform.Editor.OptimalUVCache.ClearCache(meshKey);
-#endif
+                // ランタイムではフォールバック使用（エディタキャッシュは利用不可）
                 fallbackCache.InvalidateCache(meshKey);
             }
             catch (Exception e)
@@ -135,9 +97,7 @@ namespace ExDeform.Runtime.Cache.Implementations
         {
             try
             {
-#if UNITY_EDITOR
-                ExDeform.Editor.OptimalUVCache.OptimizeStorage();
-#endif
+                // ランタイムではフォールバック使用（エディタキャッシュは利用不可）
                 fallbackCache.OptimizeMemoryUsage();
             }
             catch (Exception e)
