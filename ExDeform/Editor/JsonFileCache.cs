@@ -28,9 +28,9 @@ namespace ExDeform.Editor
             EnsureDirectoryExists();
         }
         
-        public void SaveTexture(string key, Texture2D texture)
+        public bool SaveTexture(string key, Texture2D texture)
         {
-            if (string.IsNullOrEmpty(key) || texture == null) return;
+            if (string.IsNullOrEmpty(key) || texture == null) return false;
             
             try
             {
@@ -47,10 +47,12 @@ namespace ExDeform.Editor
                 var filePath = GetCacheFilePath(key);
                 
                 File.WriteAllText(filePath, json);
+                return true;
             }
             catch (Exception e)
             {
                 Debug.LogError($"[{CacheTypeName}] Save failed for key '{key}': {e.Message}");
+                return false;
             }
         }
         
@@ -103,6 +105,56 @@ namespace ExDeform.Editor
             {
                 Debug.LogError($"[{CacheTypeName}] Clear failed for key '{key}': {e.Message}");
             }
+        }
+        
+        public void ClearAllCache()
+        {
+            try
+            {
+                if (Directory.Exists(CacheConstants.JSON_CACHE_FOLDER))
+                {
+                    var files = Directory.GetFiles(CacheConstants.JSON_CACHE_FOLDER, "*" + CacheConstants.CACHE_JSON_EXTENSION);
+                    foreach (var file in files)
+                    {
+                        File.Delete(file);
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[{CacheTypeName}] Clear all cache failed: {e.Message}");
+            }
+        }
+        
+        public CacheStatistics GetStatistics()
+        {
+            var stats = new CacheStatistics();
+            
+            try
+            {
+                if (Directory.Exists(CacheConstants.JSON_CACHE_FOLDER))
+                {
+                    var jsonFiles = Directory.GetFiles(CacheConstants.JSON_CACHE_FOLDER, "*" + CacheConstants.CACHE_JSON_EXTENSION);
+                    stats.entryCount = jsonFiles.Length;
+                    
+                    long totalSize = 0;
+                    foreach (var file in jsonFiles)
+                    {
+                        totalSize += new FileInfo(file).Length;
+                    }
+                    stats.totalSizeBytes = totalSize;
+                    
+                    // For file-based cache, we don't track hit rate or access time
+                    stats.hitRate = 0f;
+                    stats.averageAccessTime = 0f;
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[{CacheTypeName}] Statistics calculation failed: {e.Message}");
+            }
+            
+            return stats;
         }
         
         private void EnsureDirectoryExists()

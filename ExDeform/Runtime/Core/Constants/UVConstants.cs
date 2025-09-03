@@ -1,4 +1,4 @@
-namespace Deform.Masking.Core.Constants
+namespace ExDeform.Core.Constants
 {
     /// <summary>
     /// UV関連の定数定義

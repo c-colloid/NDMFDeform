@@ -1,6 +1,6 @@
 using System;
 
-namespace Deform.Masking.Core.Constants
+namespace ExDeform.Core.Constants
 {
     /// <summary>
     /// キャッシュシステム関連の定数定義

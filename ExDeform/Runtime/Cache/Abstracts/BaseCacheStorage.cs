@@ -1,9 +1,9 @@
 using System;
 using UnityEngine;
-using Deform.Masking.Core.Interfaces;
-using Deform.Masking.Core.Constants;
+using ExDeform.Core.Interfaces;
+using ExDeform.Core.Constants;
 
-namespace Deform.Masking.Cache.Abstracts
+namespace ExDeform.Cache.Abstracts
 {
     /// <summary>
     /// キャッシュストレージの基底クラス
@@ -27,6 +27,10 @@ namespace Deform.Masking.Cache.Abstracts
         #endregion
         
         #region ICacheStorage Implementation
+        /// <summary>
+        /// キャッシュ種別名（各実装で定義）
+        /// </summary>
+        public abstract string CacheTypeName { get; }
         public bool SaveTexture(string key, Texture2D texture)
         {
             if (string.IsNullOrEmpty(key))
