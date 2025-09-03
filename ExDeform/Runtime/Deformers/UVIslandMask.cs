@@ -184,7 +184,7 @@ namespace ExDeform.Runtime.Deformers
             }
             
             // 外部Deformableを検索・統合
-            var deformable = GetComponent<Deformable>(); // 動的型解決
+            var deformable = GetComponent("Deformable") as Component; // 動的型解決
             if (deformable != null)
             {
                 externalDeformable = deformable;
@@ -235,8 +235,8 @@ namespace ExDeform.Runtime.Deformers
                 // 選択された島の頂点を変形許可に設定
                 foreach (var islandID in selectedIslandIDs)
                 {
-                    var island = System.Array.Find(islands, i => i.islandID == islandID);
-                    if (island.vertexIndices != null)
+                    var island = islands.Find(i => i.islandID == islandID);
+                    if (island != null && island.vertexIndices != null)
                     {
                         foreach (var vertexIndex in island.vertexIndices)
                         {
