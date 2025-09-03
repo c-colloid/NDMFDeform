@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using UnityEngine;
 using ExDeform.Core.Interfaces;
+using ExDeform.Core.Constants;
 
 namespace ExDeform.Editor
 {
@@ -102,9 +103,9 @@ namespace ExDeform.Editor
         {
             try
             {
-                if (Directory.Exists(CacheConstants.BINARY_CACHE_FOLDER))
+                if (Directory.Exists(CacheConstants.BINARY_CACHE_DIRECTORY))
                 {
-                    var files = Directory.GetFiles(CacheConstants.BINARY_CACHE_FOLDER);
+                    var files = Directory.GetFiles(CacheConstants.BINARY_CACHE_DIRECTORY);
                     foreach (var file in files)
                     {
                         File.Delete(file);
@@ -123,9 +124,9 @@ namespace ExDeform.Editor
             
             try
             {
-                if (Directory.Exists(CacheConstants.BINARY_CACHE_FOLDER))
+                if (Directory.Exists(CacheConstants.BINARY_CACHE_DIRECTORY))
                 {
-                    var pngFiles = Directory.GetFiles(CacheConstants.BINARY_CACHE_FOLDER, "*" + CacheConstants.CACHE_PNG_EXTENSION);
+                    var pngFiles = Directory.GetFiles(CacheConstants.BINARY_CACHE_DIRECTORY, "*" + CacheConstants.CACHE_PNG_EXTENSION);
                     stats.entryCount = pngFiles.Length;
                     
                     long totalSize = 0;
@@ -152,9 +153,9 @@ namespace ExDeform.Editor
         {
             try
             {
-                if (!Directory.Exists(CacheConstants.BINARY_CACHE_FOLDER))
+                if (!Directory.Exists(CacheConstants.BINARY_CACHE_DIRECTORY))
                 {
-                    Directory.CreateDirectory(CacheConstants.BINARY_CACHE_FOLDER);
+                    Directory.CreateDirectory(CacheConstants.BINARY_CACHE_DIRECTORY);
                 }
             }
             catch (Exception e)
@@ -165,12 +166,12 @@ namespace ExDeform.Editor
         
         private string GetImageFilePath(string key)
         {
-            return Path.Combine(CacheConstants.BINARY_CACHE_FOLDER, key + CacheConstants.CACHE_PNG_EXTENSION);
+            return Path.Combine(CacheConstants.BINARY_CACHE_DIRECTORY, key + CacheConstants.CACHE_PNG_EXTENSION);
         }
         
         private string GetMetaFilePath(string key)
         {
-            return Path.Combine(CacheConstants.BINARY_CACHE_FOLDER, key + CacheConstants.CACHE_META_EXTENSION);
+            return Path.Combine(CacheConstants.BINARY_CACHE_DIRECTORY, key + CacheConstants.CACHE_META_EXTENSION);
         }
         
         private string FormatMetadata(Texture2D texture)

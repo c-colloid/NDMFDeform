@@ -4,6 +4,7 @@ using System.Linq;
 using UnityEditor;
 using UnityEngine;
 using ExDeform.Core.Interfaces;
+using ExDeform.Core.Constants;
 
 namespace ExDeform.Editor
 {
@@ -74,8 +75,8 @@ namespace ExDeform.Editor
             var result = new PerformanceResult { implementationName = cache.CacheTypeName };
             
             // Save performance test
-            var saveTimes = new double[CacheConstants.TEST_ITERATIONS];
-            for (int i = 0; i < CacheConstants.TEST_ITERATIONS; i++)
+            var saveTimes = new double[CacheConstants.PERFORMANCE_TEST_ITERATIONS];
+            for (int i = 0; i < CacheConstants.PERFORMANCE_TEST_ITERATIONS; i++)
             {
                 var key = $"{baseKey}_{i}";
                 stopwatch.Restart();
@@ -86,8 +87,8 @@ namespace ExDeform.Editor
             result.avgSaveTime = saveTimes.Average();
             
             // Load performance test  
-            var loadTimes = new double[CacheConstants.TEST_ITERATIONS];
-            for (int i = 0; i < CacheConstants.TEST_ITERATIONS; i++)
+            var loadTimes = new double[CacheConstants.PERFORMANCE_TEST_ITERATIONS];
+            for (int i = 0; i < CacheConstants.PERFORMANCE_TEST_ITERATIONS; i++)
             {
                 var key = $"{baseKey}_{i}";
                 stopwatch.Restart();
@@ -99,8 +100,8 @@ namespace ExDeform.Editor
             result.avgLoadTime = loadTimes.Average();
             
             // Existence check performance test
-            var checkTimes = new double[CacheConstants.TEST_ITERATIONS];
-            for (int i = 0; i < CacheConstants.TEST_ITERATIONS; i++)
+            var checkTimes = new double[CacheConstants.PERFORMANCE_TEST_ITERATIONS];
+            for (int i = 0; i < CacheConstants.PERFORMANCE_TEST_ITERATIONS; i++)
             {
                 var key = $"{baseKey}_{i}";
                 stopwatch.Restart();
@@ -111,7 +112,7 @@ namespace ExDeform.Editor
             result.avgCheckTime = checkTimes.Average();
             
             // Cleanup test data for this implementation
-            for (int i = 0; i < CacheConstants.TEST_ITERATIONS; i++)
+            for (int i = 0; i < CacheConstants.PERFORMANCE_TEST_ITERATIONS; i++)
             {
                 cache.ClearCache($"{baseKey}_{i}");
             }
@@ -204,7 +205,7 @@ namespace ExDeform.Editor
             {
                 try
                 {
-                    for (int i = 0; i < CacheConstants.TEST_ITERATIONS; i++)
+                    for (int i = 0; i < CacheConstants.PERFORMANCE_TEST_ITERATIONS; i++)
                     {
                         implementation.ClearCache($"{baseKey}_{i}");
                     }

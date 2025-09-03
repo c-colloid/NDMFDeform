@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using UnityEngine;
 using ExDeform.Core.Interfaces;
+using ExDeform.Core.Constants;
 
 namespace ExDeform.Editor
 {
@@ -111,9 +112,9 @@ namespace ExDeform.Editor
         {
             try
             {
-                if (Directory.Exists(CacheConstants.JSON_CACHE_FOLDER))
+                if (Directory.Exists(CacheConstants.CACHE_ROOT_DIRECTORY))
                 {
-                    var files = Directory.GetFiles(CacheConstants.JSON_CACHE_FOLDER, "*" + CacheConstants.CACHE_JSON_EXTENSION);
+                    var files = Directory.GetFiles(CacheConstants.CACHE_ROOT_DIRECTORY, "*" + CacheConstants.CACHE_JSON_EXTENSION);
                     foreach (var file in files)
                     {
                         File.Delete(file);
@@ -132,9 +133,9 @@ namespace ExDeform.Editor
             
             try
             {
-                if (Directory.Exists(CacheConstants.JSON_CACHE_FOLDER))
+                if (Directory.Exists(CacheConstants.CACHE_ROOT_DIRECTORY))
                 {
-                    var jsonFiles = Directory.GetFiles(CacheConstants.JSON_CACHE_FOLDER, "*" + CacheConstants.CACHE_JSON_EXTENSION);
+                    var jsonFiles = Directory.GetFiles(CacheConstants.CACHE_ROOT_DIRECTORY, "*" + CacheConstants.CACHE_JSON_EXTENSION);
                     stats.entryCount = jsonFiles.Length;
                     
                     long totalSize = 0;
@@ -161,9 +162,9 @@ namespace ExDeform.Editor
         {
             try
             {
-                if (!Directory.Exists(CacheConstants.JSON_CACHE_FOLDER))
+                if (!Directory.Exists(CacheConstants.CACHE_ROOT_DIRECTORY))
                 {
-                    Directory.CreateDirectory(CacheConstants.JSON_CACHE_FOLDER);
+                    Directory.CreateDirectory(CacheConstants.CACHE_ROOT_DIRECTORY);
                 }
             }
             catch (Exception e)
@@ -174,7 +175,7 @@ namespace ExDeform.Editor
         
         private string GetCacheFilePath(string key)
         {
-            return Path.Combine(CacheConstants.JSON_CACHE_FOLDER, key + CacheConstants.CACHE_JSON_EXTENSION);
+            return Path.Combine(CacheConstants.CACHE_ROOT_DIRECTORY, key + CacheConstants.CACHE_JSON_EXTENSION);
         }
     }
 }

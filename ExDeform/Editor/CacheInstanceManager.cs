@@ -1,6 +1,7 @@
 using System;
 using UnityEngine;
 using ExDeform.Core.Interfaces;
+using ExDeform.Core.Constants;
 
 namespace ExDeform.Editor
 {
@@ -77,7 +78,7 @@ namespace ExDeform.Editor
             {
                 try
                 {
-                    for (int i = 0; i < CacheConstants.TEST_ITERATIONS; i++)
+                    for (int i = 0; i < CacheConstants.PERFORMANCE_TEST_ITERATIONS; i++)
                     {
                         implementation.ClearCache($"{baseKey}_{i}");
                     }

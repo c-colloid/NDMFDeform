@@ -1,15 +1,14 @@
+using ExDeform.Core.Constants;
+
 namespace ExDeform.Editor
 {
     /// <summary>
-    /// Constants for cache system performance and configuration
-    /// キャッシュシステムのパフォーマンスと設定の定数
+    /// Editor-specific constants for cache system testing and UI
+    /// エディター固有のキャッシュシステムテストとUI用定数
     /// </summary>
     public static class CacheConstants
     {
         #region Performance Test Settings
-        /// <summary>パフォーマンステストのイテレーション数</summary>
-        public const int TEST_ITERATIONS = 1000;
-        
         /// <summary>テスト用テクスチャサイズ</summary>
         public const int TEST_TEXTURE_SIZE = 128;
         
@@ -17,18 +16,12 @@ namespace ExDeform.Editor
         public const UnityEngine.TextureFormat TEST_TEXTURE_FORMAT = UnityEngine.TextureFormat.RGBA32;
         #endregion
         
-        #region Cache Paths and Keys
+        #region Editor-specific Cache Settings
         /// <summary>EditorPrefsキャッシュのプレフィックス</summary>
         public const string EDITOR_PREFS_PREFIX = "UVCache_";
         
         /// <summary>EditorPrefsメタデータのサフィックス</summary>
         public const string EDITOR_PREFS_META_SUFFIX = "_meta";
-        
-        /// <summary>JSON形式キャッシュフォルダパス</summary>
-        public const string JSON_CACHE_FOLDER = "Library/UVIslandCache";
-        
-        /// <summary>バイナリキャッシュフォルダパス</summary>
-        public const string BINARY_CACHE_FOLDER = "Library/UVIslandCacheBinary";
         
         /// <summary>キャッシュファイル拡張子</summary>
         public const string CACHE_JSON_EXTENSION = ".json";
