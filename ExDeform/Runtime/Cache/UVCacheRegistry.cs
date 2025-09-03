@@ -4,7 +4,6 @@ using UnityEngine;
 //using ExDeform.Runtime.Cache.Implementations;
 using ExDeform.Runtime.Cache.Interfaces;
 using ExDeform.Runtime.Data;
-using ExDeform.Editor;
 
 namespace ExDeform.Runtime.Cache
 {
@@ -40,7 +39,8 @@ namespace ExDeform.Runtime.Cache
         #region フィールド
         private readonly Dictionary<CacheType, IUVCache> cacheProviders;
         private readonly Dictionary<string, CacheType> meshToProviderMap;
-        private readonly CachePerformanceMonitor performanceMonitor;
+        // Performance monitoring disabled in runtime (was Editor-only class)
+        // private readonly CachePerformanceMonitor performanceMonitor;
         
         private CacheType primaryCacheType = CacheType.RobustUVCache;
         private bool isDisposed = false;
@@ -51,7 +51,7 @@ namespace ExDeform.Runtime.Cache
         {
             cacheProviders = new Dictionary<CacheType, IUVCache>();
             meshToProviderMap = new Dictionary<string, CacheType>();
-            performanceMonitor = new CachePerformanceMonitor();
+            // performanceMonitor = new CachePerformanceMonitor(); // Editor-only class
             
             InitializeCacheProviders();
         }
@@ -97,9 +97,9 @@ namespace ExDeform.Runtime.Cache
             {
                 var result = provider.CacheUVData(meshKey, uvTexture, islandData, selectedIslands);
                 
-                // パフォーマンス記録
-                var duration = (DateTime.UtcNow - startTime).TotalMilliseconds;
-                performanceMonitor.RecordCacheOperation(GetCacheType(provider), true, duration, false);
+                // パフォーマンス記録 (disabled in runtime)
+                // var duration = (DateTime.UtcNow - startTime).TotalMilliseconds;
+                // performanceMonitor.RecordCacheOperation(GetCacheType(provider), true, duration, false);
                 
                 // 成功したプロバイダーをマッピング
                 if (result)
@@ -113,8 +113,8 @@ namespace ExDeform.Runtime.Cache
             {
                 Debug.LogError($"[UVCacheRegistry] キャッシュ保存エラー ({meshKey}): {e.Message}");
                 
-                var duration = (DateTime.UtcNow - startTime).TotalMilliseconds;
-                performanceMonitor.RecordCacheOperation(GetCacheType(provider), false, duration, false);
+                // var duration = (DateTime.UtcNow - startTime).TotalMilliseconds;
+                // performanceMonitor.RecordCacheOperation(GetCacheType(provider), false, duration, false);
                 
                 return false;
             }
@@ -256,7 +256,7 @@ namespace ExDeform.Runtime.Cache
                 }
             }
             
-            performanceMonitor.TrimOldRecords();
+            // performanceMonitor.TrimOldRecords(); // Editor-only
         }
         
         /// <summary>
@@ -269,8 +269,9 @@ namespace ExDeform.Runtime.Cache
             {
                 totalProviders = cacheProviders.Count,
                 activeMeshMappings = meshToProviderMap.Count,
-                overallPerformance = performanceMonitor.GetOverallStatistics(),
-                providerPerformance = performanceMonitor.GetProviderStatistics()
+                // Performance monitoring disabled in runtime
+                overallPerformance = default, // performanceMonitor.GetOverallStatistics(),
+                providerPerformance = null // performanceMonitor.GetProviderStatistics()
             };
         }
         #endregion
@@ -303,8 +304,8 @@ namespace ExDeform.Runtime.Cache
             {
                 var result = provider.LoadUVData(meshKey);
                 
-                var duration = (DateTime.UtcNow - startTime).TotalMilliseconds;
-                performanceMonitor.RecordCacheOperation(GetCacheType(provider), result.IsValid, duration, true);
+                // var duration = (DateTime.UtcNow - startTime).TotalMilliseconds;
+                // performanceMonitor.RecordCacheOperation(GetCacheType(provider), result.IsValid, duration, true);
                 
                 return result;
             }
@@ -312,8 +313,8 @@ namespace ExDeform.Runtime.Cache
             {
                 Debug.LogWarning($"[UVCacheRegistry] プロバイダー読み込みエラー ({meshKey}): {e.Message}");
                 
-                var duration = (DateTime.UtcNow - startTime).TotalMilliseconds;
-                performanceMonitor.RecordCacheOperation(GetCacheType(provider), false, duration, true);
+                // var duration = (DateTime.UtcNow - startTime).TotalMilliseconds;
+                // performanceMonitor.RecordCacheOperation(GetCacheType(provider), false, duration, true);
                 
                 return default;
             }
@@ -347,7 +348,7 @@ namespace ExDeform.Runtime.Cache
             
             cacheProviders.Clear();
             meshToProviderMap.Clear();
-            performanceMonitor?.Dispose();
+            // performanceMonitor?.Dispose(); // Editor-only
         }
         #endregion
     }
@@ -370,14 +371,15 @@ namespace ExDeform.Runtime.Cache
     {
         public int totalProviders;
         public int activeMeshMappings;
-        public PerformanceStatistics overallPerformance;
-        public Dictionary<CacheType, PerformanceStatistics> providerPerformance;
+        // Performance monitoring disabled in runtime (Editor-only types)
+        // public PerformanceStatistics overallPerformance;
+        // public Dictionary<CacheType, PerformanceStatistics> providerPerformance;
         
         public override string ToString()
         {
             return $"CacheRegistry: Providers={totalProviders}, " +
-                   $"Mappings={activeMeshMappings}, " +
-                   $"HitRate={overallPerformance.hitRate:P1}";
+                   $"Mappings={activeMeshMappings}";
+                   // Performance monitoring disabled in runtime
         }
     }
 }
