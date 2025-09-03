@@ -18,9 +18,9 @@ namespace ExDeform.Editor
             EnsureDirectoryExists();
         }
         
-        public void SaveTexture(string key, Texture2D texture)
+        public bool SaveTexture(string key, Texture2D texture)
         {
-            if (string.IsNullOrEmpty(key) || texture == null) return;
+            if (string.IsNullOrEmpty(key) || texture == null) return false;
             
             try
             {
@@ -34,6 +34,8 @@ namespace ExDeform.Editor
                 // Save metadata separately
                 var metaData = FormatMetadata(texture);
                 File.WriteAllText(metaPath, metaData);
+                
+                return true;
             }
             catch (Exception e)
             {
@@ -41,6 +43,7 @@ namespace ExDeform.Editor
                 
                 // Cleanup partial files on error
                 CleanupPartialFiles(key);
+                return false;
             }
         }
         
@@ -93,6 +96,56 @@ namespace ExDeform.Editor
             {
                 Debug.LogError($"[{CacheTypeName}] Clear failed for key '{key}': {e.Message}");
             }
+        }
+        
+        public void ClearAllCache()
+        {
+            try
+            {
+                if (Directory.Exists(CacheConstants.BINARY_CACHE_FOLDER))
+                {
+                    var files = Directory.GetFiles(CacheConstants.BINARY_CACHE_FOLDER);
+                    foreach (var file in files)
+                    {
+                        File.Delete(file);
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[{CacheTypeName}] Clear all cache failed: {e.Message}");
+            }
+        }
+        
+        public CacheStatistics GetStatistics()
+        {
+            var stats = new CacheStatistics();
+            
+            try
+            {
+                if (Directory.Exists(CacheConstants.BINARY_CACHE_FOLDER))
+                {
+                    var pngFiles = Directory.GetFiles(CacheConstants.BINARY_CACHE_FOLDER, "*" + CacheConstants.CACHE_PNG_EXTENSION);
+                    stats.entryCount = pngFiles.Length;
+                    
+                    long totalSize = 0;
+                    foreach (var file in pngFiles)
+                    {
+                        totalSize += new FileInfo(file).Length;
+                    }
+                    stats.totalSizeBytes = totalSize;
+                    
+                    // For file-based cache, we don't track hit rate or access time
+                    stats.hitRate = 0f;
+                    stats.averageAccessTime = 0f;
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[{CacheTypeName}] Statistics calculation failed: {e.Message}");
+            }
+            
+            return stats;
         }
         
         private void EnsureDirectoryExists()

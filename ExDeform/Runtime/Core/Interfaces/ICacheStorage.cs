@@ -9,6 +9,11 @@ namespace ExDeform.Core.Interfaces
     public interface ICacheStorage
     {
         /// <summary>
+        /// キャッシュ種別名（デバッグ・ログ用）
+        /// </summary>
+        string CacheTypeName { get; }
+        
+        /// <summary>
         /// テクスチャをキャッシュに保存
         /// </summary>
         /// <param name="key">キャッシュキー</param>
@@ -58,6 +63,10 @@ namespace ExDeform.Core.Interfaces
         public long totalSizeBytes;
         public float hitRate;
         public float averageAccessTime;
+        
+        // 内部統計用（BaseCacheStorageで使用）
+        internal int hitCount;
+        internal int missCount;
         
         public override string ToString()
         {
