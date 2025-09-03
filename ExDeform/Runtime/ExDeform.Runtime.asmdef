@@ -1,0 +1,30 @@
+{
+    "name": "ExDeform.Runtime",
+    "rootNamespace": "ExDeform",
+    "references": [
+        "Unity.Burst",
+        "Unity.Collections",
+        "Unity.Mathematics",
+        "Unity.Jobs"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.burst",
+            "expression": "1.4.0",
+            "define": "EXDEFORM_BURST_AVAILABLE"
+        },
+        {
+            "name": "com.beans.deform",
+            "expression": "1.0.0",
+            "define": "EXDEFORM_DEFORM_AVAILABLE"
+        }
+    ],
+    "noEngineReferences": false
+}

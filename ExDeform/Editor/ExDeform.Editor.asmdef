@@ -1,0 +1,32 @@
+{
+    "name": "ExDeform.Editor",
+    "rootNamespace": "ExDeform.Editor",
+    "references": [
+        "ExDeform.Runtime",
+        "Unity.Burst",
+        "Unity.Collections",
+        "Unity.Mathematics"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.ui",
+            "expression": "1.0.0",
+            "define": "EXDEFORM_UITOOLKIT_AVAILABLE"
+        },
+        {
+            "name": "com.beans.deform",
+            "expression": "1.0.0",
+            "define": "EXDEFORM_DEFORM_AVAILABLE"
+        }
+    ],
+    "noEngineReferences": false
+}

@@ -1,0 +1,27 @@
+{
+    "name": "ExDeform.UVMask.Runtime",
+    "rootNamespace": "ExDeform",
+    "references": [
+        "ExDeform.Runtime",
+        "Deform.Runtime",
+        "Unity.Burst",
+        "Unity.Collections", 
+        "Unity.Mathematics",
+        "Unity.Jobs"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.burst",
+            "expression": "1.4.0",
+            "define": "EXDEFORM_BURST_AVAILABLE"
+        }
+    ],
+    "noEngineReferences": false
+}

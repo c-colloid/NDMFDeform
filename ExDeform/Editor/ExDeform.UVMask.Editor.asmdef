@@ -1,0 +1,30 @@
+{
+    "name": "ExDeform.UVMask.Editor",
+    "rootNamespace": "ExDeform.Editor",
+    "references": [
+        "ExDeform.Runtime",
+        "ExDeform.UVMask.Runtime",
+        "Deform.Runtime",
+        "Deform.Editor",
+        "Unity.Burst",
+        "Unity.Collections",
+        "Unity.Mathematics"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.ui",
+            "expression": "1.0.0",
+            "define": "EXDEFORM_UITOOLKIT_AVAILABLE"
+        }
+    ],
+    "noEngineReferences": false
+}
