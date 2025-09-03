@@ -4,7 +4,7 @@ using System.IO;
 using UnityEngine;
 using UnityEditor;
 
-namespace Deform.Masking.Editor
+namespace ExDeform.Editor
 {
     /// <summary>
     /// Optimal UV texture cache implementation using binary files for maximum performance

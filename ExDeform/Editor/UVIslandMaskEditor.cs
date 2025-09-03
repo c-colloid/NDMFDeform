@@ -6,7 +6,7 @@ using UnityEditor.UIElements;
 using System.Linq;
 using System.Collections.Generic;
 
-namespace Deform.Masking.Editor
+namespace ExDeform.Editor
 {
     /// <summary>
     /// Custom editor for UV Island Mask with improved UI and localization

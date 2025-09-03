@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using System.Linq;
 
-namespace Deform.Masking
+namespace ExDeform.Runtime
 {
     /// <summary>
     /// UV Island analysis utility

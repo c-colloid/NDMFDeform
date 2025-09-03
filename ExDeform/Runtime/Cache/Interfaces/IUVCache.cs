@@ -1,7 +1,7 @@
 using UnityEngine;
 using Unity.Collections;
 
-namespace Deform.Masking.Cache.Interfaces
+namespace ExDeform.Runtime.Cache.Interfaces
 {
     /// <summary>
     /// UV専用キャッシュインターフェース

@@ -6,10 +6,10 @@ using Unity.Collections;
 using Unity.Mathematics;
 using ExDeform.Core.Interfaces;
 using ExDeform.Core.Extensions;
-using ExDeform.Cache;
-using ExDeform.Data;
+using ExDeform.Runtime.Cache;
+using ExDeform.Runtime.Data;
 
-namespace ExDeform.Deformers
+namespace ExDeform.Runtime.Deformers
 {
     /// <summary>
     /// UV Island based mask for deformation - ExDeform拡張版

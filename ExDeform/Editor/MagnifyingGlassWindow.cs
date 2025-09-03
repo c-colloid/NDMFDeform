@@ -1,7 +1,7 @@
 using UnityEngine;
 using UnityEditor;
 
-namespace Deform.Masking.Editor
+namespace ExDeform.Editor
 {
     /// <summary>
     /// ルーペ機能用のエディタウィンドウ

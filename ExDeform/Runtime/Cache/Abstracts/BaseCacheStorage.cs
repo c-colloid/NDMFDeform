@@ -3,7 +3,7 @@ using UnityEngine;
 using ExDeform.Core.Interfaces;
 using ExDeform.Core.Constants;
 
-namespace ExDeform.Cache.Abstracts
+namespace ExDeform.Runtime.Cache.Abstracts
 {
     /// <summary>
     /// キャッシュストレージの基底クラス

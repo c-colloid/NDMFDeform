@@ -1,7 +1,7 @@
 using UnityEngine;
 using Unity.Collections;
 
-namespace Deform.Masking.Data
+namespace ExDeform.Runtime.Data
 {
     /// <summary>
     /// UVIslandMask設定データ
