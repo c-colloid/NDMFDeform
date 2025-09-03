@@ -8,6 +8,8 @@ using ExDeform.Core.Interfaces;
 using ExDeform.Core.Extensions;
 using ExDeform.Runtime.Cache;
 using ExDeform.Runtime.Data;
+// using ExDeform.Editor; // Runtime cannot reference Editor
+using ExDeform.Runtime;
 
 namespace ExDeform.Runtime.Deformers
 {
@@ -52,10 +54,10 @@ namespace ExDeform.Runtime.Deformers
         [System.NonSerialized] private Mesh cachedMesh;
         [System.NonSerialized] private Mesh originalMesh;
         
-        // モジュール化されたコンポーネント
-        [System.NonSerialized] private UVCacheManager cacheManager;
-        [System.NonSerialized] private UVMaskProcessor maskProcessor;
-        [System.NonSerialized] private UVIslandAnalyzer islandAnalyzer;
+        // モジュール化されたコンポーネント (Editor-only classes disabled in Runtime)
+        // [System.NonSerialized] private UVCacheManager cacheManager;
+        // [System.NonSerialized] private UVMaskProcessor maskProcessor;
+        // UVIslandAnalyzer is a static utility class
         
         // 外部Deform統合
         [System.NonSerialized] private object externalDeformable;
@@ -135,7 +137,9 @@ namespace ExDeform.Runtime.Deformers
             }
             
             // Job実行（外部MeshDataと統合）
-            return maskProcessor.ProcessMaskJob(meshData, maskValues, invertMask, maskStrength, featherRadius, dependency);
+            // Note: maskProcessor is Editor-only, using simple pass-through in Runtime
+            // TODO: Implement runtime-compatible mask processing
+            return dependency; // Pass-through for now
         }
         
         public void Cleanup()
@@ -145,29 +149,27 @@ namespace ExDeform.Runtime.Deformers
             isDisposing = true;
             
             DisposeMaskValues();
-            cacheManager?.Cleanup();
-            maskProcessor?.Cleanup();
-            islandAnalyzer?.Cleanup();
+            // Editor-only classes disabled in Runtime
+            // cacheManager?.Cleanup();
+            // maskProcessor?.Cleanup();
         }
         #endregion
         
         #region 内部実装
         private void InitializeModules()
         {
-            if (cacheManager == null && enableCaching)
-            {
-                cacheManager = new UVCacheManager();
-            }
+            // Editor-only modules disabled in Runtime
+            // if (cacheManager == null && enableCaching)
+            // {
+            //     cacheManager = new UVCacheManager();
+            // }
+            // 
+            // if (maskProcessor == null)
+            // {
+            //     maskProcessor = new UVMaskProcessor(useJobSystem, useBurstCompilation);
+            // }
             
-            if (maskProcessor == null)
-            {
-                maskProcessor = new UVMaskProcessor(useJobSystem, useBurstCompilation);
-            }
-            
-            if (islandAnalyzer == null)
-            {
-                islandAnalyzer = new UVIslandAnalyzer();
-            }
+            // UVIslandAnalyzer is a static utility class - no instantiation needed
         }
         
         private void TryIntegrateWithExternalDeform()
@@ -182,7 +184,7 @@ namespace ExDeform.Runtime.Deformers
             }
             
             // 外部Deformableを検索・統合
-            var deformable = GetComponent<Deformable>(); // 動的型解決
+            var deformable = GetComponent("Deformable") as Component; // 動的型解決
             if (deformable != null)
             {
                 externalDeformable = deformable;
@@ -225,15 +227,16 @@ namespace ExDeform.Runtime.Deformers
         {
             try
             {
-                // キャッシュから島データを取得または解析
-                var islands = cacheManager?.GetCachedIslands(mesh) ?? 
-                             islandAnalyzer.AnalyzeUVIslands(mesh);
+                // キャッシュから島データを取得または解析 (Editor-only cache disabled)
+                // var islands = cacheManager?.GetCachedIslands(mesh) ?? 
+                //              UVIslandAnalyzer.AnalyzeUVIslands(mesh);
+                var islands = UVIslandAnalyzer.AnalyzeUVIslands(mesh);
                 
                 // 選択された島の頂点を変形許可に設定
                 foreach (var islandID in selectedIslandIDs)
                 {
-                    var island = System.Array.Find(islands, i => i.islandID == islandID);
-                    if (island.vertexIndices != null)
+                    var island = islands.Find(i => i.islandID == islandID);
+                    if (island != null && island.vertexIndices != null)
                     {
                         foreach (var vertexIndex in island.vertexIndices)
                         {
@@ -245,8 +248,8 @@ namespace ExDeform.Runtime.Deformers
                     }
                 }
                 
-                // キャッシュに保存（有効な場合）
-                cacheManager?.CacheIslands(mesh, islands);
+                // キャッシュに保存（有効な場合） - Editor-only cache disabled
+                // cacheManager?.CacheIslands(mesh, islands);
             }
             catch (System.Exception e)
             {
@@ -299,7 +302,8 @@ namespace ExDeform.Runtime.Deformers
         public void InvalidateCache()
         {
             maskDataReady = false;
-            cacheManager?.ClearCache();
+            // Editor-only cache disabled
+            // cacheManager?.ClearCache();
         }
         
         /// <summary>

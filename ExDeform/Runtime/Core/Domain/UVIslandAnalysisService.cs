@@ -478,7 +478,7 @@ namespace ExDeform.Runtime.Core.Domain
             if (result.Islands == null || result.Islands.Count == 0)
                 return;
 
-            result.AverageIslandSize = result.Islands.Average(i => i.VertexCount);
+            result.AverageIslandSize = (float)result.Islands.Average(i => i.VertexCount);
             result.LargestIslandSize = result.Islands.Max(i => i.VertexCount);
             result.SmallestIslandSize = result.Islands.Min(i => i.VertexCount);
             result.TotalUVArea = result.Islands.Sum(i => i.UVArea);
