@@ -26,7 +26,6 @@ namespace ExDeform.Editor.Inspector
         private readonly IUVCache uvCache;
         
         private VisualElement rootElement;
-        private UVMapRenderer uvMapRenderer;
         private IslandSelector islandSelector;
         
         // Deform統合用
@@ -197,6 +196,7 @@ namespace ExDeform.Editor.Inspector
         #endregion
         
         #region Private Methods - Event Handlers
+#if EXDEFORM_DEFORM_AVAILABLE
         private void OnDeformableChanged(SerializedPropertyChangeEvent evt)
         {
             var newDeformable = evt.changedProperty.objectReferenceValue as Deformable;
@@ -212,7 +212,16 @@ namespace ExDeform.Editor.Inspector
             
             RefreshUI();
         }
+#else
+        private void OnDeformableChanged(SerializedPropertyChangeEvent evt)
+        {
+            // Deform not available - just refresh UI
+            OnMeshChanged();
+            RefreshUI();
+        }
+#endif
         
+#if EXDEFORM_DEFORM_AVAILABLE
         private void EnsureDeformerInChain(Deformable deformable)
         {
             // DeformableのDeformerチェーンにUVIslandMaskが含まれていない場合は追加
@@ -231,6 +240,7 @@ namespace ExDeform.Editor.Inspector
                 }
             }
         }
+#endif
         #endregion
         
         #region Private Methods - Utilities

@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEditor;
+using ExDeform.Core.Interfaces;
 
 namespace ExDeform.Editor
 {
@@ -230,12 +231,12 @@ namespace ExDeform.Editor
 
                 return new CacheStatistics
                 {
-                    totalEntries = _cache.Count,
-                    totalHitCount = _hitCount,
-                    totalMissCount = _missCount,
-                    overallHitRate = hitRate,
-                    averageReadTime = avgReadTime,
-                    totalSizeBytes = totalSize
+                    entryCount = _cache.Count,
+                    totalSizeBytes = totalSize,
+                    hitRate = hitRate,
+                    averageAccessTime = (float)avgReadTime,
+                    hitCount = _hitCount,
+                    missCount = _missCount
                 };
             }
         }

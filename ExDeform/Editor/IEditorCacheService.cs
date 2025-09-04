@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using UnityEngine;
+using ExDeform.Core.Interfaces;
 
 namespace ExDeform.Editor
 {
@@ -51,24 +52,5 @@ namespace ExDeform.Editor
         /// </summary>
         /// <returns>Cache performance statistics</returns>
         CacheStatistics GetStatistics();
-    }
-
-    /// <summary>
-    /// Cache performance statistics
-    /// </summary>
-    public struct CacheStatistics
-    {
-        public int totalEntries;
-        public int totalHitCount;
-        public int totalMissCount;
-        public float overallHitRate;
-        public double averageReadTime;
-        public long totalSizeBytes;
-
-        public override string ToString()
-        {
-            return $"Entries: {totalEntries}, Hits: {totalHitCount}, Misses: {totalMissCount}, " +
-                   $"Hit Rate: {overallHitRate:P1}, Avg Read: {averageReadTime:F2}ms, Size: {totalSizeBytes / 1024}KB";
-        }
     }
 }
