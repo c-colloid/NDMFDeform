@@ -19,15 +19,16 @@ namespace ExDeform.Runtime.Deformers
     /// 外部Deform拡張との完全互換性を保ちつつモジュール化
     /// </summary>
     [System.Serializable]
-    public class UVIslandMask : MonoBehaviour
+    [Deform.Deformer(Name = "UV Island Mask", Description = "Masks deformation based on UV island selection", Type = typeof(UVIslandMask), Category = Deform.Category.Mask)]
+    public class UVIslandMask : IExDeformer
     {
-        #region Properties for compatibility
-        public string DeformerName => "UV Island Mask";
-        public DeformerCategory Category => DeformerCategory.Mask;
-        public string Description => "Masks deformation based on UV island selection";
-        public System.Version CompatibleDeformVersion => new System.Version(1, 0, 0);
-        public bool IsVisibleInEditor => true;
-        public bool IsEnabledInRuntime => enabled && HasValidConfiguration();
+        #region IExDeformer プロパティ
+        public override string DeformerName => "UV Island Mask";
+        public override DeformerCategory Category => DeformerCategory.Mask;
+        public override string Description => "Masks deformation based on UV island selection";
+        public override System.Version CompatibleDeformVersion => new System.Version(1, 0, 0);
+        public override bool IsVisibleInEditor => true;
+        public override bool IsEnabledInRuntime => enabled && HasValidConfiguration();
         #endregion
         
         #region シリアライズフィールド（後方互換性維持）
@@ -123,15 +124,15 @@ namespace ExDeform.Runtime.Deformers
         }
         #endregion
         
-        #region Deformer methods for compatibility
-        public bool Initialize(object deformable)
+        #region IExDeformer 実装
+        public override bool Initialize(object deformable)
         {
             externalDeformable = deformable;
             InitializeModules();
             return HasValidConfiguration();
         }
         
-        public JobHandle ProcessMesh(object meshData, JobHandle dependency)
+        public override JobHandle ProcessMesh(object meshData, JobHandle dependency)
         {
             currentMeshData = meshData;
             
@@ -161,7 +162,7 @@ namespace ExDeform.Runtime.Deformers
             return dependency; // Pass-through for now
         }
         
-        public void Cleanup()
+        public override void Cleanup()
         {
             if (isDisposing) return;
             
@@ -207,12 +208,11 @@ namespace ExDeform.Runtime.Deformers
             if (deformable != null)
             {
                 externalDeformable = deformable;
-                // Note: External Deform integration disabled due to missing Deform assembly
-                // deformable.AddExDeformer(this); // 拡張メソッドで追加
+                deformable.AddExDeformer(this); // 拡張メソッドで追加
                 
                 if (debugMode)
                 {
-                    Debug.Log($"[UVIslandMask] 外部Deform拡張が見つかりましたが、統合は無効化されています。");
+                    Debug.Log($"[UVIslandMask] 外部Deform拡張と統合しました。バージョン: {DeformExtensions.GetDeformVersion()}");
                 }
             }
         }
