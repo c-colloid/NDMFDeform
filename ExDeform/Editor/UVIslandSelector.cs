@@ -117,11 +117,21 @@ namespace ExDeform.Editor
         public bool IsRangeSelecting => isRangeSelecting;
         
         /// <summary>
+        /// Creates a new UVIslandSelector without a mesh
+        /// メッシュなしで新しいUVIslandSelectorを作成
+        /// </summary>
+        public UVIslandSelector()
+        {
+            uvIslands = new List<UVIslandAnalyzer.UVIsland>();
+            selectedIslandIDs = new List<int>();
+        }
+        
+        /// <summary>
         /// Creates a new UVIslandSelector with the specified mesh
         /// 指定されたメッシュで新しいUVIslandSelectorを作成
         /// </summary>
         /// <param name="mesh">The mesh to analyze for UV islands</param>
-        public UVIslandSelector(Mesh mesh)
+        public UVIslandSelector(Mesh mesh) : this()
         {
             SetMesh(mesh);
         }
@@ -607,6 +617,30 @@ namespace ExDeform.Editor
                     Handles.DrawLine(v2, v0);
                 }
             }
+        }
+        
+        /// <summary>
+        /// Refresh island data by re-analyzing the current mesh
+        /// 現在のメッシュを再分析してアイランドデータを更新
+        /// </summary>
+        public void RefreshIslandData()
+        {
+            if (targetMesh != null)
+            {
+                SetMesh(targetMesh);
+            }
+        }
+        
+        /// <summary>
+        /// Create a selector UI element (placeholder implementation)
+        /// セレクターUI要素を作成（プレースホルダー実装）
+        /// </summary>
+        public UnityEngine.UIElements.VisualElement CreateSelectorElement()
+        {
+            var container = new UnityEngine.UIElements.VisualElement();
+            container.name = "uv-island-selector";
+            container.Add(new UnityEngine.UIElements.Label("UV Island Selector"));
+            return container;
         }
         
         /// <summary>

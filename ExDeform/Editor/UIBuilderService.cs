@@ -297,11 +297,11 @@ namespace ExDeform.Editor
                 // Container mouse events
                 if (config.MouseHandlers.OnContainerMouseMove != null)
                 {
-                    uvMapContainer.RegisterCallback<MouseMoveEvent>(config.MouseHandlers.OnContainerMouseMove, TrickleDown.TrickleDown);
+                    uvMapContainer.RegisterCallback<MouseMoveEvent>(evt => config.MouseHandlers.OnContainerMouseMove(evt), TrickleDown.TrickleDown);
                 }
                 if (config.MouseHandlers.OnContainerMouseUp != null)
                 {
-                    uvMapContainer.RegisterCallback<MouseUpEvent>(config.MouseHandlers.OnContainerMouseUp, TrickleDown.TrickleDown);
+                    uvMapContainer.RegisterCallback<MouseUpEvent>(evt => config.MouseHandlers.OnContainerMouseUp(evt), TrickleDown.TrickleDown);
                 }
             }
             
@@ -749,22 +749,22 @@ namespace ExDeform.Editor
         {
             if (handlers.OnMouseDown != null)
             {
-                element.RegisterCallback<MouseDownEvent>(handlers.OnMouseDown, TrickleDown.TrickleDown);
+                element.RegisterCallback<MouseDownEvent>(evt => handlers.OnMouseDown(evt), TrickleDown.TrickleDown);
             }
             
             if (handlers.OnMouseMove != null)
             {
-                element.RegisterCallback<MouseMoveEvent>(handlers.OnMouseMove, TrickleDown.TrickleDown);
+                element.RegisterCallback<MouseMoveEvent>(evt => handlers.OnMouseMove(evt), TrickleDown.TrickleDown);
             }
             
             if (handlers.OnMouseUp != null)
             {
-                element.RegisterCallback<MouseUpEvent>(handlers.OnMouseUp, TrickleDown.TrickleDown);
+                element.RegisterCallback<MouseUpEvent>(evt => handlers.OnMouseUp(evt), TrickleDown.TrickleDown);
             }
             
             if (handlers.OnWheel != null)
             {
-                element.RegisterCallback<WheelEvent>(handlers.OnWheel, TrickleDown.TrickleDown);
+                element.RegisterCallback<WheelEvent>(evt => handlers.OnWheel(evt), TrickleDown.TrickleDown);
             }
         }
         

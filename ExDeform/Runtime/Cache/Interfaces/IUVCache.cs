@@ -7,7 +7,7 @@ namespace ExDeform.Runtime.Cache.Interfaces
     /// UV専用キャッシュインターフェース
     /// Deformerとしての特性を活かした最適化されたキャッシュ機能
     /// </summary>
-    public interface IUVCache
+    public interface IUVCache : System.IDisposable
     {
         /// <summary>
         /// UVテクスチャとメタデータを一括保存

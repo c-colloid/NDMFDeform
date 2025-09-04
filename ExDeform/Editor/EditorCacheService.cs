@@ -234,9 +234,7 @@ namespace ExDeform.Editor
                     entryCount = _cache.Count,
                     totalSizeBytes = totalSize,
                     hitRate = hitRate,
-                    averageAccessTime = (float)avgReadTime,
-                    hitCount = _hitCount,
-                    missCount = _missCount
+                    averageAccessTime = (float)avgReadTime
                 };
             }
         }
@@ -281,15 +279,16 @@ namespace ExDeform.Editor
                     // Log performance metrics
                     LogCacheOperation($"Cache Health Check: {stats}");
                     
-                    // Check for performance issues
-                    if (stats.overallHitRate < 0.5f && stats.totalHitCount + stats.totalMissCount > 10)
+                    // Check for performance issues  
+                    var totalOps = _hitCount + _missCount;
+                    if (stats.hitRate < 0.5f && totalOps > 10)
                     {
-                        LogCacheOperation($"Low cache hit rate detected: {stats.overallHitRate:P1} - Consider investigating cache key generation", isError: true);
+                        LogCacheOperation($"Low cache hit rate detected: {stats.hitRate:P1} - Consider investigating cache key generation", isError: true);
                     }
                     
-                    if (stats.averageReadTime > 5.0f)
+                    if (stats.averageAccessTime > 5.0f)
                     {
-                        LogCacheOperation($"Slow cache read performance: {stats.averageReadTime:F2}ms average - Consider cache cleanup", isError: true);
+                        LogCacheOperation($"Slow cache read performance: {stats.averageAccessTime:F2}ms average - Consider cache cleanup", isError: true);
                     }
                     
                     // Automatic cleanup for large caches

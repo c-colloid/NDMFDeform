@@ -325,7 +325,7 @@ namespace ExDeform.Editor
             return uvMapArea.Q<VisualElement>(null, "uv-map-container") ?? 
                    uvMapArea.Children().FirstOrDefault(child => 
                        child.style.backgroundColor.value.Equals(Color.white) &&
-                       child.style.borderBottomWidth.value.value > 0);
+                       child.style.borderBottomWidth.value > 0);
         }
         
         private void SetupAdditionalEventHandlers()

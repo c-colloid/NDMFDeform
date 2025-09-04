@@ -62,6 +62,11 @@ namespace ExDeform.Runtime.Deformers
         // 外部Deform統合
         [System.NonSerialized] private object externalDeformable;
         [System.NonSerialized] private object currentMeshData;
+        [System.NonSerialized] private Transform cachedRendererTransform;
+        
+        #if EXDEFORM_DEFORM_AVAILABLE
+        [SerializeField] private Deform.Deformable targetDeformable;
+        #endif
         #endregion
         
         #region 公開プロパティ（後方互換性）
@@ -77,6 +82,19 @@ namespace ExDeform.Runtime.Deformers
         public bool UseJobSystem { get => useJobSystem; set => useJobSystem = value; }
         public bool UseBurstCompilation { get => useBurstCompilation; set => useBurstCompilation = value; }
         public int EditorTextureResolution => editorTextureResolution;
+        
+        // エディター用プロパティ
+        public Transform CachedRendererTransform 
+        { 
+            get => cachedRendererTransform; 
+            set => cachedRendererTransform = value; 
+        }
+        
+        #if EXDEFORM_DEFORM_AVAILABLE
+        public Deform.Deformable TargetDeformable => targetDeformable;
+        #else
+        public object TargetDeformable => null;
+        #endif
         #endregion
         
         #region Unity ライフサイクル
@@ -315,6 +333,18 @@ namespace ExDeform.Runtime.Deformers
                    $"MaskReady={maskDataReady}, " +
                    $"ExternalDeform={DeformExtensions.IsDeformAvailable()}, " +
                    $"CacheEnabled={enableCaching}";
+        }
+        
+        /// <summary>
+        /// レンダラーキャッシュの更新（エディター用）
+        /// </summary>
+        public void UpdateRendererCache()
+        {
+            if (cachedRendererTransform == null)
+            {
+                var renderer = GetComponent<Renderer>();
+                cachedRendererTransform = renderer?.transform;
+            }
         }
         #endregion
     }

@@ -14,6 +14,9 @@ namespace ExDeform.Editor
         
         /// <summary>パフォーマンステストで使用するテクスチャフォーマット</summary>
         public const UnityEngine.TextureFormat TEST_TEXTURE_FORMAT = UnityEngine.TextureFormat.RGBA32;
+        
+        /// <summary>パフォーマンステスト反復回数</summary>
+        public const int PERFORMANCE_TEST_ITERATIONS = 100;
         #endregion
         
         #region Editor-specific Cache Settings
@@ -27,6 +30,12 @@ namespace ExDeform.Editor
         public const string CACHE_JSON_EXTENSION = ".json";
         public const string CACHE_PNG_EXTENSION = ".png";
         public const string CACHE_META_EXTENSION = ".meta";
+        
+        /// <summary>キャッシュルートディレクトリ</summary>
+        public const string CACHE_ROOT_DIRECTORY = "Library/ExDeformCache";
+        
+        /// <summary>バイナリキャッシュディレクトリ</summary>
+        public const string BINARY_CACHE_DIRECTORY = "Library/ExDeformCache/Binary";
         #endregion
         
         #region Size and Performance Limits

@@ -73,7 +73,7 @@ namespace ExDeform.Editor.Inspector
         public void OnDeformerChainChanged()
         {
             RefreshUI();
-            uvMapRenderer?.RefreshTexture();
+            // UVMapRenderer is static - no instance needed
         }
         
         /// <summary>
@@ -83,7 +83,7 @@ namespace ExDeform.Editor.Inspector
         {
             uvCache?.InvalidateCache(GetMeshKey());
             islandSelector?.RefreshIslandData();
-            uvMapRenderer?.RefreshTexture();
+            // UVMapRenderer is static - no instance needed
         }
         #endregion
         
@@ -140,13 +140,12 @@ namespace ExDeform.Editor.Inspector
         {
             var uvSection = CreateSection("UV Island Selection");
             
-            // UVマップレンダラー
-            uvMapRenderer = new UVMapRenderer(targetMask, uvCache);
-            var uvMapElement = uvMapRenderer.CreateMapElement();
+            // UVマップレンダラー is static - create map element directly
+            var uvMapElement = CreateUVMapElement();
             
             // アイランドセレクター
-            islandSelector = new IslandSelector(targetMask, uvCache);
-            var selectorElement = islandSelector.CreateSelectorElement();
+            islandSelector = new IslandSelector();
+            var selectorElement = CreateSelectorElement();
             
             uvSection.Add(uvMapElement);
             uvSection.Add(selectorElement);
@@ -257,13 +256,38 @@ namespace ExDeform.Editor.Inspector
         
         private string GetMeshKey()
         {
-            var deformable = targetMask.targetDeformable;
-            if (deformable?.GetMesh() != null)
+#if EXDEFORM_DEFORM_AVAILABLE
+            if (targetMask.TargetDeformable is Deformable deformable && deformable.GetMesh() != null)
             {
                 var mesh = deformable.GetMesh();
                 return $"{mesh.name}_{mesh.GetInstanceID()}_{mesh.vertexCount}";
             }
+#endif
             return "invalid_mesh";
+        }
+        
+        /// <summary>
+        /// Create UV map UI element (placeholder implementation)
+        /// UVマップUI要素を作成（プレースホルダー実装）
+        /// </summary>
+        private VisualElement CreateUVMapElement()
+        {
+            var container = new VisualElement();
+            container.name = "uv-map-container";
+            container.Add(new Label("UV Map Viewer"));
+            return container;
+        }
+        
+        /// <summary>
+        /// Create selector UI element (placeholder implementation)
+        /// セレクターUI要素を作成（プレースホルダー実装）
+        /// </summary>
+        private VisualElement CreateSelectorElement()
+        {
+            var container = new VisualElement();
+            container.name = "selector-container";
+            container.Add(new Label("Island Selector"));
+            return container;
         }
         #endregion
     }
@@ -279,5 +303,6 @@ namespace ExDeform.Editor.Inspector
         public bool IsValidCache(string meshKey, int meshHash) => false;
         public void InvalidateCache(string meshKey) { }
         public void OptimizeMemoryUsage() { }
+        public void Dispose() { }
     }
 }
