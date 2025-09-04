@@ -19,7 +19,7 @@ namespace ExDeform.Runtime.Deformers
     /// 外部Deform拡張との完全互換性を保ちつつモジュール化
     /// </summary>
     [System.Serializable]
-    [Deform.Deformer(Name = "UV Island Mask", Description = "Masks deformation based on UV island selection", Type = typeof(UVIslandMask), Category = DeformerCategory.Mask)]
+    [Deform.Deformer(Name = "UV Island Mask", Description = "Masks deformation based on UV island selection", Type = typeof(UVIslandMask), Category = (Deform.Category)1)]
     public class UVIslandMask : IExDeformer
     {
         #region IExDeformer プロパティ
