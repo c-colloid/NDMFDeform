@@ -106,6 +106,18 @@ namespace ExDeform.Runtime.Cache.Implementations
                 fallbackCache.OptimizeMemoryUsage();
             }
         }
+
+        public void Dispose()
+        {
+            try
+            {
+                fallbackCache?.Dispose();
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[OptimalUVCacheAdapter] Error disposing fallback cache: {e.Message}");
+            }
+        }
         #endregion
 
         #region Helper Methods
