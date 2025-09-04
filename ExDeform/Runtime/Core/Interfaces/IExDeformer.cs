@@ -1,4 +1,4 @@
-using Unity.Jobs;
+﻿using Unity.Jobs;
 using UnityEngine;
 
 namespace ExDeform.Core.Interfaces
@@ -43,7 +43,7 @@ namespace ExDeform.Core.Interfaces
         /// <param name="meshData">外部Deformの MeshData</param>
         /// <param name="dependency">Job依存関係</param>
         /// <returns>処理後JobHandle</returns>
-        public abstract JobHandle ProcessMesh(object meshData, JobHandle dependency);
+	    public abstract JobHandle ProcessMesh(Deform.MeshData meshData, JobHandle dependency);
         
         /// <summary>
         /// リソースクリーンアップ

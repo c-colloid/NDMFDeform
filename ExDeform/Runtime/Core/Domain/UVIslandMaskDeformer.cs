@@ -67,7 +67,7 @@ namespace ExDeform.Runtime.Core.Domain
             return IsValidConfiguration();
         }
 
-        public override JobHandle ProcessMesh(object meshData, JobHandle dependency)
+	    public override JobHandle ProcessMesh(Deform.MeshData meshData, JobHandle dependency)
         {
             if (!_isInitialized || meshData == null)
                 return dependency;

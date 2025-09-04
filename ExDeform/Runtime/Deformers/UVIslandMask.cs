@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 using Unity.Jobs;
 using Unity.Burst;
@@ -63,7 +63,7 @@ namespace ExDeform.Runtime.Deformers
         
         // 外部Deform統合
         [System.NonSerialized] private object externalDeformable;
-        [System.NonSerialized] private object currentMeshData;
+	    [System.NonSerialized] private MeshData currentMeshData;
         [System.NonSerialized] private Transform cachedRendererTransform;
         
         #if EXDEFORM_DEFORM_AVAILABLE
@@ -132,13 +132,13 @@ namespace ExDeform.Runtime.Deformers
             return HasValidConfiguration();
         }
         
-        public override JobHandle ProcessMesh(object meshData, JobHandle dependency)
+	    public override JobHandle ProcessMesh(Deform.MeshData meshData, JobHandle dependency)
         {
             currentMeshData = meshData;
             
             // 外部MeshDataから情報を抽出
-            var vertexCount = meshData.GetVertexCount();
-            var originalMesh = meshData.GetOriginalMesh();
+	        var vertexCount = meshData.GetVertexCount();
+	        originalMesh = meshData.OriginalMesh;
             
             if (vertexCount == 0 || originalMesh == null)
             {
@@ -344,7 +344,7 @@ namespace ExDeform.Runtime.Deformers
         {
             if (cachedRendererTransform == null)
             {
-                var renderer = GetComponent<Renderer>();
+	            var renderer = currentMeshData.Target.GetRenderer();
                 cachedRendererTransform = renderer?.transform;
             }
         }
