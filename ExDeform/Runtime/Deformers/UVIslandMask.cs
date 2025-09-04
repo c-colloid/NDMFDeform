@@ -10,6 +10,7 @@ using ExDeform.Runtime.Cache;
 using ExDeform.Runtime.Data;
 // using ExDeform.Editor; // Runtime cannot reference Editor
 using ExDeform.Runtime;
+using Deform;
 
 namespace ExDeform.Runtime.Deformers
 {
@@ -18,15 +19,16 @@ namespace ExDeform.Runtime.Deformers
     /// 外部Deform拡張との完全互換性を保ちつつモジュール化
     /// </summary>
     [System.Serializable]
-    public class UVIslandMask : MonoBehaviour, IExDeformer
+    [Deformer(Name = "UV Island Mask", Description = "Masks deformation based on UV island selection", Type = typeof(UVIslandMask), Category = Category.Mask)]
+    public class UVIslandMask : IExDeformer
     {
         #region IExDeformer プロパティ
-        public string DeformerName => "UV Island Mask";
-        public DeformerCategory Category => DeformerCategory.Mask;
-        public string Description => "Masks deformation based on UV island selection";
-        public System.Version CompatibleDeformVersion => new System.Version(1, 0, 0);
-        public bool IsVisibleInEditor => true;
-        public bool IsEnabledInRuntime => enabled && HasValidConfiguration();
+        public override string DeformerName => "UV Island Mask";
+        public override DeformerCategory Category => DeformerCategory.Mask;
+        public override string Description => "Masks deformation based on UV island selection";
+        public override System.Version CompatibleDeformVersion => new System.Version(1, 0, 0);
+        public override bool IsVisibleInEditor => true;
+        public override bool IsEnabledInRuntime => enabled && HasValidConfiguration();
         #endregion
         
         #region シリアライズフィールド（後方互換性維持）
@@ -123,14 +125,14 @@ namespace ExDeform.Runtime.Deformers
         #endregion
         
         #region IExDeformer 実装
-        public bool Initialize(object deformable)
+        public override bool Initialize(object deformable)
         {
             externalDeformable = deformable;
             InitializeModules();
             return HasValidConfiguration();
         }
         
-        public JobHandle ProcessMesh(object meshData, JobHandle dependency)
+        public override JobHandle ProcessMesh(object meshData, JobHandle dependency)
         {
             currentMeshData = meshData;
             
@@ -160,7 +162,7 @@ namespace ExDeform.Runtime.Deformers
             return dependency; // Pass-through for now
         }
         
-        public void Cleanup()
+        public override void Cleanup()
         {
             if (isDisposing) return;
             
