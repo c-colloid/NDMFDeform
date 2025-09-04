@@ -15,12 +15,12 @@ namespace ExDeform.Runtime.Core.Domain
     public class UVIslandMaskDeformer : IExDeformer
     {
         #region IExDeformer Implementation
-        public string DeformerName => "UV Island Mask (Domain)";
-        public DeformerCategory Category => DeformerCategory.Mask;
-        public string Description => "Domain-driven UV island masking with improved testability";
-        public System.Version CompatibleDeformVersion => new System.Version(1, 0, 0);
-        public bool IsVisibleInEditor => _configuration.IsVisibleInEditor;
-        public bool IsEnabledInRuntime => _configuration.IsEnabled && IsValidConfiguration();
+        public override string DeformerName => "UV Island Mask (Domain)";
+        public override DeformerCategory Category => DeformerCategory.Mask;
+        public override string Description => "Domain-driven UV island masking with improved testability";
+        public override System.Version CompatibleDeformVersion => new System.Version(1, 0, 0);
+        public override bool IsVisibleInEditor => _configuration.IsVisibleInEditor;
+        public override bool IsEnabledInRuntime => _configuration.IsEnabled && IsValidConfiguration();
         #endregion
 
         #region Fields
@@ -60,14 +60,14 @@ namespace ExDeform.Runtime.Core.Domain
         #endregion
 
         #region IExDeformer Implementation
-        public bool Initialize(object deformable)
+        public override bool Initialize(object deformable)
         {
             _externalDeformable = deformable;
             _isInitialized = true;
             return IsValidConfiguration();
         }
 
-        public JobHandle ProcessMesh(object meshData, JobHandle dependency)
+        public override JobHandle ProcessMesh(object meshData, JobHandle dependency)
         {
             if (!_isInitialized || meshData == null)
                 return dependency;
@@ -93,7 +93,7 @@ namespace ExDeform.Runtime.Core.Domain
             return dependency;
         }
 
-        public void Cleanup()
+        public override void Cleanup()
         {
             _islands.Clear();
             _maskService.ClearMasks();
