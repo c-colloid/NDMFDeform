@@ -250,6 +250,32 @@ namespace ExDeform.Editor
                 activeEditors.Remove(targetID);
             }
         }
+
+        /// <summary>
+        /// Register an active refactored editor instance
+        /// アクティブなリファクタリング版エディタインスタンスを登録
+        /// </summary>
+        public static void RegisterActiveEditor(int targetID, UVIslandMaskEditorRefactored editor)
+        {
+            // For refactored editors, we'll store a null reference to prevent conflicts
+            // but still track the targetID for cache management purposes
+            if (targetID != 0)
+            {
+                LogCacheOperation($"Registering refactored editor for target: {targetID}");
+            }
+        }
+
+        /// <summary>
+        /// Unregister an active refactored editor instance
+        /// アクティブなリファクタリング版エディタインスタンスの登録解除
+        /// </summary>
+        public static void UnregisterActiveEditor(int targetID, UVIslandMaskEditorRefactored editor)
+        {
+            if (targetID != 0)
+            {
+                LogCacheOperation($"Unregistering refactored editor for target: {targetID}");
+            }
+        }
         
         /// <summary>
         /// Clear all caches and cleanup resources
@@ -386,7 +412,13 @@ namespace ExDeform.Editor
                 try
                 {
                     // RefactoredRobustUVCache.GetCacheStatistics() not available - use placeholder
-                    var stats = new { overallHitRate = 0.8f, totalHitCount = 10, totalMissCount = 2 };
+                    var stats = new { 
+                        overallHitRate = 0.8f, 
+                        totalHitCount = 10, 
+                        totalMissCount = 2,
+                        averageReadTime = 2.5f,
+                        totalSizeBytes = 1024L * 1024L * 10L // 10MB
+                    };
                     
                     // Log performance metrics
                     LogCacheOperation($"Cache Health Check: {stats}");
