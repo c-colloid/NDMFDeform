@@ -12,15 +12,15 @@ namespace ExDeform.Runtime.Core.Domain
     /// Domain-driven UV Island Mask Deformer - business logic separated from UI concerns
     /// ドメイン駆動UVアイランドマスクデフォーマー - ビジネスロジックをUI関心事から分離
     /// </summary>
-    public class UVIslandMaskDeformer : IExDeformer
+    public class UVIslandMaskDeformer
     {
-        #region IExDeformer Implementation
-        public override string DeformerName => "UV Island Mask (Domain)";
-        public override DeformerCategory Category => DeformerCategory.Mask;
-        public override string Description => "Domain-driven UV island masking with improved testability";
-        public override System.Version CompatibleDeformVersion => new System.Version(1, 0, 0);
-        public override bool IsVisibleInEditor => _configuration.IsVisibleInEditor;
-        public override bool IsEnabledInRuntime => _configuration.IsEnabled && IsValidConfiguration();
+        #region Deformer Properties
+        public string DeformerName => "UV Island Mask (Domain)";
+        public DeformerCategory Category => DeformerCategory.Mask;
+        public string Description => "Domain-driven UV island masking with improved testability";
+        public System.Version CompatibleDeformVersion => new System.Version(1, 0, 0);
+        public bool IsVisibleInEditor => _configuration.IsVisibleInEditor;
+        public bool IsEnabledInRuntime => _configuration.IsEnabled && IsValidConfiguration();
         #endregion
 
         #region Fields
@@ -59,15 +59,15 @@ namespace ExDeform.Runtime.Core.Domain
         public bool IsInitialized => _isInitialized;
         #endregion
 
-        #region IExDeformer Implementation
-        public override bool Initialize(object deformable)
+        #region Deformer Implementation
+        public bool Initialize(object deformable)
         {
             _externalDeformable = deformable;
             _isInitialized = true;
             return IsValidConfiguration();
         }
 
-        public override JobHandle ProcessMesh(object meshData, JobHandle dependency)
+        public JobHandle ProcessMesh(object meshData, JobHandle dependency)
         {
             if (!_isInitialized || meshData == null)
                 return dependency;
@@ -93,7 +93,7 @@ namespace ExDeform.Runtime.Core.Domain
             return dependency;
         }
 
-        public override void Cleanup()
+        public void Cleanup()
         {
             _islands.Clear();
             _maskService.ClearMasks();

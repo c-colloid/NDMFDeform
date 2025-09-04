@@ -19,16 +19,15 @@ namespace ExDeform.Runtime.Deformers
     /// 外部Deform拡張との完全互換性を保ちつつモジュール化
     /// </summary>
     [System.Serializable]
-    [Deform.Deformer(Name = "UV Island Mask", Description = "Masks deformation based on UV island selection", Type = typeof(UVIslandMask), Category = (Deform.Category)1)]
-    public class UVIslandMask : IExDeformer
+    public class UVIslandMask : MonoBehaviour
     {
-        #region IExDeformer プロパティ
-        public override string DeformerName => "UV Island Mask";
-        public override DeformerCategory Category => DeformerCategory.Mask;
-        public override string Description => "Masks deformation based on UV island selection";
-        public override System.Version CompatibleDeformVersion => new System.Version(1, 0, 0);
-        public override bool IsVisibleInEditor => true;
-        public override bool IsEnabledInRuntime => enabled && HasValidConfiguration();
+        #region Properties for compatibility
+        public string DeformerName => "UV Island Mask";
+        public DeformerCategory Category => DeformerCategory.Mask;
+        public string Description => "Masks deformation based on UV island selection";
+        public System.Version CompatibleDeformVersion => new System.Version(1, 0, 0);
+        public bool IsVisibleInEditor => true;
+        public bool IsEnabledInRuntime => enabled && HasValidConfiguration();
         #endregion
         
         #region シリアライズフィールド（後方互換性維持）
@@ -124,15 +123,15 @@ namespace ExDeform.Runtime.Deformers
         }
         #endregion
         
-        #region IExDeformer 実装
-        public override bool Initialize(object deformable)
+        #region Deformer methods for compatibility
+        public bool Initialize(object deformable)
         {
             externalDeformable = deformable;
             InitializeModules();
             return HasValidConfiguration();
         }
         
-        public override JobHandle ProcessMesh(object meshData, JobHandle dependency)
+        public JobHandle ProcessMesh(object meshData, JobHandle dependency)
         {
             currentMeshData = meshData;
             
@@ -162,7 +161,7 @@ namespace ExDeform.Runtime.Deformers
             return dependency; // Pass-through for now
         }
         
-        public override void Cleanup()
+        public void Cleanup()
         {
             if (isDisposing) return;
             
