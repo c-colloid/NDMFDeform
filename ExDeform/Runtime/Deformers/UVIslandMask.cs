@@ -207,11 +207,12 @@ namespace ExDeform.Runtime.Deformers
             if (deformable != null)
             {
                 externalDeformable = deformable;
-                deformable.AddExDeformer(this); // 拡張メソッドで追加
+                // Note: External Deform integration disabled due to missing Deform assembly
+                // deformable.AddExDeformer(this); // 拡張メソッドで追加
                 
                 if (debugMode)
                 {
-                    Debug.Log($"[UVIslandMask] 外部Deform拡張と統合しました。バージョン: {DeformExtensions.GetDeformVersion()}");
+                    Debug.Log($"[UVIslandMask] 外部Deform拡張が見つかりましたが、統合は無効化されています。");
                 }
             }
         }
