@@ -6,7 +6,9 @@
         "ExDeform.UVMask.Runtime",
         "Unity.Burst",
         "Unity.Collections",
-        "Unity.Mathematics"
+        "Unity.Mathematics",
+        "NDMFDeform.Deform",
+        "NDMFDeform.DeformEditor"
     ],
     "includePlatforms": [
         "Editor"
