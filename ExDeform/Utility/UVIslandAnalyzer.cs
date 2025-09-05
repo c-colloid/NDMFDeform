@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 using System.Linq;
 
@@ -14,7 +14,7 @@ namespace Deform.Masking
         /// UV tolerance for connecting islands. Increased to allow better island merging.
         /// UVアイランドの接続許容範囲。アイランドの結合を改善するため増加。
         /// </summary>
-        public static float UVTolerance = 0.05f; // Further increased from 0.01f to solve remaining splitting issues
+	    public static float UVTolerance = 0.005f; // Further increased from 0.001f to solve remaining splitting issues
         
         /// <summary>
         /// Triangle degenerate tolerance. Relaxed to include more triangles in analysis.
@@ -24,13 +24,13 @@ namespace Deform.Masking
         
         /// <summary>
         /// Use advanced topology-aware algorithm. Set to false for legacy compatibility.
-        /// 高度なトポロジー認識アルゴリズムを使用。レガシー互換性のためにfalseに設定。
+	    /// 高度なトポロジー認識アルゴリズムを使用 = true。レガシー互換性 = false
         /// </summary>
         public static bool UseAdvancedAlgorithm = true;
         
         /// <summary>
-        /// Enable debug logging for UV island analysis troubleshooting.
-        /// UVアイランド解析のトラブルシューティング用デバッグログを有効化。
+	    /// Debug logging for UV island analysis troubleshooting.
+        /// UVアイランド解析のトラブルシューティング用デバッグログ
         /// </summary>
         public static bool EnableDebugLogging = false;
         /// <summary>
@@ -414,58 +414,351 @@ namespace Deform.Masking
         }
         
         /// <summary>
-        /// Add aggressive proximity-based connections to catch islands that should be merged
-        /// マージされるべきアイランドを捉えるための積極的な近接接続を追加
+        /// Add connections using Union-Find with weighted edge analysis
+        /// 重み付きエッジ解析とUnion-Findを使用した接続追加
         /// </summary>
         private static void AddAggressiveProximityConnections(Dictionary<int, HashSet<int>> adjacency, int[] triangles, Vector2[] uvs)
         {
             int triangleCount = triangles.Length / 3;
-            float aggressiveTolerance = UVTolerance * 2.0f; // More aggressive tolerance
             
-            // Check all triangle pairs for potential connections
-            // This is more computationally intensive but catches edge cases
+            // Build potential connections with confidence weights
+            var potentialConnections = BuildWeightedConnections(triangles, uvs);
+            
+            // Use Union-Find to merge islands based on connection strength
+            var unionFind = new UnionFind(triangleCount);
+            
+            // Sort connections by strength (highest first)
+            potentialConnections.Sort((a, b) => b.weight.CompareTo(a.weight));
+            
+            // Add connections in order of strength, avoiding over-connection
+            foreach (var connection in potentialConnections)
+            {
+                int tri1 = connection.triangle1;
+                int tri2 = connection.triangle2;
+                
+                // Skip if already connected or would create excessive connections
+                if (adjacency[tri1].Contains(tri2) || 
+                    adjacency[tri1].Count >= 15 || adjacency[tri2].Count >= 15) continue;
+                
+                // Only connect if islands are not already merged and connection is strong
+                if (!unionFind.AreConnected(tri1, tri2) && connection.weight > 0.7f)
+                {
+                    unionFind.Union(tri1, tri2);
+                    adjacency[tri1].Add(tri2);
+                    adjacency[tri2].Add(tri1);
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Connection with confidence weight
+        /// </summary>
+        private struct WeightedConnection
+        {
+            public int triangle1;
+            public int triangle2;
+            public float weight; // 0.0 to 1.0, higher = more likely to be connected
+        }
+        
+        /// <summary>
+        /// Union-Find data structure for efficient connected component tracking
+        /// 効率的な連結成分追跡のためのUnion-Findデータ構造
+        /// </summary>
+        private class UnionFind
+        {
+            private int[] parent;
+            private int[] rank;
+            
+            public UnionFind(int size)
+            {
+                parent = new int[size];
+                rank = new int[size];
+                for (int i = 0; i < size; i++)
+                {
+                    parent[i] = i;
+                    rank[i] = 0;
+                }
+            }
+            
+            public int Find(int x)
+            {
+                if (parent[x] != x)
+                    parent[x] = Find(parent[x]); // Path compression
+                return parent[x];
+            }
+            
+            public bool Union(int x, int y)
+            {
+                int rootX = Find(x);
+                int rootY = Find(y);
+                
+                if (rootX == rootY) return false;
+                
+                // Union by rank
+                if (rank[rootX] < rank[rootY])
+                {
+                    parent[rootX] = rootY;
+                }
+                else if (rank[rootX] > rank[rootY])
+                {
+                    parent[rootY] = rootX;
+                }
+                else
+                {
+                    parent[rootY] = rootX;
+                    rank[rootX]++;
+                }
+                
+                return true;
+            }
+            
+            public bool AreConnected(int x, int y)
+            {
+                return Find(x) == Find(y);
+            }
+        }
+        
+        /// <summary>
+        /// Build weighted connections using multiple heuristics
+        /// 複数のヒューリスティックを使用して重み付き接続を構築
+        /// </summary>
+        private static List<WeightedConnection> BuildWeightedConnections(int[] triangles, Vector2[] uvs)
+        {
+            int triangleCount = triangles.Length / 3;
+            var connections = new List<WeightedConnection>();
+            
+            // Build efficient lookup structures
+            var vertexUVMap = BuildVertexUVClusters(triangles, uvs);
+            
             for (int i = 0; i < triangleCount - 1; i++)
             {
-                if (adjacency[i].Count > 20) continue; // Reasonable limit to prevent excessive connections
+                var candidates = FindConnectionCandidates(i, triangles, uvs, vertexUVMap);
                 
-                int base1 = i * 3;
-                Vector2 center1 = GetTriangleUVCenter(triangles, uvs, base1);
-                
-                for (int j = i + 1; j < triangleCount; j++)
+                foreach (int j in candidates)
                 {
-                    if (adjacency[i].Contains(j)) continue; // Already connected
+                    if (j <= i) continue;
                     
-                    int base2 = j * 3;
-                    Vector2 center2 = GetTriangleUVCenter(triangles, uvs, base2);
-                    
-                    // Check if triangle centers are close in UV space
-                    if (Vector2.Distance(center1, center2) < aggressiveTolerance)
+                    float weight = CalculateConnectionWeight(i, j, triangles, uvs);
+                    if (weight > 0.3f) // Only consider reasonably strong connections
                     {
-                        // Additional validation: check if any vertices are close
-                        bool hasCloseVertices = false;
-                        for (int v1 = 0; v1 < 3; v1++)
+                        connections.Add(new WeightedConnection
                         {
-                            var uv1 = uvs[triangles[base1 + v1]];
-                            for (int v2 = 0; v2 < 3; v2++)
-                            {
-                                var uv2 = uvs[triangles[base2 + v2]];
-                                if (Vector2.Distance(uv1, uv2) < UVTolerance)
-                                {
-                                    hasCloseVertices = true;
-                                    break;
-                                }
-                            }
-                            if (hasCloseVertices) break;
-                        }
+                            triangle1 = i,
+                            triangle2 = j,
+                            weight = weight
+                        });
+                    }
+                }
+            }
+            
+            return connections;
+        }
+        
+        /// <summary>
+        /// Build UV clustering for efficient candidate finding
+        /// </summary>
+        private static Dictionary<Vector2, HashSet<int>> BuildVertexUVClusters(int[] triangles, Vector2[] uvs)
+        {
+            var clusters = new Dictionary<Vector2, HashSet<int>>();
+            int triangleCount = triangles.Length / 3;
+            
+            for (int i = 0; i < triangleCount; i++)
+            {
+                int baseIndex = i * 3;
+                for (int v = 0; v < 3; v++)
+                {
+                    var uv = uvs[triangles[baseIndex + v]];
+                    var clusterKey = QuantizeUV(uv, UVTolerance * 0.5f);
+                    
+                    if (!clusters.ContainsKey(clusterKey))
+                        clusters[clusterKey] = new HashSet<int>();
+                    clusters[clusterKey].Add(i);
+                }
+            }
+            
+            return clusters;
+        }
+        
+        /// <summary>
+        /// Quantize UV coordinate to cluster key
+        /// </summary>
+        private static Vector2 QuantizeUV(Vector2 uv, float step)
+        {
+            return new Vector2(
+                Mathf.Round(uv.x / step) * step,
+                Mathf.Round(uv.y / step) * step
+            );
+        }
+        
+        /// <summary>
+        /// Find potential connection candidates for a triangle
+        /// </summary>
+        private static HashSet<int> FindConnectionCandidates(int triangleIndex, int[] triangles, Vector2[] uvs, Dictionary<Vector2, HashSet<int>> clusters)
+        {
+            var candidates = new HashSet<int>();
+            int baseIndex = triangleIndex * 3;
+            
+            for (int v = 0; v < 3; v++)
+            {
+                var uv = uvs[triangles[baseIndex + v]];
+                var clusterKey = QuantizeUV(uv, UVTolerance * 0.5f);
+                
+                if (clusters.ContainsKey(clusterKey))
+                {
+                    foreach (int candidate in clusters[clusterKey])
+                    {
+                        if (candidate != triangleIndex)
+                            candidates.Add(candidate);
+                    }
+                }
+                
+                // Also check adjacent clusters
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    for (int dy = -1; dy <= 1; dy++)
+                    {
+                        if (dx == 0 && dy == 0) continue;
                         
-                        if (hasCloseVertices)
+                        var adjacentKey = clusterKey + new Vector2(dx, dy) * UVTolerance * 0.5f;
+                        if (clusters.ContainsKey(adjacentKey))
                         {
-                            adjacency[i].Add(j);
-                            adjacency[j].Add(i);
+                            foreach (int candidate in clusters[adjacentKey])
+                            {
+                                if (candidate != triangleIndex)
+                                    candidates.Add(candidate);
+                            }
                         }
                     }
                 }
             }
+            
+            return candidates;
+        }
+        
+        /// <summary>
+        /// Calculate connection weight using multiple criteria
+        /// 複数の基準を使用して接続重みを計算
+        /// </summary>
+        private static float CalculateConnectionWeight(int tri1, int tri2, int[] triangles, Vector2[] uvs)
+        {
+            float weight = 0f;
+            int base1 = tri1 * 3;
+            int base2 = tri2 * 3;
+            
+            // Criterion 1: Vertex proximity (40% of weight)
+            float minVertexDist = float.MaxValue;
+            int sharedVertices = 0;
+            
+            for (int v1 = 0; v1 < 3; v1++)
+            {
+                var uv1 = uvs[triangles[base1 + v1]];
+                for (int v2 = 0; v2 < 3; v2++)
+                {
+                    var uv2 = uvs[triangles[base2 + v2]];
+                    float dist = Vector2.Distance(uv1, uv2);
+                    
+                    if (dist < UVTolerance)
+                        sharedVertices++;
+                    
+                    minVertexDist = Mathf.Min(minVertexDist, dist);
+                }
+            }
+            
+            weight += (1f - Mathf.Clamp01(minVertexDist / UVTolerance)) * 0.4f;
+            weight += (sharedVertices / 3f) * 0.2f; // Bonus for shared vertices
+            
+            // Criterion 2: Area overlap (30% of weight)
+            float overlap = CalculateTriangleUVOverlap(tri1, tri2, triangles, uvs);
+            weight += overlap * 0.3f;
+            
+            // Criterion 3: Edge continuity (30% of weight)
+            float edgeContinuity = CalculateEdgeContinuity(tri1, tri2, triangles, uvs);
+            weight += edgeContinuity * 0.3f;
+            
+            return Mathf.Clamp01(weight);
+        }
+        
+        /// <summary>
+        /// Calculate UV area overlap between two triangles
+        /// </summary>
+        private static float CalculateTriangleUVOverlap(int tri1, int tri2, int[] triangles, Vector2[] uvs)
+        {
+            // Simplified overlap calculation using bounding boxes
+            var bounds1 = GetTriangleUVBounds(tri1, triangles, uvs);
+            var bounds2 = GetTriangleUVBounds(tri2, triangles, uvs);
+            
+            float overlapArea = Mathf.Max(0, Mathf.Min(bounds1.max.x, bounds2.max.x) - Mathf.Max(bounds1.min.x, bounds2.min.x)) *
+                               Mathf.Max(0, Mathf.Min(bounds1.max.y, bounds2.max.y) - Mathf.Max(bounds1.min.y, bounds2.min.y));
+            
+            float totalArea = (bounds1.size.x * bounds1.size.y) + (bounds2.size.x * bounds2.size.y);
+            
+            return totalArea > 0 ? (2f * overlapArea) / totalArea : 0f;
+        }
+        
+        /// <summary>
+        /// Calculate edge continuity between triangles
+        /// </summary>
+        private static float CalculateEdgeContinuity(int tri1, int tri2, int[] triangles, Vector2[] uvs)
+        {
+            int base1 = tri1 * 3;
+            int base2 = tri2 * 3;
+            
+            float bestContinuity = 0f;
+            
+            // Check all edge pairs for continuity
+            for (int e1 = 0; e1 < 3; e1++)
+            {
+                var edge1Start = uvs[triangles[base1 + e1]];
+                var edge1End = uvs[triangles[base1 + (e1 + 1) % 3]];
+                
+                for (int e2 = 0; e2 < 3; e2++)
+                {
+                    var edge2Start = uvs[triangles[base2 + e2]];
+                    var edge2End = uvs[triangles[base2 + (e2 + 1) % 3]];
+                    
+                    // Check if edges are continuous
+                    float continuity = CalculateEdgePairContinuity(edge1Start, edge1End, edge2Start, edge2End);
+                    bestContinuity = Mathf.Max(bestContinuity, continuity);
+                }
+            }
+            
+            return bestContinuity;
+        }
+        
+        /// <summary>
+        /// Calculate continuity between two edges
+        /// </summary>
+        private static float CalculateEdgePairContinuity(Vector2 e1Start, Vector2 e1End, Vector2 e2Start, Vector2 e2End)
+        {
+            // Check if edges share endpoints
+            float d1 = Vector2.Distance(e1End, e2Start);
+            float d2 = Vector2.Distance(e1Start, e2End);
+            
+            float minEndpointDist = Mathf.Min(d1, d2);
+            if (minEndpointDist > UVTolerance) return 0f;
+            
+            // Check parallelism
+            Vector2 dir1 = (e1End - e1Start).normalized;
+            Vector2 dir2 = (e2End - e2Start).normalized;
+            float parallelism = Mathf.Abs(Vector2.Dot(dir1, dir2));
+            
+            return (1f - minEndpointDist / UVTolerance) * parallelism;
+        }
+        
+        /// <summary>
+        /// Get UV bounds for a triangle
+        /// </summary>
+        private static Bounds GetTriangleUVBounds(int triangleIndex, int[] triangles, Vector2[] uvs)
+        {
+            int baseIndex = triangleIndex * 3;
+            var uv0 = uvs[triangles[baseIndex]];
+            var uv1 = uvs[triangles[baseIndex + 1]];
+            var uv2 = uvs[triangles[baseIndex + 2]];
+            
+            var min = Vector2.Min(Vector2.Min(uv0, uv1), uv2);
+            var max = Vector2.Max(Vector2.Max(uv0, uv1), uv2);
+            
+            return new Bounds((min + max) * 0.5f, max - min);
         }
         
         /// <summary>
