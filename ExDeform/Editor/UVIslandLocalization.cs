@@ -155,8 +155,8 @@ namespace Deform.Masking.Editor
             },
             ["tooltip_magnifying"] = new Dictionary<Language, string>
             {
-                [Language.English] = "Enable magnifying glass with middle-click for detailed UV island inspection",
-                [Language.Japanese] = "中クリックでルーペ機能を有効化し、UVアイランドの詳細表示"
+                [Language.English] = "Enable magnifying glass with right-click for detailed UV island inspection",
+                [Language.Japanese] = "右クリックでルーペ機能を有効化し、UVアイランドの詳細表示"
             },
             ["magnifying_zoom"] = new Dictionary<Language, string>
             {
@@ -204,8 +204,8 @@ namespace Deform.Masking.Editor
             // Control instructions
             ["controls_uv_map"] = new Dictionary<Language, string>
             {
-                [Language.English] = "Click: select islands, Drag: pan view, Wheel: zoom, Middle-click: magnifying glass",
-                [Language.Japanese] = "クリック: アイランド選択、ドラッグ: 視点移動、ホイール: ズーム、中ボタン: ルーペ"
+                [Language.English] = "Left-click: select islands, Middle-drag: pan view, Wheel: zoom, Right-click: magnifying glass",
+                [Language.Japanese] = "左クリック: アイランド選択、中ドラッグ: 視点移動、ホイール: ズーム、右クリック: ルーペ"
             },
             
             // Island info

@@ -54,6 +54,7 @@ namespace Deform.Masking.Editor
         private Vector2 currentMagnifyingMousePos;
         private Texture2D magnifyingGlassTexture;
         private bool isRangeSelecting = false;
+        private bool isRangeDeselecting = false;
         
         // Instance-based caching to avoid serialization issues
         private UVIslandSelector cachedSelector;
@@ -929,6 +930,8 @@ namespace Deform.Masking.Editor
                 
                 if (selector.EnableRangeSelection && evt.shiftKey)
                 {
+                    // Check for deselection mode (Ctrl+Shift) at the start of range selection
+                    isRangeDeselecting = evt.ctrlKey && evt.shiftKey;
                     StartRangeSelection(localPosition);
                 }
                 else
@@ -937,7 +940,13 @@ namespace Deform.Masking.Editor
                 }
                 evt.StopPropagation();
             }
-            else if (evt.button == 2 && selector.EnableMagnifyingGlass) // Middle click
+            else if (evt.button == 2 && !isMagnifyingGlassActive) // Middle click for pan
+            {
+                isDraggingUVMap = true;
+                lastMousePos = localPosition;
+                evt.StopPropagation();
+            }
+            else if (evt.button == 1 && selector.EnableMagnifyingGlass) // Right click for magnifying glass
             {
                 StartMagnifyingGlass(localPosition);
                 evt.StopPropagation();
@@ -974,11 +983,7 @@ namespace Deform.Masking.Editor
                 
                 RefreshUIFast();
             }
-            else
-            {
-                isDraggingUVMap = true;
-                lastMousePos = localPosition;
-            }
+            // Removed automatic pan start on left click - pan is now middle button only
         }
         
         private void OnUVMapMouseMove(MouseMoveEvent evt) => HandleMouseMove(evt);
@@ -1003,7 +1008,8 @@ namespace Deform.Masking.Editor
             else if (isDraggingUVMap && !isMagnifyingGlassActive)
             {
                 var deltaPos = localPosition - lastMousePos;
-                var panSensitivity = 1f / (UV_MAP_SIZE * Mathf.Max(selector.UvMapZoom, 1f));
+                // Fixed pan sensitivity to maintain consistent movement regardless of zoom
+                var panSensitivity = 1f / UV_MAP_SIZE;
                 var uvDelta = new Vector2(
                     deltaPos.x * panSensitivity,
                     -deltaPos.y * panSensitivity
@@ -1038,13 +1044,26 @@ namespace Deform.Masking.Editor
                 {
                     bool addToSelection = evt.shiftKey && !evt.ctrlKey;
                     bool removeFromSelection = evt.ctrlKey && evt.shiftKey;
+                    isRangeDeselecting = removeFromSelection;
                     FinishRangeSelection(addToSelection, removeFromSelection);
                 }
                 
-                isDraggingUVMap = false;
                 evt.StopPropagation();
             }
-            else if (evt.button == 2) // Middle button
+            else if (evt.button == 2) // Middle button - stop panning
+            {
+                isDraggingUVMap = false;
+                
+                // Update texture after mouse interaction ends
+                if (selector?.AutoUpdatePreview ?? false)
+                {
+                    selector?.UpdateTextureIfNeeded();
+                    RefreshUVMapImage();
+                }
+                
+                evt.StopPropagation();
+            }
+            else if (evt.button == 1) // Right button
             {
                 StopMagnifyingGlass();
                 evt.StopPropagation();
@@ -1091,6 +1110,12 @@ namespace Deform.Masking.Editor
                 
                 var uvCoord = LocalPosToUV(clampedPos);
                 selector.UpdateRangeSelection(uvCoord);
+                
+	            bool removeFromSelection = evt.ctrlKey && evt.shiftKey;
+                // Update deselection mode state based on current key state during dragging
+                // Use Input class for cross-platform key detection
+	            isRangeDeselecting = removeFromSelection;
+                
                 UpdateRangeSelectionVisual();
                 evt.StopPropagation();
             }
@@ -1112,7 +1137,8 @@ namespace Deform.Masking.Editor
                 );
                 
                 var deltaPos = clampedPos - lastMousePos;
-                var panSensitivity = 1f / (UV_MAP_SIZE * Mathf.Max(selector.UvMapZoom, 1f));
+                // Fixed pan sensitivity to maintain consistent movement regardless of zoom
+                var panSensitivity = 1f / UV_MAP_SIZE;
                 var uvDelta = new Vector2(
                     deltaPos.x * panSensitivity,
                     -deltaPos.y * panSensitivity
@@ -1142,6 +1168,7 @@ namespace Deform.Masking.Editor
                 {
                     bool addToSelection = evt.shiftKey && !evt.ctrlKey;
                     bool removeFromSelection = evt.ctrlKey && evt.shiftKey;
+                    isRangeDeselecting = removeFromSelection;
                     FinishRangeSelection(addToSelection, removeFromSelection);
                     evt.StopPropagation();
                 }
@@ -1160,6 +1187,22 @@ namespace Deform.Masking.Editor
                 }
             }
             else if (evt.button == 2)
+            {
+                if (isDraggingUVMap)
+                {
+                    isDraggingUVMap = false;
+                    
+                    // Update texture after mouse interaction ends
+                    if (selector?.AutoUpdatePreview ?? false)
+                    {
+                        selector?.UpdateTextureIfNeeded();
+                        RefreshUVMapImage();
+                    }
+                    
+                    evt.StopPropagation();
+                }
+            }
+            else if (evt.button == 1)
             {
                 if (isMagnifyingGlassActive)
                 {
@@ -1608,6 +1651,7 @@ namespace Deform.Masking.Editor
             var uvCoordinate = LocalPosToUV(localPos);
             selector.StartRangeSelection(uvCoordinate);
             isRangeSelecting = true;
+	        isRangeDeselecting = false; // Default to selection mode
             UpdateRangeSelectionVisual();
         }
         
@@ -1616,6 +1660,12 @@ namespace Deform.Masking.Editor
             // Use proper coordinate transformation that accounts for zoom and pan
             var uvCoordinate = LocalPosToUV(localPos);
             selector.UpdateRangeSelection(uvCoordinate);
+            
+            // Update deselection mode state based on current key state during dragging
+            // Use Input class for cross-platform key detection
+            //isRangeDeselecting = (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)) && 
+            //                    (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift));
+            
             UpdateRangeSelectionVisual();
         }
         
@@ -1623,6 +1673,8 @@ namespace Deform.Masking.Editor
         {
             selector.FinishRangeSelection(addToSelection, removeFromSelection);
             rangeSelectionOverlay.style.display = DisplayStyle.None;
+            isRangeSelecting = false;
+            isRangeDeselecting = false;
             targetMask.SetSelectedIslands(selector.SelectedIslandIDs);
             EditorUtility.SetDirty(targetMask);
             RefreshUI(false);
@@ -1647,6 +1699,26 @@ namespace Deform.Masking.Editor
             var top = (1f - topLeft.y) * UV_MAP_SIZE;
             var width = (bottomRight.x - topLeft.x) * UV_MAP_SIZE;
             var height = (topLeft.y - bottomRight.y) * UV_MAP_SIZE;
+            
+            // Update visual style based on selection mode
+            if (isRangeDeselecting)
+            {
+                // Red/orange style for deselection
+                rangeSelectionOverlay.style.backgroundColor = new Color(0.8f, 0.3f, 0.2f, 0.3f);
+                rangeSelectionOverlay.style.borderLeftColor = new Color(0.8f, 0.3f, 0.2f, 0.8f);
+                rangeSelectionOverlay.style.borderRightColor = new Color(0.8f, 0.3f, 0.2f, 0.8f);
+                rangeSelectionOverlay.style.borderTopColor = new Color(0.8f, 0.3f, 0.2f, 0.8f);
+                rangeSelectionOverlay.style.borderBottomColor = new Color(0.8f, 0.3f, 0.2f, 0.8f);
+            }
+            else
+            {
+                // Blue style for selection (default)
+                rangeSelectionOverlay.style.backgroundColor = new Color(0.3f, 0.5f, 0.8f, 0.3f);
+                rangeSelectionOverlay.style.borderLeftColor = new Color(0.3f, 0.5f, 0.8f, 0.8f);
+                rangeSelectionOverlay.style.borderRightColor = new Color(0.3f, 0.5f, 0.8f, 0.8f);
+                rangeSelectionOverlay.style.borderTopColor = new Color(0.3f, 0.5f, 0.8f, 0.8f);
+                rangeSelectionOverlay.style.borderBottomColor = new Color(0.3f, 0.5f, 0.8f, 0.8f);
+            }
             
             rangeSelectionOverlay.style.left = left;
             rangeSelectionOverlay.style.top = top;

@@ -884,7 +884,39 @@ namespace Deform.Masking
         /// </summary>
         public static bool IsPointInUVIsland(Vector2 point, UVIsland island, Vector2[] uvs, int[] triangles)
         {
-            // island.triangleIndices contains triangle indices, not vertex indices
+            return IsPointInUVIslandOptimized(point, island, uvs, triangles);
+        }
+        
+        /// <summary>
+        /// Optimized point-in-island test using hybrid approach for better performance on large islands
+        /// 大きなアイランドでのパフォーマンス向上のためのハイブリッドアプローチによる最適化されたポイントインアイランドテスト
+        /// </summary>
+        public static bool IsPointInUVIslandOptimized(Vector2 point, UVIsland island, Vector2[] uvs, int[] triangles)
+        {
+            // Early rejection: check if point is within island bounds with small padding
+            var bounds = island.uvBounds;
+            const float BOUNDS_PADDING = 0.001f;
+            if (point.x < bounds.min.x - BOUNDS_PADDING || point.x > bounds.max.x + BOUNDS_PADDING ||
+                point.y < bounds.min.y - BOUNDS_PADDING || point.y > bounds.max.y + BOUNDS_PADDING)
+            {
+                return false;
+            }
+            
+            // For small islands, use direct triangle testing (fast path)
+            if (island.triangleIndices.Count <= 20)
+            {
+                return IsPointInTrianglesDirect(point, island, uvs, triangles);
+            }
+            
+            // For large islands, use ray casting algorithm (more reliable for complex shapes)
+            return IsPointInIslandRayCasting(point, island, uvs, triangles);
+        }
+        
+        /// <summary>
+        /// Direct triangle testing - fast for small islands
+        /// </summary>
+        private static bool IsPointInTrianglesDirect(Vector2 point, UVIsland island, Vector2[] uvs, int[] triangles)
+        {
             foreach (int triangleIndex in island.triangleIndices)
             {
                 int baseIndex = triangleIndex * 3;
@@ -908,6 +940,77 @@ namespace Deform.Masking
                     return true;
             }
             return false;
+        }
+        
+        /// <summary>
+        /// Ray casting algorithm - reliable for large complex islands
+        /// レイキャスティングアルゴリズム - 大きな複雑なアイランドに対して信頼性が高い
+        /// </summary>
+        private static bool IsPointInIslandRayCasting(Vector2 point, UVIsland island, Vector2[] uvs, int[] triangles)
+        {
+            int intersections = 0;
+            var rayEnd = new Vector2(island.uvBounds.max.x + 0.1f, point.y); // Horizontal ray to the right
+            
+            // Check intersections with all triangle edges
+            foreach (int triangleIndex in island.triangleIndices)
+            {
+                int baseIndex = triangleIndex * 3;
+                
+                // Safety check for array bounds
+                if (baseIndex + 2 >= triangles.Length) continue;
+                
+                // Get vertex indices from triangles array
+                int vertIndex0 = triangles[baseIndex];
+                int vertIndex1 = triangles[baseIndex + 1];
+                int vertIndex2 = triangles[baseIndex + 2];
+                
+                // Safety check for UV array bounds
+                if (vertIndex0 >= uvs.Length || vertIndex1 >= uvs.Length || vertIndex2 >= uvs.Length) continue;
+                
+                var uv0 = uvs[vertIndex0];
+                var uv1 = uvs[vertIndex1];
+                var uv2 = uvs[vertIndex2];
+                
+                // Check each edge of the triangle
+                if (LineSegmentsIntersect(point, rayEnd, uv0, uv1)) intersections++;
+                if (LineSegmentsIntersect(point, rayEnd, uv1, uv2)) intersections++;
+                if (LineSegmentsIntersect(point, rayEnd, uv2, uv0)) intersections++;
+            }
+            
+            // Odd number of intersections means point is inside
+            return (intersections % 2) == 1;
+        }
+        
+        /// <summary>
+        /// Check if two line segments intersect (for ray casting)
+        /// 2つの線分が交差するかチェック（レイキャスティング用）
+        /// </summary>
+        private static bool LineSegmentsIntersect(Vector2 p1, Vector2 q1, Vector2 p2, Vector2 q2)
+        {
+            float d1 = Direction(p2, q2, p1);
+            float d2 = Direction(p2, q2, q1);
+            float d3 = Direction(p1, q1, p2);
+            float d4 = Direction(p1, q1, q2);
+            
+            if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+                ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0)))
+                return true;
+            else if (d1 == 0 && OnSegment(p2, q2, p1)) return true;
+            else if (d2 == 0 && OnSegment(p2, q2, q1)) return true;
+            else if (d3 == 0 && OnSegment(p1, q1, p2)) return true;
+            else if (d4 == 0 && OnSegment(p1, q1, q2)) return true;
+            else return false;
+        }
+        
+        private static float Direction(Vector2 a, Vector2 b, Vector2 c)
+        {
+            return (c.x - a.x) * (b.y - a.y) - (b.x - a.x) * (c.y - a.y);
+        }
+        
+        private static bool OnSegment(Vector2 a, Vector2 b, Vector2 c)
+        {
+            return Mathf.Min(a.x, b.x) <= c.x && c.x <= Mathf.Max(a.x, b.x) &&
+                   Mathf.Min(a.y, b.y) <= c.y && c.y <= Mathf.Max(a.y, b.y);
         }
         
         public static bool IsPointInTriangle(Vector2 point, Vector2 a, Vector2 b, Vector2 c)

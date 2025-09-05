@@ -351,38 +351,52 @@ namespace Deform.Masking.Editor
         
         public int GetIslandAtUVCoordinate(Vector2 uvCoord)
         {
+            // Phase 1: Try exact triangle hit detection for all islands
+            foreach (var island in uvIslands)
+            {
+                // Use optimized point-in-island test
+                bool inIsland = UVIslandAnalyzer.IsPointInUVIsland(uvCoord, island, targetMesh.uv, targetMesh.triangles);
+                if (inIsland)
+                {
+                    return island.islandID;
+                }
+            }
             
+            // Phase 2: If no exact hit, try closest island within bounds (more generous approach)
+            const float BOUNDS_TOLERANCE = 0.005f; // Small tolerance for near-miss clicks
             int closestIsland = -1;
             float closestDistance = float.MaxValue;
             
-            // Try exact match first
             foreach (var island in uvIslands)
             {
-                if (island.uvBounds.Contains(new Vector3(uvCoord.x, uvCoord.y, 0)))
+                // Check if point is near the island bounds
+                var bounds = island.uvBounds;
+                var expandedBounds = new Bounds(bounds.center, bounds.size + Vector3.one * BOUNDS_TOLERANCE * 2);
+                
+                if (expandedBounds.Contains(new Vector3(uvCoord.x, uvCoord.y, 0)))
                 {
-                    bool inTriangle = UVIslandAnalyzer.IsPointInUVIsland(uvCoord, island, targetMesh.uv, targetMesh.triangles);
-                    if (inTriangle)
+                    // Calculate distance to closest edge of the island bounds
+                    float distanceToBounds = GetDistanceToRectangleBounds(uvCoord, bounds);
+                    
+                    if (distanceToBounds < closestDistance)
                     {
-                        return island.islandID;
+                        closestDistance = distanceToBounds;
+                        closestIsland = island.islandID;
                     }
                 }
-                
-                // Calculate distance to island center for fallback
-                var centerDistance = Vector2.Distance(uvCoord, new Vector2(island.uvBounds.center.x, island.uvBounds.center.y));
-                if (centerDistance < closestDistance)
-                {
-                    closestDistance = centerDistance;
-                    closestIsland = island.islandID;
-                }
             }
             
-            // If no exact match, use closest island within reasonable distance
-            if (closestDistance < UV_DISTANCE_THRESHOLD && closestIsland >= 0)
-            {
-                return closestIsland;
-            }
-            
-            return -1;
+            return closestDistance <= BOUNDS_TOLERANCE ? closestIsland : -1;
+        }
+        
+        /// <summary>
+        /// Calculate distance from point to rectangle bounds (for improved fallback selection)
+        /// </summary>
+        private float GetDistanceToRectangleBounds(Vector2 point, Bounds bounds)
+        {
+            float dx = Mathf.Max(0, Mathf.Max(bounds.min.x - point.x, point.x - bounds.max.x));
+            float dy = Mathf.Max(0, Mathf.Max(bounds.min.y - point.y, point.y - bounds.max.y));
+            return Mathf.Sqrt(dx * dx + dy * dy);
         }
         
         private void UpdateMasks()
