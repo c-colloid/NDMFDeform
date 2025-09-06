@@ -2116,7 +2116,8 @@ namespace Deform.Masking.Editor
             {
                 try
                 {
-                    var lowResTexture = selector.GenerateUVMapTexture(LOW_RES_TEXTURE_SIZE, LOW_RES_TEXTURE_SIZE);
+                    // Use the new method that ignores zoom/pan state for cache generation
+                    var lowResTexture = selector.GenerateLowResUVMapTexture(LOW_RES_TEXTURE_SIZE, LOW_RES_TEXTURE_SIZE);
                     if (lowResTexture != null)
                     {
                         bool saveSuccess = RobustUVCache.SaveTexture(currentCacheKey, lowResTexture);

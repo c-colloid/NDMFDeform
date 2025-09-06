@@ -533,6 +533,51 @@ namespace Deform.Masking.Editor
             return texture;
         }
         
+        /// <summary>
+        /// Generate UV texture for low-resolution cache, ignoring zoom and pan state
+        /// 低解像度キャッシュ用のUVテクスチャ生成（ズーム・パン状態を無視）
+        /// </summary>
+        public Texture2D GenerateLowResUVMapTexture(int width = DEFAULT_TEXTURE_SIZE, int height = DEFAULT_TEXTURE_SIZE)
+        {
+            var texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
+            var pixels = new Color[width * height];
+            
+            // Fill background
+            var backgroundColor = BACKGROUND_COLOR;
+            for (int i = 0; i < pixels.Length; i++)
+            {
+                pixels[i] = backgroundColor;
+            }
+            
+            // Use identity transform matrix to show full UV map without zoom/pan
+            var transformMatrix = CalculateFullViewTransformMatrix();
+            
+            // Draw simple UV grid
+            UVTextureRenderer.DrawSimpleGrid(pixels, width, height, transformMatrix);
+            
+            // Draw UV islands
+            UVTextureRenderer.DrawUVIslands(pixels, width, height, transformMatrix, uvIslands, selectedIslandIDs, targetMesh);
+            
+            texture.SetPixels(pixels);
+            texture.Apply();
+            
+            return texture;
+        }
+        
+        /// <summary>
+        /// Calculate transform matrix for full view without zoom/pan (for cache generation)
+        /// ズーム/パンなしの全体表示用変換マトリクス計算（キャッシュ生成用）
+        /// </summary>
+        public Matrix4x4 CalculateFullViewTransformMatrix()
+        {
+            var centerOffset = Matrix4x4.Translate(new Vector3(CENTER_OFFSET, CENTER_OFFSET, 0f));
+            var scaleMatrix = Matrix4x4.Scale(new Vector3(1f, 1f, 1f)); // Always use 1:1 scale
+            var panMatrix = Matrix4x4.Translate(new Vector3(0f, 0f, 0f)); // No pan offset
+            var recenterMatrix = Matrix4x4.Translate(new Vector3(RECENTER_OFFSET, RECENTER_OFFSET, 0f));
+            
+            return recenterMatrix * panMatrix * scaleMatrix * centerOffset;
+        }
+        
         // Magnifying glass texture generation
         public Texture2D GenerateMagnifyingGlassTexture(Vector2 centerUV, int size = DEFAULT_MAGNIFYING_GLASS_SIZE_INT)
         {
