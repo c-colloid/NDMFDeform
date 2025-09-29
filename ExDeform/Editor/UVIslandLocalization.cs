@@ -204,8 +204,8 @@ namespace Deform.Masking.Editor
             // Control instructions
             ["controls_uv_map"] = new Dictionary<Language, string>
             {
-                [Language.English] = "Left-click: select islands, Middle-drag: pan view, Wheel: zoom, Right-click: magnifying glass",
-                [Language.Japanese] = "左クリック: アイランド選択、中ドラッグ: 視点移動、ホイール: ズーム、右クリック: ルーペ"
+                [Language.English] = "Left-click: select islands, \nMiddle-drag: pan view, \nWheel: zoom, \nRight-click: magnifying glass",
+                [Language.Japanese] = "左クリック: アイランド選択、\n中ドラッグ: 視点移動、\nホイール: ズーム、\n右クリック: ルーペ"
             },
             
             // Island info
