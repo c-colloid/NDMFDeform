@@ -609,69 +609,44 @@ namespace Deform.Masking.Editor
         
         
         /// <summary>
-        /// Draw selected faces in scene view using dynamic mesh if available
-        /// 動的メッシュが利用可能な場合はそれを使用してシーンビューで選択された面を描画
+        /// Draw selected faces in scene view using GL with polygon offset for perfect Z-fighting prevention
+        /// GLとポリゴンオフセットを使用してシーンビューで選択された面を描画（完全なZファイティング防止）
         /// </summary>
         public void DrawSelectedFacesInScene()
         {
             if (triangleMask == null || targetTransform == null) return;
             if (!HasSelectedIslands) return;
-            
+
             // Use dynamic mesh for highlighting if available, otherwise fallback to original mesh
             Mesh meshForHighlight = useDynamicMeshForHighlight && dynamicMesh != null ? dynamicMesh : targetMesh;
             if (meshForHighlight == null) return;
-            
+
 	        var vertices = new List<Vector3>();
 	        meshForHighlight.GetVertices(vertices);
 	        var submesh = 0;
 	        var triangles = meshForHighlight.GetTriangles(submesh);
-            
+
             // Validate that triangle mask is compatible with current mesh
             if (triangles.Length == 0) return;
-            
-            // Advanced adaptive offset calculation considering multiple factors
+
+            DrawSelectedFacesWithGL(vertices, triangles);
+        }
+
+        /// <summary>
+        /// Draw selected faces using GL immediate mode with hardware polygon offset
+        /// ハードウェアポリゴンオフセットを使用したGL即時モードで選択された面を描画
+        /// </summary>
+        private void DrawSelectedFacesWithGL(List<Vector3> vertices, int[] triangles)
+        {
+            // Create material for GL rendering if needed
+            if (!CreateGLMaterial())
+                return;
+
             var sceneCamera = SceneView.currentDrawingSceneView?.camera;
             if (sceneCamera == null) return;
 
-            Vector3 cameraPos = sceneCamera.transform.position;
-            Vector3 cameraForward = sceneCamera.transform.forward;
-            Vector3 meshCenter = targetTransform.TransformPoint(meshForHighlight.bounds.center);
-            float cameraDistance = Vector3.Distance(cameraPos, meshCenter);
-            float meshSize = meshForHighlight.bounds.size.magnitude;
-
-            // Calculate viewing angle factor (0 = perpendicular, 1 = parallel)
-            Vector3 cameraToMesh = (meshCenter - cameraPos).normalized;
-            float viewAngleFactor = Mathf.Abs(Vector3.Dot(cameraToMesh, cameraForward));
-
-            // Base offset calculation with multiple factors
-            float baseOffset = cameraDistance * 0.0002f + meshSize * 0.00015f;
-
-            // Distance factor: exponential scaling for far objects
-            float distanceFactor = 1f + Mathf.Pow(cameraDistance / 8f, 1.8f);
-
-            // Angle factor: aggressive increase for shallow viewing angles
-            float angleFactor = 1f + Mathf.Pow(1f - viewAngleFactor, 2f) * 4f;
-
-            // Depth buffer precision factor (non-linear depth buffer consideration)
-            float nearPlane = sceneCamera.nearClipPlane;
-            float farPlane = sceneCamera.farClipPlane;
-            float normalizedDepth = (cameraDistance - nearPlane) / (farPlane - nearPlane);
-            // Non-linear depth buffer precision loss
-            float precisionFactor = 1f + Mathf.Pow(normalizedDepth, 2f) * 5f;
-
-            // Combined adaptive offset with all factors
-            float adaptiveOffset = baseOffset * distanceFactor * angleFactor * precisionFactor;
-            adaptiveOffset = Mathf.Clamp(adaptiveOffset, 0.0003f, 0.2f);
-
-            // ALWAYS use per-triangle normal offset for robust Z-fighting prevention
-            // Camera-forward offset alone is insufficient for edge cases
-
-            // Pre-calculate per-vertex offsets to maintain mesh continuity
-            var vertexOffsets = new Dictionary<int, Vector3>();
-            var vertexNormals = new Dictionary<int, Vector3>();
-            var vertexContributions = new Dictionary<int, int>();
-
-            // First pass: accumulate normals for each vertex
+            // Pre-transform vertices to world space (only once for all passes)
+            var vertexWorldPositions = new Dictionary<int, Vector3>();
             for (int maskIndex = 0; maskIndex < triangleMask.Length; maskIndex++)
             {
                 int triangleIndex = triangleMask[maskIndex];
@@ -683,56 +658,22 @@ namespace Deform.Masking.Editor
                     var idx1 = triangles[baseIndex + 1];
                     var idx2 = triangles[baseIndex + 2];
 
-                    var pos0 = vertices[idx0];
-                    var pos1 = vertices[idx1];
-                    var pos2 = vertices[idx2];
-
-                    // Calculate face normal in local space
-                    var faceNormal = Vector3.Cross(pos1 - pos0, pos2 - pos0).normalized;
-
-                    // Accumulate for each vertex
-                    foreach (var idx in new[] { idx0, idx1, idx2 })
-                    {
-                        if (!vertexNormals.ContainsKey(idx))
-                        {
-                            vertexNormals[idx] = Vector3.zero;
-                            vertexContributions[idx] = 0;
-                        }
-                        vertexNormals[idx] += faceNormal;
-                        vertexContributions[idx]++;
-                    }
+                    // Transform each vertex only if not already transformed
+                    if (!vertexWorldPositions.ContainsKey(idx0))
+                        vertexWorldPositions[idx0] = targetTransform.TransformPoint(vertices[idx0]);
+                    if (!vertexWorldPositions.ContainsKey(idx1))
+                        vertexWorldPositions[idx1] = targetTransform.TransformPoint(vertices[idx1]);
+                    if (!vertexWorldPositions.ContainsKey(idx2))
+                        vertexWorldPositions[idx2] = targetTransform.TransformPoint(vertices[idx2]);
                 }
-            }
-
-            // Second pass: calculate smooth per-vertex offsets
-            foreach (var kvp in vertexNormals)
-            {
-                int vertIdx = kvp.Key;
-                Vector3 avgNormal = (kvp.Value / vertexContributions[vertIdx]).normalized;
-
-                var worldPos = targetTransform.TransformPoint(vertices[vertIdx]);
-                var worldNormal = targetTransform.TransformDirection(avgNormal).normalized;
-
-                // Per-vertex camera direction
-                var cameraToVertDir = (worldPos - cameraPos).normalized;
-                var offsetDirection = -cameraToVertDir;
-
-                // Calculate angle factor for this vertex
-                float normalDotCamera = Mathf.Abs(Vector3.Dot(worldNormal, cameraToVertDir));
-                float vertexAngleFactor = 1f + Mathf.Pow(1f - normalDotCamera, 3f) * 6f;
-
-                // Combined offset direction
-                float normalWeight = Mathf.Lerp(0.5f, 2f, 1f - normalDotCamera);
-                var combinedDirection = (offsetDirection + worldNormal * normalWeight).normalized;
-
-                vertexOffsets[vertIdx] = combinedDirection * adaptiveOffset * vertexAngleFactor;
             }
 
             var originalZTest = Handles.zTest;
 
-            // Method 1: Background pass - always visible with significant offset
+            // Method 1: Background pass - always visible (no depth test)
+            // Draw BEFORE GL operations to ensure proper ordering
             Handles.zTest = UnityEngine.Rendering.CompareFunction.Always;
-            Handles.color = new Color(0.2f, 0.7f, 1f, 0.25f); // Light blue background
+            Handles.color = new Color(0.2f, 0.7f, 1f, 0.25f);
 
             for (int maskIndex = 0; maskIndex < triangleMask.Length; maskIndex++)
             {
@@ -745,19 +686,23 @@ namespace Deform.Masking.Editor
                     var idx1 = triangles[baseIndex + 1];
                     var idx2 = triangles[baseIndex + 2];
 
-                    // Use pre-calculated vertex offsets for seamless mesh
-                    var v0 = targetTransform.TransformPoint(vertices[idx0]) + vertexOffsets[idx0] * 0.5f;
-                    var v1 = targetTransform.TransformPoint(vertices[idx1]) + vertexOffsets[idx1] * 0.5f;
-                    var v2 = targetTransform.TransformPoint(vertices[idx2]) + vertexOffsets[idx2] * 0.5f;
+                    var v0 = vertexWorldPositions[idx0];
+                    var v1 = vertexWorldPositions[idx1];
+                    var v2 = vertexWorldPositions[idx2];
 
                     Handles.DrawAAConvexPolygon(v0, v1, v2);
                 }
             }
-            
-            // Method 2: Foreground pass - depth tested with larger offset
-            Handles.zTest = UnityEngine.Rendering.CompareFunction.LessEqual;
-            Handles.color = new Color(1f, 0.5f, 0f, 0.7f); // Orange foreground
 
+            // Method 2: Foreground pass with hardware polygon offset (GL with custom shader)
+            // GL needs to be in its own matrix context
+            GL.PushMatrix();
+            GL.MultMatrix(targetTransform.localToWorldMatrix);
+
+            glMaterial.SetColor("_Color", new Color(1f, 0.5f, 0f, 0.7f));
+            glMaterial.SetPass(0);
+
+            GL.Begin(GL.TRIANGLES);
             for (int maskIndex = 0; maskIndex < triangleMask.Length; maskIndex++)
             {
                 int triangleIndex = triangleMask[maskIndex];
@@ -769,18 +714,20 @@ namespace Deform.Masking.Editor
                     var idx1 = triangles[baseIndex + 1];
                     var idx2 = triangles[baseIndex + 2];
 
-                    // Use pre-calculated vertex offsets with larger multiplier
-                    var v0 = targetTransform.TransformPoint(vertices[idx0]) + vertexOffsets[idx0] * 1.0f;
-                    var v1 = targetTransform.TransformPoint(vertices[idx1]) + vertexOffsets[idx1] * 1.0f;
-                    var v2 = targetTransform.TransformPoint(vertices[idx2]) + vertexOffsets[idx2] * 1.0f;
-
-                    Handles.DrawAAConvexPolygon(v0, v1, v2);
+                    // GL.Color is multiplied with material color
+                    GL.Color(new Color(1f, 1f, 1f, 1f));
+                    GL.Vertex(vertices[idx0]);
+                    GL.Vertex(vertices[idx1]);
+                    GL.Vertex(vertices[idx2]);
                 }
             }
-            
-            // Method 3: Wireframe outline with maximum offset to ensure visibility
+            GL.End();
+
+	        GL.PopMatrix();
+
+            // Method 3: Wireframe outline
             Handles.zTest = UnityEngine.Rendering.CompareFunction.LessEqual;
-            Handles.color = new Color(1f, 0.3f, 0f, 1f); // Solid orange wireframe
+            Handles.color = new Color(1f, 0.3f, 0f, 1f);
 
             for (int maskIndex = 0; maskIndex < triangleMask.Length; maskIndex++)
             {
@@ -793,19 +740,48 @@ namespace Deform.Masking.Editor
                     var idx1 = triangles[baseIndex + 1];
                     var idx2 = triangles[baseIndex + 2];
 
-                    // Use pre-calculated vertex offsets with maximum multiplier
-                    var v0 = targetTransform.TransformPoint(vertices[idx0]) + vertexOffsets[idx0] * 1.5f;
-                    var v1 = targetTransform.TransformPoint(vertices[idx1]) + vertexOffsets[idx1] * 1.5f;
-                    var v2 = targetTransform.TransformPoint(vertices[idx2]) + vertexOffsets[idx2] * 1.5f;
+                    var v0 = vertexWorldPositions[idx0];
+                    var v1 = vertexWorldPositions[idx1];
+                    var v2 = vertexWorldPositions[idx2];
 
                     Handles.DrawLine(v0, v1);
                     Handles.DrawLine(v1, v2);
                     Handles.DrawLine(v2, v0);
                 }
             }
-            
-            // Restore original zTest setting
+
             Handles.zTest = originalZTest;
+        }
+
+        // GL material for rendering
+        private static Material glMaterial;
+
+        /// <summary>
+        /// Create or get GL material for immediate mode rendering with polygon offset support
+        /// ポリゴンオフセットサポート付きGL即時モードレンダリング用のマテリアルを作成または取得
+        /// </summary>
+        private bool CreateGLMaterial()
+        {
+            if (glMaterial != null)
+                return true;
+
+            // Use custom shader with polygon offset support
+            var shader = Shader.Find("Hidden/UVIslandHighlight");
+            if (shader == null)
+            {
+                // Fallback to built-in shader
+                shader = Shader.Find("Hidden/Internal-Colored");
+                if (shader == null)
+                {
+                    Debug.LogError("Could not find shader for GL rendering");
+                    return false;
+                }
+            }
+
+            glMaterial = new Material(shader);
+            glMaterial.hideFlags = HideFlags.HideAndDontSave;
+
+            return true;
         }
         
         /// <summary>
