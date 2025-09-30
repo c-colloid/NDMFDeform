@@ -633,6 +633,16 @@ namespace Deform.Masking.Editor
         }
 
         /// <summary>
+        /// Triangle rendering data (precomputed for all passes)
+        /// 三角形レンダリングデータ（全パス共通で事前計算）
+        /// </summary>
+        private struct TriangleRenderData
+        {
+            public Vector3 v0Local, v1Local, v2Local;  // Local coordinates for GL
+            public Vector3 v0World, v1World, v2World;  // World coordinates for Handles
+        }
+
+        /// <summary>
         /// Draw selected faces using GL immediate mode with hardware polygon offset
         /// ハードウェアポリゴンオフセットを使用したGL即時モードで選択された面を描画
         /// </summary>
@@ -645,8 +655,9 @@ namespace Deform.Masking.Editor
             var sceneCamera = SceneView.currentDrawingSceneView?.camera;
             if (sceneCamera == null) return;
 
-            // Pre-transform vertices to world space (only once for all passes)
-            var vertexWorldPositions = new Dictionary<int, Vector3>();
+            // Precompute all triangle data in a single pass
+            var triangleDataList = new List<TriangleRenderData>(triangleMask.Length);
+
             for (int maskIndex = 0; maskIndex < triangleMask.Length; maskIndex++)
             {
                 int triangleIndex = triangleMask[maskIndex];
@@ -658,44 +669,32 @@ namespace Deform.Masking.Editor
                     var idx1 = triangles[baseIndex + 1];
                     var idx2 = triangles[baseIndex + 2];
 
-                    // Transform each vertex only if not already transformed
-                    if (!vertexWorldPositions.ContainsKey(idx0))
-                        vertexWorldPositions[idx0] = targetTransform.TransformPoint(vertices[idx0]);
-                    if (!vertexWorldPositions.ContainsKey(idx1))
-                        vertexWorldPositions[idx1] = targetTransform.TransformPoint(vertices[idx1]);
-                    if (!vertexWorldPositions.ContainsKey(idx2))
-                        vertexWorldPositions[idx2] = targetTransform.TransformPoint(vertices[idx2]);
+                    var data = new TriangleRenderData
+                    {
+                        v0Local = vertices[idx0],
+                        v1Local = vertices[idx1],
+                        v2Local = vertices[idx2],
+                        v0World = targetTransform.TransformPoint(vertices[idx0]),
+                        v1World = targetTransform.TransformPoint(vertices[idx1]),
+                        v2World = targetTransform.TransformPoint(vertices[idx2])
+                    };
+
+                    triangleDataList.Add(data);
                 }
             }
 
             var originalZTest = Handles.zTest;
 
             // Method 1: Background pass - always visible (no depth test)
-            // Draw BEFORE GL operations to ensure proper ordering
             Handles.zTest = UnityEngine.Rendering.CompareFunction.Always;
             Handles.color = new Color(0.2f, 0.7f, 1f, 0.25f);
 
-            for (int maskIndex = 0; maskIndex < triangleMask.Length; maskIndex++)
+            foreach (var tri in triangleDataList)
             {
-                int triangleIndex = triangleMask[maskIndex];
-                int baseIndex = triangleIndex * 3;
-
-                if (baseIndex + 2 < triangles.Length)
-                {
-                    var idx0 = triangles[baseIndex];
-                    var idx1 = triangles[baseIndex + 1];
-                    var idx2 = triangles[baseIndex + 2];
-
-                    var v0 = vertexWorldPositions[idx0];
-                    var v1 = vertexWorldPositions[idx1];
-                    var v2 = vertexWorldPositions[idx2];
-
-                    Handles.DrawAAConvexPolygon(v0, v1, v2);
-                }
+                Handles.DrawAAConvexPolygon(tri.v0World, tri.v1World, tri.v2World);
             }
 
             // Method 2: Foreground pass with hardware polygon offset (GL with custom shader)
-            // GL needs to be in its own matrix context
             GL.PushMatrix();
             GL.MultMatrix(targetTransform.localToWorldMatrix);
 
@@ -703,51 +702,27 @@ namespace Deform.Masking.Editor
             glMaterial.SetPass(0);
 
             GL.Begin(GL.TRIANGLES);
-            for (int maskIndex = 0; maskIndex < triangleMask.Length; maskIndex++)
+            GL.Color(new Color(1f, 1f, 1f, 1f));  // GL.Color is multiplied with material color
+
+            foreach (var tri in triangleDataList)
             {
-                int triangleIndex = triangleMask[maskIndex];
-                int baseIndex = triangleIndex * 3;
-
-                if (baseIndex + 2 < triangles.Length)
-                {
-                    var idx0 = triangles[baseIndex];
-                    var idx1 = triangles[baseIndex + 1];
-                    var idx2 = triangles[baseIndex + 2];
-
-                    // GL.Color is multiplied with material color
-                    GL.Color(new Color(1f, 1f, 1f, 1f));
-                    GL.Vertex(vertices[idx0]);
-                    GL.Vertex(vertices[idx1]);
-                    GL.Vertex(vertices[idx2]);
-                }
+                GL.Vertex(tri.v0Local);
+                GL.Vertex(tri.v1Local);
+                GL.Vertex(tri.v2Local);
             }
-            GL.End();
 
+            GL.End();
 	        GL.PopMatrix();
 
             // Method 3: Wireframe outline
             Handles.zTest = UnityEngine.Rendering.CompareFunction.LessEqual;
             Handles.color = new Color(1f, 0.3f, 0f, 1f);
 
-            for (int maskIndex = 0; maskIndex < triangleMask.Length; maskIndex++)
+            foreach (var tri in triangleDataList)
             {
-                int triangleIndex = triangleMask[maskIndex];
-                int baseIndex = triangleIndex * 3;
-
-                if (baseIndex + 2 < triangles.Length)
-                {
-                    var idx0 = triangles[baseIndex];
-                    var idx1 = triangles[baseIndex + 1];
-                    var idx2 = triangles[baseIndex + 2];
-
-                    var v0 = vertexWorldPositions[idx0];
-                    var v1 = vertexWorldPositions[idx1];
-                    var v2 = vertexWorldPositions[idx2];
-
-                    Handles.DrawLine(v0, v1);
-                    Handles.DrawLine(v1, v2);
-                    Handles.DrawLine(v2, v0);
-                }
+                Handles.DrawLine(tri.v0World, tri.v1World);
+                Handles.DrawLine(tri.v1World, tri.v2World);
+                Handles.DrawLine(tri.v2World, tri.v0World);
             }
 
             Handles.zTest = originalZTest;
