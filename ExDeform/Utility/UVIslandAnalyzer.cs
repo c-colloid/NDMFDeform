@@ -77,13 +77,15 @@ namespace Deform.Masking
             if (mesh.triangles == null || mesh.triangles.Length == 0)
                 return new List<UVIsland>();
                 
-            var uvs = mesh.uv;
-            var triangles = mesh.triangles;
+	        var uvs = new List<Vector2>();
+	        mesh.GetUVs(0, uvs);
+	        var submesh = 0;
+	        var triangles = mesh.GetTriangles(submesh);
             var islands = new List<UVIsland>();
             var processedTriangles = new HashSet<int>();
             
             // Build comprehensive connectivity information
-            var vertexToTriangles = BuildVertexToTriangleMapping(triangles, uvs.Length);
+	        var vertexToTriangles = BuildVertexToTriangleMapping(triangles, uvs.Count);
             var triangleAdjacency = BuildTriangleAdjacencyGraph(triangles, uvs, vertexToTriangles);
             
             // Process triangles using improved connectivity analysis
@@ -159,13 +161,15 @@ namespace Deform.Masking
             if (mesh.triangles == null || mesh.triangles.Length == 0)
                 return new List<UVIsland>();
                 
-            var uvs = mesh.uv;
-            var triangles = mesh.triangles;
+	        var uvs = new List<Vector2>();
+	        mesh.GetUVs(0, uvs);
+	        var submesh = 0;
+	        var triangles = mesh.GetTriangles(submesh);
             var islands = new List<UVIsland>();
             var processedTriangles = new HashSet<int>();
             
             // Pre-build vertex to triangle mapping for faster adjacency lookup
-            var vertexToTriangles = BuildVertexToTriangleMapping(triangles, uvs.Length);
+	        var vertexToTriangles = BuildVertexToTriangleMapping(triangles, uvs.Count);
             
             // Group triangles by connected UV coordinates
             for (int i = 0; i < triangles.Length; i += 3)
@@ -246,7 +250,7 @@ namespace Deform.Masking
         /// Build advanced triangle adjacency graph using multiple connectivity criteria
         /// 複数の接続基準を使用して高度な三角形隣接グラフを構築
         /// </summary>
-        private static Dictionary<int, HashSet<int>> BuildTriangleAdjacencyGraph(int[] triangles, Vector2[] uvs, Dictionary<int, List<int>> vertexToTriangles)
+	    private static Dictionary<int, HashSet<int>> BuildTriangleAdjacencyGraph(int[] triangles, List<Vector2> uvs, Dictionary<int, List<int>> vertexToTriangles)
         {
             var adjacency = new Dictionary<int, HashSet<int>>();
             int triangleCount = triangles.Length / 3;
@@ -326,7 +330,7 @@ namespace Deform.Masking
         /// Check if two triangles sharing an edge should be UV-connected
         /// エッジを共有する2つの三角形がUV接続されるべきかチェック
         /// </summary>
-        private static bool AreTrianglesUVConnected(int tri1, int tri2, int[] triangles, Vector2[] uvs, (int, int) sharedEdge)
+	    private static bool AreTrianglesUVConnected(int tri1, int tri2, int[] triangles, List<Vector2> uvs, (int, int) sharedEdge)
         {
             // The key insight: triangles sharing an edge are UV-connected if their UV coordinates 
             // are continuous across the shared edge. If there's a UV seam, they belong to different islands.
@@ -370,7 +374,7 @@ namespace Deform.Masking
         /// Add UV proximity-based connections for cases where topology might have gaps
         /// トポロジーにギャップがある場合のUV近接性ベースの接続を追加
         /// </summary>
-        private static void AddUVProximityConnections(Dictionary<int, HashSet<int>> adjacency, int[] triangles, Vector2[] uvs, Dictionary<int, List<int>> vertexToTriangles)
+	    private static void AddUVProximityConnections(Dictionary<int, HashSet<int>> adjacency, int[] triangles, List<Vector2> uvs, Dictionary<int, List<int>> vertexToTriangles)
         {
             // This method adds connections based on UV coordinate proximity
             // It's a fallback for cases where edge-based detection might miss connections
@@ -417,7 +421,7 @@ namespace Deform.Masking
         /// Add connections using Union-Find with weighted edge analysis
         /// 重み付きエッジ解析とUnion-Findを使用した接続追加
         /// </summary>
-        private static void AddAggressiveProximityConnections(Dictionary<int, HashSet<int>> adjacency, int[] triangles, Vector2[] uvs)
+	    private static void AddAggressiveProximityConnections(Dictionary<int, HashSet<int>> adjacency, int[] triangles, List<Vector2> uvs)
         {
             int triangleCount = triangles.Length / 3;
             
@@ -522,7 +526,7 @@ namespace Deform.Masking
         /// Build weighted connections using multiple heuristics
         /// 複数のヒューリスティックを使用して重み付き接続を構築
         /// </summary>
-        private static List<WeightedConnection> BuildWeightedConnections(int[] triangles, Vector2[] uvs)
+	    private static List<WeightedConnection> BuildWeightedConnections(int[] triangles, List<Vector2> uvs)
         {
             int triangleCount = triangles.Length / 3;
             var connections = new List<WeightedConnection>();
@@ -557,7 +561,7 @@ namespace Deform.Masking
         /// <summary>
         /// Build UV clustering for efficient candidate finding
         /// </summary>
-        private static Dictionary<Vector2, HashSet<int>> BuildVertexUVClusters(int[] triangles, Vector2[] uvs)
+        private static Dictionary<Vector2, HashSet<int>> BuildVertexUVClusters(int[] triangles, List<Vector2> uvs)
         {
             var clusters = new Dictionary<Vector2, HashSet<int>>();
             int triangleCount = triangles.Length / 3;
@@ -593,7 +597,7 @@ namespace Deform.Masking
         /// <summary>
         /// Find potential connection candidates for a triangle
         /// </summary>
-        private static HashSet<int> FindConnectionCandidates(int triangleIndex, int[] triangles, Vector2[] uvs, Dictionary<Vector2, HashSet<int>> clusters)
+        private static HashSet<int> FindConnectionCandidates(int triangleIndex, int[] triangles, List<Vector2> uvs, Dictionary<Vector2, HashSet<int>> clusters)
         {
             var candidates = new HashSet<int>();
             int baseIndex = triangleIndex * 3;
@@ -639,7 +643,7 @@ namespace Deform.Masking
         /// Calculate connection weight using multiple criteria
         /// 複数の基準を使用して接続重みを計算
         /// </summary>
-        private static float CalculateConnectionWeight(int tri1, int tri2, int[] triangles, Vector2[] uvs)
+        private static float CalculateConnectionWeight(int tri1, int tri2, int[] triangles, List<Vector2> uvs)
         {
             float weight = 0f;
             int base1 = tri1 * 3;
@@ -681,7 +685,7 @@ namespace Deform.Masking
         /// <summary>
         /// Calculate UV area overlap between two triangles
         /// </summary>
-        private static float CalculateTriangleUVOverlap(int tri1, int tri2, int[] triangles, Vector2[] uvs)
+        private static float CalculateTriangleUVOverlap(int tri1, int tri2, int[] triangles, List<Vector2> uvs)
         {
             // Simplified overlap calculation using bounding boxes
             var bounds1 = GetTriangleUVBounds(tri1, triangles, uvs);
@@ -698,7 +702,7 @@ namespace Deform.Masking
         /// <summary>
         /// Calculate edge continuity between triangles
         /// </summary>
-        private static float CalculateEdgeContinuity(int tri1, int tri2, int[] triangles, Vector2[] uvs)
+        private static float CalculateEdgeContinuity(int tri1, int tri2, int[] triangles, List<Vector2> uvs)
         {
             int base1 = tri1 * 3;
             int base2 = tri2 * 3;
@@ -748,7 +752,7 @@ namespace Deform.Masking
         /// <summary>
         /// Get UV bounds for a triangle
         /// </summary>
-        private static Bounds GetTriangleUVBounds(int triangleIndex, int[] triangles, Vector2[] uvs)
+        private static Bounds GetTriangleUVBounds(int triangleIndex, int[] triangles, List<Vector2> uvs)
         {
             int baseIndex = triangleIndex * 3;
             var uv0 = uvs[triangles[baseIndex]];
@@ -765,7 +769,7 @@ namespace Deform.Masking
         /// Calculate the UV center of a triangle
         /// 三角形のUV中心を計算
         /// </summary>
-        private static Vector2 GetTriangleUVCenter(int[] triangles, Vector2[] uvs, int baseIndex)
+        private static Vector2 GetTriangleUVCenter(int[] triangles, List<Vector2> uvs, int baseIndex)
         {
             var uv0 = uvs[triangles[baseIndex]];
             var uv1 = uvs[triangles[baseIndex + 1]];
@@ -773,7 +777,7 @@ namespace Deform.Masking
             return (uv0 + uv1 + uv2) / 3f;
         }
         
-        private static void FindAdjacentTrianglesOptimized(int triangleIndex, int[] triangles, Vector2[] uvs, 
+        private static void FindAdjacentTrianglesOptimized(int triangleIndex, int[] triangles, List<Vector2> uvs, 
             Queue<int> trianglesToProcess, HashSet<int> processedTriangles, Dictionary<int, List<int>> vertexToTriangles)
         {
             int triStart = triangleIndex * 3;
@@ -882,7 +886,7 @@ namespace Deform.Masking
         /// Check if point is inside UV island
         /// 点がUVアイランド内にあるかチェック
         /// </summary>
-        public static bool IsPointInUVIsland(Vector2 point, UVIsland island, Vector2[] uvs, int[] triangles)
+        public static bool IsPointInUVIsland(Vector2 point, UVIsland island, List<Vector2> uvs, int[] triangles)
         {
             return IsPointInUVIslandOptimized(point, island, uvs, triangles);
         }
@@ -891,7 +895,7 @@ namespace Deform.Masking
         /// Optimized point-in-island test using hybrid approach for better performance on large islands
         /// 大きなアイランドでのパフォーマンス向上のためのハイブリッドアプローチによる最適化されたポイントインアイランドテスト
         /// </summary>
-        public static bool IsPointInUVIslandOptimized(Vector2 point, UVIsland island, Vector2[] uvs, int[] triangles)
+        public static bool IsPointInUVIslandOptimized(Vector2 point, UVIsland island, List<Vector2> uvs, int[] triangles)
         {
             // Early rejection: check if point is within island bounds with small padding
             var bounds = island.uvBounds;
@@ -915,7 +919,7 @@ namespace Deform.Masking
         /// <summary>
         /// Direct triangle testing - fast for small islands
         /// </summary>
-        private static bool IsPointInTrianglesDirect(Vector2 point, UVIsland island, Vector2[] uvs, int[] triangles)
+        private static bool IsPointInTrianglesDirect(Vector2 point, UVIsland island, List<Vector2> uvs, int[] triangles)
         {
             foreach (int triangleIndex in island.triangleIndices)
             {
@@ -930,7 +934,7 @@ namespace Deform.Masking
                 int vertIndex2 = triangles[baseIndex + 2];
                 
                 // Safety check for UV array bounds
-                if (vertIndex0 >= uvs.Length || vertIndex1 >= uvs.Length || vertIndex2 >= uvs.Length) continue;
+	            if (vertIndex0 >= uvs.Count || vertIndex1 >= uvs.Count || vertIndex2 >= uvs.Count) continue;
                 
                 var uv0 = uvs[vertIndex0];
                 var uv1 = uvs[vertIndex1];
@@ -946,7 +950,7 @@ namespace Deform.Masking
         /// Ray casting algorithm - reliable for large complex islands
         /// レイキャスティングアルゴリズム - 大きな複雑なアイランドに対して信頼性が高い
         /// </summary>
-        private static bool IsPointInIslandRayCasting(Vector2 point, UVIsland island, Vector2[] uvs, int[] triangles)
+        private static bool IsPointInIslandRayCasting(Vector2 point, UVIsland island, List<Vector2> uvs, int[] triangles)
         {
             int intersections = 0;
             var rayEnd = new Vector2(island.uvBounds.max.x + 0.1f, point.y); // Horizontal ray to the right
@@ -965,7 +969,7 @@ namespace Deform.Masking
                 int vertIndex2 = triangles[baseIndex + 2];
                 
                 // Safety check for UV array bounds
-                if (vertIndex0 >= uvs.Length || vertIndex1 >= uvs.Length || vertIndex2 >= uvs.Length) continue;
+	            if (vertIndex0 >= uvs.Count || vertIndex1 >= uvs.Count || vertIndex2 >= uvs.Count) continue;
                 
                 var uv0 = uvs[vertIndex0];
                 var uv1 = uvs[vertIndex1];

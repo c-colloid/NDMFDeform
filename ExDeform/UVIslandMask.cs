@@ -114,10 +114,12 @@ namespace Deform.Masking
 	        var mesh = data.OriginalMesh; // Get mesh from Deformable target
             if (mesh != null && selectedIslandIDs.Count > 0)
             {
-                var uvs = mesh.uv;
-                var triangles = mesh.triangles;
+	            var uvs = new List<Vector2>();
+	            mesh.GetUVs(0, uvs);
+	            var submesh = 0;
+	            var triangles = mesh.GetTriangles(submesh);
                 
-                if (uvs != null && uvs.Length > 0)
+	            if (uvs != null && uvs.Count > 0)
                 {
                     var islands = UVIslandAnalyzer.AnalyzeUVIslands(mesh);
                     
