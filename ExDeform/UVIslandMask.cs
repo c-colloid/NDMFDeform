@@ -16,7 +16,9 @@ namespace Deform.Masking
     public class UVIslandMask : Deformer
     {
         [Header("Mask Settings")]
+        [SerializeField] private List<int> selectedSubmeshes = new List<int> { 0 };
         [SerializeField] private List<int> selectedIslandIDs = new List<int>();
+        [SerializeField] private List<int> selectedVertexIndices = new List<int>(); // Direct vertex list
         [SerializeField] private bool invertMask = false;
         [SerializeField, Range(0f, 1f)] private float maskStrength = 1f;
         
@@ -32,7 +34,9 @@ namespace Deform.Masking
         [System.NonSerialized] private Transform cachedRendererTransform;
         
         // Properties for editor access
+        public List<int> SelectedSubmeshes => selectedSubmeshes;
         public List<int> SelectedIslandIDs => selectedIslandIDs;
+        public List<int> SelectedVertexIndices => selectedVertexIndices;
         public bool InvertMask { get => invertMask; set => invertMask = value; }
 	    public float MaskStrength { get => maskStrength; set => maskStrength = Mathf.Clamp01(value); }
 	    public Mesh CachedMesh => cachedMesh;
@@ -95,12 +99,12 @@ namespace Deform.Masking
                     // Already disposed, continue
                 }
             }
-                
+
             if (!isDisposing)
             {
                 maskValues = new NativeArray<float>(data.Length, Allocator.Persistent);
             }
-            
+
             // Initialize all vertices to masked (1.0 = revert to original, no deformation)
             if (maskValues.IsCreated && !isDisposing)
             {
@@ -109,38 +113,51 @@ namespace Deform.Masking
                     maskValues[i] = 1f;
                 }
             }
-            
-            // Apply deformation only to selected islands
-	        var mesh = data.OriginalMesh; // Get mesh from Deformable target
-            if (mesh != null && selectedIslandIDs.Count > 0)
+
+            // Priority 1: Use direct vertex list if provided (most efficient)
+            if (selectedVertexIndices != null && selectedVertexIndices.Count > 0)
             {
-	            var uvs = new List<Vector2>();
-	            mesh.GetUVs(0, uvs);
-	            var submesh = 0;
-	            var triangles = mesh.GetTriangles(submesh);
-                
-	            if (uvs != null && uvs.Count > 0)
+                foreach (var vertexIndex in selectedVertexIndices)
                 {
-                    var islands = UVIslandAnalyzer.AnalyzeUVIslands(mesh);
-                    
-                    // Allow deformation for selected islands only
-                    foreach (var islandID in selectedIslandIDs)
+                    if (vertexIndex < maskValues.Length)
                     {
-                        var island = islands.Find(i => i.islandID == islandID);
-                        if (island != null)
+                        maskValues[vertexIndex] = 0f; // Allow deformation
+                    }
+                }
+            }
+            // Priority 2: Fall back to island-based analysis for backward compatibility
+            else if (selectedIslandIDs.Count > 0 && selectedSubmeshes.Count > 0)
+            {
+                var mesh = data.OriginalMesh; // Get mesh from Deformable target
+                if (mesh != null)
+                {
+                    var uvs = new List<Vector2>();
+                    mesh.GetUVs(0, uvs);
+
+                    if (uvs != null && uvs.Count > 0)
+                    {
+                        // Analyze only selected submeshes for better performance
+                        var islands = UVIslandAnalyzer.AnalyzeUVIslands(mesh, selectedSubmeshes);
+
+                        // Allow deformation for selected islands only
+                        foreach (var islandID in selectedIslandIDs)
                         {
-                            foreach (var vertexIndex in island.vertexIndices)
+                            var island = islands.Find(i => i.islandID == islandID);
+                            if (island != null)
                             {
-                                if (vertexIndex < maskValues.Length)
+                                foreach (var vertexIndex in island.vertexIndices)
                                 {
-                                    maskValues[vertexIndex] = 0f; // Allow deformation
+                                    if (vertexIndex < maskValues.Length)
+                                    {
+                                        maskValues[vertexIndex] = 0f; // Allow deformation
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
-            
+
             maskDataReady = true;
         }
         
@@ -189,6 +206,22 @@ namespace Deform.Masking
         public void SetSelectedIslands(List<int> islandIDs)
         {
             selectedIslandIDs = islandIDs ?? new List<int>();
+            maskDataReady = false;
+        }
+
+        public void SetSelectedSubmeshes(List<int> submeshIndices)
+        {
+            selectedSubmeshes = submeshIndices ?? new List<int> { 0 };
+            maskDataReady = false;
+        }
+
+        /// <summary>
+        /// Set selected vertex indices directly (most efficient method)
+        /// 選択された頂点インデックスを直接設定（最も効率的な方法）
+        /// </summary>
+        public void SetSelectedVertexIndices(List<int> vertexIndices)
+        {
+            selectedVertexIndices = vertexIndices ?? new List<int>();
             maskDataReady = false;
         }
         

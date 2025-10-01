@@ -39,7 +39,13 @@ namespace Deform.Masking.Editor
         // Core data
         private Mesh targetMesh;
         private List<UVIslandAnalyzer.UVIsland> uvIslands = new List<UVIslandAnalyzer.UVIsland>();
-        private List<int> selectedIslandIDs = new List<int>();
+        private List<UVIslandAnalyzer.UVIsland> allUVIslands = new List<UVIslandAnalyzer.UVIsland>(); // All islands from all submeshes
+        private List<int> selectedSubmeshIndices = new List<int> { 0 }; // Selected submeshes for filtering
+        private int currentPreviewSubmesh = 0; // Current submesh being previewed
+
+        // Per-submesh selection storage: Key=submeshIndex, Value=set of island IDs
+        private Dictionary<int, HashSet<int>> selectedIslandsPerSubmesh = new Dictionary<int, HashSet<int>>();
+
         private Texture2D uvMapTexture;
         
         #region Fields
@@ -70,6 +76,9 @@ namespace Deform.Masking.Editor
         // Cache
         private int[] vertexMask;
         private int[] triangleMask;
+
+        // Per-submesh triangle masks for accurate scene highlighting
+        private Dictionary<int, List<int>> triangleMaskPerSubmesh = new Dictionary<int, List<int>>();
         
         // Performance optimization
         private bool textureNeedsUpdate = false;
@@ -86,14 +95,43 @@ namespace Deform.Masking.Editor
         
         // Properties
         public List<UVIslandAnalyzer.UVIsland> UVIslands => uvIslands;
-        public List<int> SelectedIslandIDs => selectedIslandIDs;
+        public List<UVIslandAnalyzer.UVIsland> AllUVIslands => allUVIslands;
+        public List<int> SelectedSubmeshIndices => selectedSubmeshIndices;
+        public int CurrentPreviewSubmesh => currentPreviewSubmesh;
+
+        // Get selected island IDs for current preview submesh only
+        public List<int> SelectedIslandIDs
+        {
+            get
+            {
+                if (selectedIslandsPerSubmesh.TryGetValue(currentPreviewSubmesh, out var islandSet))
+                    return new List<int>(islandSet);
+                return new List<int>();
+            }
+        }
+
+        // Get all selected island IDs across all submeshes (for compatibility)
+        public List<int> AllSelectedIslandIDs
+        {
+            get
+            {
+                var allIDs = new List<int>();
+                foreach (var kvp in selectedIslandsPerSubmesh)
+                {
+                    allIDs.AddRange(kvp.Value);
+                }
+                return allIDs;
+            }
+        }
+
         public Texture2D UvMapTexture => uvMapTexture;
         public Mesh TargetMesh => targetMesh;
-        public bool HasSelectedIslands => selectedIslandIDs.Count > 0;
+        public bool HasSelectedIslands => selectedIslandsPerSubmesh.Values.Any(set => set.Count > 0);
         public int[] TriangleMask => triangleMask;
         public Transform TargetTransform { get => targetTransform; set => targetTransform = value; }
         public int[] VertexMask => vertexMask;
         public Mesh DynamicMesh { get => dynamicMesh; set { dynamicMesh = value; useDynamicMeshForHighlight = value != null; } }
+        public int SubmeshCount => targetMesh?.subMeshCount ?? 0;
         
         // Display properties
         public bool UseAdaptiveVertexSize { get => useAdaptiveVertexSize; set => useAdaptiveVertexSize = value; }
@@ -143,12 +181,46 @@ namespace Deform.Masking.Editor
         public void UpdateMeshData()
         {
             if (targetMesh == null) return;
-            
-            uvIslands = UVIslandAnalyzer.AnalyzeUVIslands(targetMesh);
+
+            // Analyze all submeshes
+            allUVIslands = UVIslandAnalyzer.AnalyzeUVIslands(targetMesh);
+
+            // Initialize current preview submesh if not set
+            if (selectedSubmeshIndices != null && selectedSubmeshIndices.Count > 0 &&
+                !selectedSubmeshIndices.Contains(currentPreviewSubmesh))
+            {
+                currentPreviewSubmesh = selectedSubmeshIndices[0];
+            }
+
+            // Filter islands for current preview submesh only (not all selected submeshes)
+            FilterIslandsByCurrentPreviewSubmesh();
+
             UpdateMasks();
-            
+
             // Always generate texture when mesh data is updated to ensure immediate visibility
             GenerateUVMapTexture();
+        }
+
+        private void FilterIslandsBySelectedSubmeshes()
+        {
+            if (selectedSubmeshIndices == null || selectedSubmeshIndices.Count == 0)
+            {
+                uvIslands = new List<UVIslandAnalyzer.UVIsland>(allUVIslands);
+                return;
+            }
+
+            uvIslands = allUVIslands.Where(island => selectedSubmeshIndices.Contains(island.submeshIndex)).ToList();
+        }
+
+        private void FilterIslandsByCurrentPreviewSubmesh()
+        {
+            if (currentPreviewSubmesh < 0 || targetMesh == null || currentPreviewSubmesh >= targetMesh.subMeshCount)
+            {
+                uvIslands = new List<UVIslandAnalyzer.UVIsland>(allUVIslands);
+                return;
+            }
+
+            uvIslands = allUVIslands.Where(island => island.submeshIndex == currentPreviewSubmesh).ToList();
         }
         
         private void CalculateAdaptiveVertexSphereSize()
@@ -161,24 +233,32 @@ namespace Deform.Masking.Editor
         }
         
         /// <summary>
-        /// Toggles the selection state of a UV island
-        /// UVアイランドの選択状態を切り替え
+        /// Toggles the selection state of a UV island in current preview submesh
+        /// 現在のプレビューサブメッシュ内のUVアイランドの選択状態を切り替え
         /// </summary>
         /// <param name="islandID">The ID of the island to toggle</param>
         public void ToggleIslandSelection(int islandID)
         {
-            bool wasSelected = selectedIslandIDs.Contains(islandID);
+            // Ensure the submesh entry exists
+            if (!selectedIslandsPerSubmesh.ContainsKey(currentPreviewSubmesh))
+            {
+                selectedIslandsPerSubmesh[currentPreviewSubmesh] = new HashSet<int>();
+            }
+
+            var islandSet = selectedIslandsPerSubmesh[currentPreviewSubmesh];
+            bool wasSelected = islandSet.Contains(islandID);
+
             if (wasSelected)
             {
-                selectedIslandIDs.Remove(islandID);
-                RemoveIslandFromMasks(islandID);
+                islandSet.Remove(islandID);
+                RemoveIslandFromMasks(islandID, currentPreviewSubmesh);
             }
             else
             {
-                selectedIslandIDs.Add(islandID);
-                AddIslandToMasks(islandID);
+                islandSet.Add(islandID);
+                AddIslandToMasks(islandID, currentPreviewSubmesh);
             }
-            
+
             // Mark texture as dirty instead of regenerating immediately
             if (autoUpdatePreview)
             {
@@ -188,24 +268,102 @@ namespace Deform.Masking.Editor
         
         public void ClearSelection()
         {
-            selectedIslandIDs.Clear();
+            selectedIslandsPerSubmesh.Clear();
             UpdateMasks();
-            
+
             if (autoUpdatePreview)
             {
                 GenerateUVMapTexture();
             }
         }
-        
+
+        /// <summary>
+        /// Set selected islands for current preview submesh
+        /// 現在のプレビューサブメッシュの選択アイランドを設定
+        /// </summary>
         public void SetSelectedIslands(List<int> islandIDs)
         {
-            selectedIslandIDs = islandIDs ?? new List<int>();
+            if (!selectedIslandsPerSubmesh.ContainsKey(currentPreviewSubmesh))
+            {
+                selectedIslandsPerSubmesh[currentPreviewSubmesh] = new HashSet<int>();
+            }
+
+            selectedIslandsPerSubmesh[currentPreviewSubmesh] = new HashSet<int>(islandIDs ?? new List<int>());
             UpdateMasks();
-            
+
             if (autoUpdatePreview)
             {
                 GenerateUVMapTexture();
             }
+        }
+
+        /// <summary>
+        /// Set all selected islands across all submeshes (for backward compatibility)
+        /// 全サブメッシュの選択アイランドを設定（後方互換性用）
+        /// </summary>
+        public void SetAllSelectedIslands(Dictionary<int, HashSet<int>> selections)
+        {
+            selectedIslandsPerSubmesh = selections ?? new Dictionary<int, HashSet<int>>();
+            UpdateMasks();
+
+            if (autoUpdatePreview)
+            {
+                GenerateUVMapTexture();
+            }
+        }
+
+        public void SetSelectedSubmeshes(List<int> submeshIndices)
+        {
+            selectedSubmeshIndices = submeshIndices ?? new List<int> { 0 };
+
+            // Update current preview submesh if it's no longer in selected submeshes
+            if (!selectedSubmeshIndices.Contains(currentPreviewSubmesh))
+            {
+                currentPreviewSubmesh = selectedSubmeshIndices[0];
+            }
+
+            // Filter by current preview submesh only (not all selected)
+            FilterIslandsByCurrentPreviewSubmesh();
+            UpdateMasks();
+
+            if (autoUpdatePreview)
+            {
+                GenerateUVMapTexture();
+            }
+        }
+
+        public void SetPreviewSubmesh(int submeshIndex)
+        {
+            if (submeshIndex < 0 || targetMesh == null || submeshIndex >= targetMesh.subMeshCount)
+                return;
+
+            currentPreviewSubmesh = submeshIndex;
+            FilterIslandsByCurrentPreviewSubmesh();
+
+            if (autoUpdatePreview)
+            {
+                GenerateUVMapTexture();
+            }
+        }
+
+        public void NextPreviewSubmesh()
+        {
+            if (selectedSubmeshIndices == null || selectedSubmeshIndices.Count == 0)
+                return;
+
+            int currentIndex = selectedSubmeshIndices.IndexOf(currentPreviewSubmesh);
+            int nextIndex = (currentIndex + 1) % selectedSubmeshIndices.Count;
+            SetPreviewSubmesh(selectedSubmeshIndices[nextIndex]);
+        }
+
+        public void PreviousPreviewSubmesh()
+        {
+            if (selectedSubmeshIndices == null || selectedSubmeshIndices.Count == 0)
+                return;
+
+            int currentIndex = selectedSubmeshIndices.IndexOf(currentPreviewSubmesh);
+            int prevIndex = (currentIndex - 1 + selectedSubmeshIndices.Count) % selectedSubmeshIndices.Count;
+            SetPreviewSubmesh(selectedSubmeshIndices[prevIndex]);
         }
         
         // Range selection methods
@@ -227,42 +385,50 @@ namespace Deform.Masking.Editor
         public void FinishRangeSelection(bool addToSelection = false, bool removeFromSelection = false)
         {
             if (!isRangeSelecting) return;
-            
+
             var selectionRect = new Rect(
                 Mathf.Min(rangeSelectionStart.x, rangeSelectionEnd.x),
                 Mathf.Min(rangeSelectionStart.y, rangeSelectionEnd.y),
                 Mathf.Abs(rangeSelectionEnd.x - rangeSelectionStart.x),
                 Mathf.Abs(rangeSelectionEnd.y - rangeSelectionStart.y)
             );
-            
+
             var islandsInRange = GetIslandsInRect(selectionRect);
-            
+
+            // Ensure the submesh entry exists
+            if (!selectedIslandsPerSubmesh.ContainsKey(currentPreviewSubmesh))
+            {
+                selectedIslandsPerSubmesh[currentPreviewSubmesh] = new HashSet<int>();
+            }
+
+            var islandSet = selectedIslandsPerSubmesh[currentPreviewSubmesh];
+
             if (removeFromSelection)
             {
                 foreach (var islandID in islandsInRange)
                 {
-                    selectedIslandIDs.Remove(islandID);
+                    islandSet.Remove(islandID);
                 }
             }
             else if (addToSelection)
             {
                 foreach (var islandID in islandsInRange)
                 {
-                    if (!selectedIslandIDs.Contains(islandID))
-                    {
-                        selectedIslandIDs.Add(islandID);
-                    }
+                    islandSet.Add(islandID);
                 }
             }
             else
             {
-                selectedIslandIDs.Clear();
-                selectedIslandIDs.AddRange(islandsInRange);
+                islandSet.Clear();
+                foreach (var islandID in islandsInRange)
+                {
+                    islandSet.Add(islandID);
+                }
             }
-            
+
             isRangeSelecting = false;
             UpdateMasks();
-            
+
             if (autoUpdatePreview)
             {
                 GenerateUVMapTexture();
@@ -354,12 +520,8 @@ namespace Deform.Masking.Editor
             // Phase 1: Try exact triangle hit detection for all islands
             foreach (var island in uvIslands)
             {
-            	var uvs = new List<Vector2>();
-	            targetMesh.GetUVs(0, uvs);
-	            var submesh = 0;
-	            var triangles = targetMesh.GetTriangles(submesh);
-                // Use optimized point-in-island test
-	            bool inIsland = UVIslandAnalyzer.IsPointInUVIsland(uvCoord, island, uvs, triangles);
+                // Use optimized point-in-island test with submesh info
+                bool inIsland = UVIslandAnalyzer.IsPointInUVIsland(uvCoord, island, targetMesh);
                 if (inIsland)
                 {
                     return island.islandID;
@@ -405,37 +567,60 @@ namespace Deform.Masking.Editor
         
         private void UpdateMasks()
         {
-            if (uvIslands.Count == 0)
+            if (allUVIslands.Count == 0)
             {
                 vertexMask = new int[0];
                 triangleMask = new int[0];
+                triangleMaskPerSubmesh.Clear();
                 return;
             }
-            
-            var maskedVertices = new List<int>();
+
+            var maskedVertices = new HashSet<int>();
             var maskedTriangles = new List<int>();
-            
-            foreach (var islandID in selectedIslandIDs)
+            triangleMaskPerSubmesh.Clear();
+
+            // Iterate through all selected islands across all submeshes
+            foreach (var kvp in selectedIslandsPerSubmesh)
             {
-                var island = uvIslands.FirstOrDefault(i => i.islandID == islandID);
-                if (island != null)
+                int submeshIndex = kvp.Key;
+                var islandIDs = kvp.Value;
+
+                // Initialize submesh triangle list
+                if (!triangleMaskPerSubmesh.ContainsKey(submeshIndex))
                 {
-                    maskedVertices.AddRange(island.vertexIndices);
-                    maskedTriangles.AddRange(island.triangleIndices);
+                    triangleMaskPerSubmesh[submeshIndex] = new List<int>();
+                }
+
+                foreach (var islandID in islandIDs)
+                {
+                    // Find island from all islands by matching both submesh and island ID
+                    var island = allUVIslands.FirstOrDefault(i => i.submeshIndex == submeshIndex && i.islandID == islandID);
+                    if (island != null)
+                    {
+                        foreach (var vertIndex in island.vertexIndices)
+                        {
+                            maskedVertices.Add(vertIndex);
+                        }
+                        maskedTriangles.AddRange(island.triangleIndices);
+
+                        // Store triangles per submesh for accurate scene highlighting
+                        triangleMaskPerSubmesh[submeshIndex].AddRange(island.triangleIndices);
+                    }
                 }
             }
-            
-            vertexMaskSet = maskedVertices.ToHashSet();
+
+            vertexMaskSet = maskedVertices;
             triangleMaskList = maskedTriangles;
-            
+
             vertexMask = vertexMaskSet.ToArray();
             triangleMask = triangleMaskList.ToArray();
         }
         
         // Optimized incremental mask updates
-        private void AddIslandToMasks(int islandID)
+        private void AddIslandToMasks(int islandID, int submeshIndex)
         {
-            var island = uvIslands.FirstOrDefault(i => i.islandID == islandID);
+            // Find island from current preview submesh only
+            var island = uvIslands.FirstOrDefault(i => i.islandID == islandID && i.submeshIndex == submeshIndex);
             if (island != null)
             {
                 foreach (var vertIndex in island.vertexIndices)
@@ -443,44 +628,75 @@ namespace Deform.Masking.Editor
                     vertexMaskSet.Add(vertIndex);
                 }
                 triangleMaskList.AddRange(island.triangleIndices);
-                
+
+                // Update per-submesh triangle mask for scene highlighting
+                if (!triangleMaskPerSubmesh.ContainsKey(submeshIndex))
+                {
+                    triangleMaskPerSubmesh[submeshIndex] = new List<int>();
+                }
+                triangleMaskPerSubmesh[submeshIndex].AddRange(island.triangleIndices);
+
                 // Update arrays
                 vertexMask = vertexMaskSet.ToArray();
                 triangleMask = triangleMaskList.ToArray();
             }
         }
-        
-        private void RemoveIslandFromMasks(int islandID)
+
+        private void RemoveIslandFromMasks(int islandID, int submeshIndex)
         {
-            var island = uvIslands.FirstOrDefault(i => i.islandID == islandID);
+            // Find island from current preview submesh only
+            var island = uvIslands.FirstOrDefault(i => i.islandID == islandID && i.submeshIndex == submeshIndex);
             if (island != null)
             {
                 foreach (var vertIndex in island.vertexIndices)
                 {
                     // Only remove if no other selected islands contain this vertex
                     bool vertexUsedElsewhere = false;
-                    foreach (var otherIslandID in selectedIslandIDs)
+
+                    // Check all selected islands across all submeshes
+                    foreach (var kvp in selectedIslandsPerSubmesh)
                     {
-                        if (otherIslandID == islandID) continue;
-                        var otherIsland = uvIslands.FirstOrDefault(i => i.islandID == otherIslandID);
-                        if (otherIsland != null && otherIsland.vertexIndices.Contains(vertIndex))
+                        foreach (var otherIslandID in kvp.Value)
                         {
-                            vertexUsedElsewhere = true;
-                            break;
+                            if (kvp.Key == submeshIndex && otherIslandID == islandID) continue;
+
+                            var otherIsland = allUVIslands.FirstOrDefault(i => i.submeshIndex == kvp.Key && i.islandID == otherIslandID);
+                            if (otherIsland != null && otherIsland.vertexIndices.Contains(vertIndex))
+                            {
+                                vertexUsedElsewhere = true;
+                                break;
+                            }
                         }
+                        if (vertexUsedElsewhere) break;
                     }
+
                     if (!vertexUsedElsewhere)
                     {
                         vertexMaskSet.Remove(vertIndex);
                     }
                 }
-                
-                // Remove triangles
+
+                // Remove triangles from global list
                 foreach (var triIndex in island.triangleIndices)
                 {
                     triangleMaskList.Remove(triIndex);
                 }
-                
+
+                // Remove triangles from per-submesh list for scene highlighting
+                if (triangleMaskPerSubmesh.ContainsKey(submeshIndex))
+                {
+                    foreach (var triIndex in island.triangleIndices)
+                    {
+                        triangleMaskPerSubmesh[submeshIndex].Remove(triIndex);
+                    }
+
+                    // Clean up empty submesh entries
+                    if (triangleMaskPerSubmesh[submeshIndex].Count == 0)
+                    {
+                        triangleMaskPerSubmesh.Remove(submeshIndex);
+                    }
+                }
+
                 // Update arrays
                 vertexMask = vertexMaskSet.ToArray();
                 triangleMask = triangleMaskList.ToArray();
@@ -523,16 +739,16 @@ namespace Deform.Masking.Editor
             }
             
             var transformMatrix = CalculateUVTransformMatrix();
-            
+
             // Draw simple UV grid
             UVTextureRenderer.DrawSimpleGrid(pixels, width, height, transformMatrix);
-            
-            // Draw UV islands
-            UVTextureRenderer.DrawUVIslands(pixels, width, height, transformMatrix, uvIslands, selectedIslandIDs, targetMesh);
-            
+
+            // Draw UV islands with current preview submesh selections
+            UVTextureRenderer.DrawUVIslands(pixels, width, height, transformMatrix, uvIslands, SelectedIslandIDs, targetMesh);
+
             texture.SetPixels(pixels);
             texture.Apply();
-            
+
             uvMapTexture = texture;
             return texture;
         }
@@ -555,16 +771,16 @@ namespace Deform.Masking.Editor
             
             // Use identity transform matrix to show full UV map without zoom/pan
             var transformMatrix = CalculateFullViewTransformMatrix();
-            
+
             // Draw simple UV grid
             UVTextureRenderer.DrawSimpleGrid(pixels, width, height, transformMatrix);
-            
-            // Draw UV islands
-            UVTextureRenderer.DrawUVIslands(pixels, width, height, transformMatrix, uvIslands, selectedIslandIDs, targetMesh);
-            
+
+            // Draw UV islands with current preview submesh selections
+            UVTextureRenderer.DrawUVIslands(pixels, width, height, transformMatrix, uvIslands, SelectedIslandIDs, targetMesh);
+
             texture.SetPixels(pixels);
             texture.Apply();
-            
+
             return texture;
         }
         
@@ -599,11 +815,11 @@ namespace Deform.Masking.Editor
             
             // Calculate magnifying area
             float radius = RECENTER_OFFSET / magnifyingGlassZoom;
-            UVTextureRenderer.DrawMagnifyingContent(pixels, size, size, centerUV, radius, uvIslands, selectedIslandIDs, targetMesh);
-            
+            UVTextureRenderer.DrawMagnifyingContent(pixels, size, size, centerUV, radius, uvIslands, SelectedIslandIDs, targetMesh);
+
             texture.SetPixels(pixels);
             texture.Apply();
-            
+
             return texture;
         }
         
@@ -614,22 +830,36 @@ namespace Deform.Masking.Editor
         /// </summary>
         public void DrawSelectedFacesInScene()
         {
-            if (triangleMask == null || targetTransform == null) return;
+            if (triangleMaskPerSubmesh == null || triangleMaskPerSubmesh.Count == 0 || targetTransform == null) return;
             if (!HasSelectedIslands) return;
 
             // Use dynamic mesh for highlighting if available, otherwise fallback to original mesh
             Mesh meshForHighlight = useDynamicMeshForHighlight && dynamicMesh != null ? dynamicMesh : targetMesh;
             if (meshForHighlight == null) return;
 
-	        var vertices = new List<Vector3>();
-	        meshForHighlight.GetVertices(vertices);
-	        var submesh = 0;
-	        var triangles = meshForHighlight.GetTriangles(submesh);
+            var vertices = new List<Vector3>();
+            meshForHighlight.GetVertices(vertices);
 
-            // Validate that triangle mask is compatible with current mesh
-            if (triangles.Length == 0) return;
+            // Draw faces only for submeshes that have selected islands
+            foreach (var kvp in triangleMaskPerSubmesh)
+            {
+                int submeshIndex = kvp.Key;
+                var triangleMaskForSubmesh = kvp.Value;
 
-            DrawSelectedFacesWithGL(vertices, triangles);
+                if (triangleMaskForSubmesh.Count == 0)
+                    continue;
+
+                if (submeshIndex < 0 || submeshIndex >= meshForHighlight.subMeshCount)
+                    continue;
+
+                var triangles = meshForHighlight.GetTriangles(submeshIndex);
+
+                // Validate that triangle mask is compatible with current mesh
+                if (triangles.Length == 0)
+                    continue;
+
+                DrawSelectedFacesWithGL(vertices, triangles, triangleMaskForSubmesh);
+            }
         }
 
         /// <summary>
@@ -646,7 +876,7 @@ namespace Deform.Masking.Editor
         /// Draw selected faces using GL immediate mode with hardware polygon offset
         /// ハードウェアポリゴンオフセットを使用したGL即時モードで選択された面を描画
         /// </summary>
-        private void DrawSelectedFacesWithGL(List<Vector3> vertices, int[] triangles)
+        private void DrawSelectedFacesWithGL(List<Vector3> vertices, int[] triangles, List<int> triangleMaskForSubmesh)
         {
             // Create material for GL rendering if needed
             if (!CreateGLMaterial())
@@ -656,11 +886,11 @@ namespace Deform.Masking.Editor
             if (sceneCamera == null) return;
 
             // Precompute all triangle data in a single pass
-            var triangleDataList = new List<TriangleRenderData>(triangleMask.Length);
+            var triangleDataList = new List<TriangleRenderData>(triangleMaskForSubmesh.Count);
 
-            for (int maskIndex = 0; maskIndex < triangleMask.Length; maskIndex++)
+            for (int maskIndex = 0; maskIndex < triangleMaskForSubmesh.Count; maskIndex++)
             {
-                int triangleIndex = triangleMask[maskIndex];
+                int triangleIndex = triangleMaskForSubmesh[maskIndex];
                 int baseIndex = triangleIndex * 3;
 
                 if (baseIndex + 2 < triangles.Length)

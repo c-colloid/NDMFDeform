@@ -41,6 +41,7 @@ namespace Deform.Masking
         public class UVIsland
         {
             public int islandID;
+            public int submeshIndex;
             public List<int> vertexIndices = new List<int>();
             public List<int> triangleIndices = new List<int>();
             public List<Vector2> uvCoordinates = new List<Vector2>();
@@ -64,6 +65,29 @@ namespace Deform.Masking
                 return AnalyzeUVIslandsLegacy(mesh);
             }
         }
+
+        /// <summary>
+        /// Analyze UV islands from mesh with optional submesh filtering
+        /// サブメッシュフィルタリング付きでメッシュからUVアイランドを解析
+        /// </summary>
+        /// <param name="mesh">The mesh to analyze</param>
+        /// <param name="submeshIndices">Optional list of submesh indices to analyze. If null, all submeshes are analyzed.</param>
+        public static List<UVIsland> AnalyzeUVIslands(Mesh mesh, List<int> submeshIndices)
+        {
+            if (submeshIndices == null || submeshIndices.Count == 0)
+            {
+                return AnalyzeUVIslands(mesh);
+            }
+
+            if (UseAdvancedAlgorithm)
+            {
+                return AnalyzeUVIslandsAdvanced(mesh, submeshIndices);
+            }
+            else
+            {
+                return AnalyzeUVIslandsLegacy(mesh, submeshIndices);
+            }
+        }
         
         /// <summary>
         /// Advanced topology-aware UV island analysis
@@ -73,79 +97,116 @@ namespace Deform.Masking
         {
             if (mesh == null || mesh.uv == null || mesh.uv.Length == 0)
                 return new List<UVIsland>();
-                
+
             if (mesh.triangles == null || mesh.triangles.Length == 0)
                 return new List<UVIsland>();
-                
-	        var uvs = new List<Vector2>();
-	        mesh.GetUVs(0, uvs);
-	        var submesh = 0;
-	        var triangles = mesh.GetTriangles(submesh);
-            var islands = new List<UVIsland>();
-            var processedTriangles = new HashSet<int>();
-            
-            // Build comprehensive connectivity information
-	        var vertexToTriangles = BuildVertexToTriangleMapping(triangles, uvs.Count);
-            var triangleAdjacency = BuildTriangleAdjacencyGraph(triangles, uvs, vertexToTriangles);
-            
-            // Process triangles using improved connectivity analysis
-            for (int i = 0; i < triangles.Length; i += 3)
+
+            var uvs = new List<Vector2>();
+            mesh.GetUVs(0, uvs);
+
+            // Analyze all submeshes
+            var allSubmeshIndices = new List<int>();
+            for (int i = 0; i < mesh.subMeshCount; i++)
             {
-                int triIndex = i / 3;
-                if (processedTriangles.Contains(triIndex))
+                allSubmeshIndices.Add(i);
+            }
+
+            return AnalyzeUVIslandsAdvanced(mesh, allSubmeshIndices);
+        }
+
+        /// <summary>
+        /// Advanced topology-aware UV island analysis with submesh filtering
+        /// サブメッシュフィルタリング付き高度なトポロジー認識UVアイランド解析
+        /// </summary>
+        private static List<UVIsland> AnalyzeUVIslandsAdvanced(Mesh mesh, List<int> submeshIndices)
+        {
+            if (mesh == null || mesh.uv == null || mesh.uv.Length == 0)
+                return new List<UVIsland>();
+
+            if (mesh.triangles == null || mesh.triangles.Length == 0)
+                return new List<UVIsland>();
+
+            var uvs = new List<Vector2>();
+            mesh.GetUVs(0, uvs);
+            var islands = new List<UVIsland>();
+            int globalIslandID = 0;
+
+            // Process each submesh
+            foreach (int submeshIndex in submeshIndices)
+            {
+                if (submeshIndex < 0 || submeshIndex >= mesh.subMeshCount)
                     continue;
-                    
-                var island = new UVIsland
+
+                var triangles = mesh.GetTriangles(submeshIndex);
+                if (triangles.Length == 0)
+                    continue;
+
+                var processedTriangles = new HashSet<int>();
+
+                // Build comprehensive connectivity information
+                var vertexToTriangles = BuildVertexToTriangleMapping(triangles, uvs.Count);
+                var triangleAdjacency = BuildTriangleAdjacencyGraph(triangles, uvs, vertexToTriangles);
+
+                // Process triangles using improved connectivity analysis
+                for (int i = 0; i < triangles.Length; i += 3)
                 {
-                    islandID = islands.Count,
-                    maskColor = GenerateIslandColor(islands.Count)
-                };
-                
-                // Advanced flood fill with topology-aware connectivity
-                var trianglesToProcess = new Queue<int>();
-                trianglesToProcess.Enqueue(triIndex);
-                
-                while (trianglesToProcess.Count > 0)
-                {
-                    int currentTriIndex = trianglesToProcess.Dequeue();
-                    if (processedTriangles.Contains(currentTriIndex))
+                    int triIndex = i / 3;
+                    if (processedTriangles.Contains(triIndex))
                         continue;
-                        
-                    processedTriangles.Add(currentTriIndex);
-                    
-                    // Add triangle index to island
-                    island.triangleIndices.Add(currentTriIndex);
-                    
-                    // Add triangle vertices to island
-                    int triStart = currentTriIndex * 3;
-                    for (int v = 0; v < 3; v++)
+
+                    var island = new UVIsland
                     {
-                        int vertIndex = triangles[triStart + v];
-                        if (!island.vertexIndices.Contains(vertIndex))
-                        {
-                            island.vertexIndices.Add(vertIndex);
-                            island.uvCoordinates.Add(uvs[vertIndex]);
-                        }
-                    }
-                    
-                    // Find adjacent triangles using improved connectivity analysis
-                    if (triangleAdjacency.ContainsKey(currentTriIndex))
+                        islandID = globalIslandID++,
+                        submeshIndex = submeshIndex,
+                        maskColor = GenerateIslandColor(islands.Count)
+                    };
+
+                    // Advanced flood fill with topology-aware connectivity
+                    var trianglesToProcess = new Queue<int>();
+                    trianglesToProcess.Enqueue(triIndex);
+
+                    while (trianglesToProcess.Count > 0)
                     {
-                        foreach (var adjacentTriIndex in triangleAdjacency[currentTriIndex])
+                        int currentTriIndex = trianglesToProcess.Dequeue();
+                        if (processedTriangles.Contains(currentTriIndex))
+                            continue;
+
+                        processedTriangles.Add(currentTriIndex);
+
+                        // Add triangle index to island
+                        island.triangleIndices.Add(currentTriIndex);
+
+                        // Add triangle vertices to island
+                        int triStart = currentTriIndex * 3;
+                        for (int v = 0; v < 3; v++)
                         {
-                            if (!processedTriangles.Contains(adjacentTriIndex))
+                            int vertIndex = triangles[triStart + v];
+                            if (!island.vertexIndices.Contains(vertIndex))
                             {
-                                trianglesToProcess.Enqueue(adjacentTriIndex);
+                                island.vertexIndices.Add(vertIndex);
+                                island.uvCoordinates.Add(uvs[vertIndex]);
+                            }
+                        }
+
+                        // Find adjacent triangles using improved connectivity analysis
+                        if (triangleAdjacency.ContainsKey(currentTriIndex))
+                        {
+                            foreach (var adjacentTriIndex in triangleAdjacency[currentTriIndex])
+                            {
+                                if (!processedTriangles.Contains(adjacentTriIndex))
+                                {
+                                    trianglesToProcess.Enqueue(adjacentTriIndex);
+                                }
                             }
                         }
                     }
+
+                    // Calculate UV bounds for the island
+                    island.uvBounds = CalculateUVBounds(island.uvCoordinates);
+                    islands.Add(island);
                 }
-                
-                // Calculate UV bounds for the island
-                island.uvBounds = CalculateUVBounds(island.uvCoordinates);
-                islands.Add(island);
             }
-            
+
             return islands;
         }
         
@@ -157,70 +218,107 @@ namespace Deform.Masking
         {
             if (mesh == null || mesh.uv == null || mesh.uv.Length == 0)
                 return new List<UVIsland>();
-                
+
             if (mesh.triangles == null || mesh.triangles.Length == 0)
                 return new List<UVIsland>();
-                
-	        var uvs = new List<Vector2>();
-	        mesh.GetUVs(0, uvs);
-	        var submesh = 0;
-	        var triangles = mesh.GetTriangles(submesh);
-            var islands = new List<UVIsland>();
-            var processedTriangles = new HashSet<int>();
-            
-            // Pre-build vertex to triangle mapping for faster adjacency lookup
-	        var vertexToTriangles = BuildVertexToTriangleMapping(triangles, uvs.Count);
-            
-            // Group triangles by connected UV coordinates
-            for (int i = 0; i < triangles.Length; i += 3)
+
+            var uvs = new List<Vector2>();
+            mesh.GetUVs(0, uvs);
+
+            // Analyze all submeshes
+            var allSubmeshIndices = new List<int>();
+            for (int i = 0; i < mesh.subMeshCount; i++)
             {
-                int triIndex = i / 3;
-                if (processedTriangles.Contains(triIndex))
-                    continue;
-                    
-                var island = new UVIsland
-                {
-                    islandID = islands.Count,
-                    maskColor = GenerateIslandColor(islands.Count)
-                };
-                
-                // Flood fill to find all connected triangles
-                var trianglesToProcess = new Queue<int>();
-                trianglesToProcess.Enqueue(triIndex);
-                
-                while (trianglesToProcess.Count > 0)
-                {
-                    int currentTriIndex = trianglesToProcess.Dequeue();
-                    if (processedTriangles.Contains(currentTriIndex))
-                        continue;
-                        
-                    processedTriangles.Add(currentTriIndex);
-                    
-                    // Add triangle index to island (not vertex indices!)
-                    island.triangleIndices.Add(currentTriIndex);
-                    
-                    // Add triangle vertices to island
-                    int triStart = currentTriIndex * 3;
-                    for (int v = 0; v < 3; v++)
-                    {
-                        int vertIndex = triangles[triStart + v];
-                        if (!island.vertexIndices.Contains(vertIndex))
-                        {
-                            island.vertexIndices.Add(vertIndex);
-                            island.uvCoordinates.Add(uvs[vertIndex]);
-                        }
-                    }
-                    
-                    // Find adjacent triangles with shared UV coordinates using pre-built mapping
-                    FindAdjacentTrianglesOptimized(currentTriIndex, triangles, uvs, trianglesToProcess, 
-                        processedTriangles, vertexToTriangles);
-                }
-                
-                // Calculate UV bounds for the island
-                island.uvBounds = CalculateUVBounds(island.uvCoordinates);
-                islands.Add(island);
+                allSubmeshIndices.Add(i);
             }
-            
+
+            return AnalyzeUVIslandsLegacy(mesh, allSubmeshIndices);
+        }
+
+        /// <summary>
+        /// Legacy UV island analysis with submesh filtering
+        /// サブメッシュフィルタリング付き互換性のためのレガシーUVアイランド解析
+        /// </summary>
+        private static List<UVIsland> AnalyzeUVIslandsLegacy(Mesh mesh, List<int> submeshIndices)
+        {
+            if (mesh == null || mesh.uv == null || mesh.uv.Length == 0)
+                return new List<UVIsland>();
+
+            if (mesh.triangles == null || mesh.triangles.Length == 0)
+                return new List<UVIsland>();
+
+            var uvs = new List<Vector2>();
+            mesh.GetUVs(0, uvs);
+            var islands = new List<UVIsland>();
+            int globalIslandID = 0;
+
+            // Process each submesh
+            foreach (int submeshIndex in submeshIndices)
+            {
+                if (submeshIndex < 0 || submeshIndex >= mesh.subMeshCount)
+                    continue;
+
+                var triangles = mesh.GetTriangles(submeshIndex);
+                if (triangles.Length == 0)
+                    continue;
+
+                var processedTriangles = new HashSet<int>();
+
+                // Pre-build vertex to triangle mapping for faster adjacency lookup
+                var vertexToTriangles = BuildVertexToTriangleMapping(triangles, uvs.Count);
+
+                // Group triangles by connected UV coordinates
+                for (int i = 0; i < triangles.Length; i += 3)
+                {
+                    int triIndex = i / 3;
+                    if (processedTriangles.Contains(triIndex))
+                        continue;
+
+                    var island = new UVIsland
+                    {
+                        islandID = globalIslandID++,
+                        submeshIndex = submeshIndex,
+                        maskColor = GenerateIslandColor(islands.Count)
+                    };
+
+                    // Flood fill to find all connected triangles
+                    var trianglesToProcess = new Queue<int>();
+                    trianglesToProcess.Enqueue(triIndex);
+
+                    while (trianglesToProcess.Count > 0)
+                    {
+                        int currentTriIndex = trianglesToProcess.Dequeue();
+                        if (processedTriangles.Contains(currentTriIndex))
+                            continue;
+
+                        processedTriangles.Add(currentTriIndex);
+
+                        // Add triangle index to island (not vertex indices!)
+                        island.triangleIndices.Add(currentTriIndex);
+
+                        // Add triangle vertices to island
+                        int triStart = currentTriIndex * 3;
+                        for (int v = 0; v < 3; v++)
+                        {
+                            int vertIndex = triangles[triStart + v];
+                            if (!island.vertexIndices.Contains(vertIndex))
+                            {
+                                island.vertexIndices.Add(vertIndex);
+                                island.uvCoordinates.Add(uvs[vertIndex]);
+                            }
+                        }
+
+                        // Find adjacent triangles with shared UV coordinates using pre-built mapping
+                        FindAdjacentTrianglesOptimized(currentTriIndex, triangles, uvs, trianglesToProcess,
+                            processedTriangles, vertexToTriangles);
+                    }
+
+                    // Calculate UV bounds for the island
+                    island.uvBounds = CalculateUVBounds(island.uvCoordinates);
+                    islands.Add(island);
+                }
+            }
+
             return islands;
         }
         
@@ -888,6 +986,21 @@ namespace Deform.Masking
         /// </summary>
         public static bool IsPointInUVIsland(Vector2 point, UVIsland island, List<Vector2> uvs, int[] triangles)
         {
+            return IsPointInUVIslandOptimized(point, island, uvs, triangles);
+        }
+
+        /// <summary>
+        /// Check if point is inside UV island (overload for Mesh)
+        /// 点がUVアイランド内にあるかチェック（Meshオーバーロード）
+        /// </summary>
+        public static bool IsPointInUVIsland(Vector2 point, UVIsland island, Mesh mesh)
+        {
+            if (mesh == null || island == null) return false;
+
+            var uvs = new List<Vector2>();
+            mesh.GetUVs(0, uvs);
+            var triangles = mesh.GetTriangles(island.submeshIndex);
+
             return IsPointInUVIslandOptimized(point, island, uvs, triangles);
         }
         

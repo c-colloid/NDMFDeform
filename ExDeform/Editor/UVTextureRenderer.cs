@@ -36,13 +36,20 @@ namespace Deform.Masking.Editor
         public static void DrawUVIslands(Color[] pixels, int width, int height, Matrix4x4 transform,
             List<UVIslandAnalyzer.UVIsland> uvIslands, List<int> selectedIslandIDs, Mesh targetMesh)
         {
-            if (targetMesh?.uv == null || targetMesh.triangles == null) return;
+            if (targetMesh?.uv == null) return;
 
             var uvs = targetMesh.uv;
-            var triangles = targetMesh.triangles;
 
             foreach (var island in uvIslands)
             {
+                // Get submesh-specific triangles
+                if (island.submeshIndex < 0 || island.submeshIndex >= targetMesh.subMeshCount)
+                    continue;
+
+                var triangles = targetMesh.GetTriangles(island.submeshIndex);
+                if (triangles == null || triangles.Length == 0)
+                    continue;
+
                 var color = selectedIslandIDs.Contains(island.islandID) ?
                     new Color(island.maskColor.r, island.maskColor.g, island.maskColor.b, BLEND_FACTOR) :
                     UNSELECTED_ISLAND_COLOR;
@@ -57,13 +64,20 @@ namespace Deform.Masking.Editor
         public static void DrawMagnifyingContent(Color[] pixels, int width, int height, Vector2 centerUV, float radius,
             List<UVIslandAnalyzer.UVIsland> uvIslands, List<int> selectedIslandIDs, Mesh targetMesh)
         {
-            if (targetMesh?.uv == null || targetMesh.triangles == null) return;
+            if (targetMesh?.uv == null) return;
 
             var uvs = targetMesh.uv;
-            var triangles = targetMesh.triangles;
 
             foreach (var island in uvIslands)
             {
+                // Get submesh-specific triangles
+                if (island.submeshIndex < 0 || island.submeshIndex >= targetMesh.subMeshCount)
+                    continue;
+
+                var triangles = targetMesh.GetTriangles(island.submeshIndex);
+                if (triangles == null || triangles.Length == 0)
+                    continue;
+
                 var color = selectedIslandIDs.Contains(island.islandID) ?
                     island.maskColor : new Color(0.7f, 0.7f, 0.7f, 0.6f);
 

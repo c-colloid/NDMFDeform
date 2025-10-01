@@ -28,6 +28,10 @@ namespace Deform.Masking.Editor
         
         // UI controls
         private EnumField languageField;
+        private VisualElement submeshSelector;
+        private Label currentSubmeshLabel;
+        private Button prevSubmeshButton;
+        private Button nextSubmeshButton;
         private Toggle adaptiveVertexSizeToggle;
         private Slider vertexSizeSlider;
         private Slider adaptiveMultiplierSlider;
@@ -119,14 +123,20 @@ namespace Deform.Masking.Editor
             {
                 // Reuse cached selector with UV data
                 selector = cachedSelector;
-                selector.SetSelectedIslands(targetMask.SelectedIslandIDs);
-                
+                selector.SetSelectedSubmeshes(targetMask.SelectedSubmeshes);
+
+                // Load island IDs - for backward compatibility, load all saved IDs into current preview submesh
+                if (targetMask.SelectedIslandIDs.Count > 0)
+                {
+                    selector.SetSelectedIslands(targetMask.SelectedIslandIDs);
+                }
+
                 // Update target transform for dynamic mesh highlighting
                 selector.TargetTransform = GetRendererTransform();
-                
+
                 // Load low-resolution cached texture for immediate display
                 LoadLowResTextureFromCache();
-                
+
                 // Always regenerate texture for cached selector to ensure freshness
                 isInitialized = false;
                 textureInitialized = false;
@@ -135,19 +145,26 @@ namespace Deform.Masking.Editor
             {
                 // Create new selector based on original mesh
                 selector = new UVIslandSelector(originalMesh);
-                selector.SetSelectedIslands(targetMask.SelectedIslandIDs);
+                selector.SetSelectedSubmeshes(targetMask.SelectedSubmeshes);
+
+                // Load island IDs - for backward compatibility, load all saved IDs into current preview submesh
+                if (targetMask.SelectedIslandIDs.Count > 0)
+                {
+                    selector.SetSelectedIslands(targetMask.SelectedIslandIDs);
+                }
+
                 selector.TargetTransform = GetRendererTransform();
-                
+
                 // Cache the selector for future use
                 if (currentCacheKey != null)
                 {
                     persistentCache[currentCacheKey] = selector;
                 }
-                
+
                 // Try to load cached texture even for new selectors
                 // This handles the case where selector cache was cleared but binary cache remains
                 LoadLowResTextureFromCache();
-                
+
                 isInitialized = false;
                 textureInitialized = false;
             }
@@ -173,6 +190,7 @@ namespace Deform.Masking.Editor
             CreateLanguageSelector();
             CreateHeader();
             CreateMaskSettings();
+            CreateSubmeshSelector();
             CreateDisplaySettings();
             CreateUVMapArea();
             CreateIslandList();
@@ -272,7 +290,7 @@ namespace Deform.Masking.Editor
         private void CreateMaskSettings()
         {
             var maskContainer = CreateSection("Mask Settings / マスク設定");
-            
+
             // Invert mask toggle
             var invertMaskToggle = new Toggle("Invert Mask / マスク反転")
             {
@@ -285,7 +303,7 @@ namespace Deform.Masking.Editor
                 targetMask.InvertMask = evt.newValue;
                 EditorUtility.SetDirty(targetMask);
             });
-            
+
             // Mask strength slider
             var maskStrengthSlider = new Slider("Mask Strength / マスク強度", 0f, 1f)
             {
@@ -298,10 +316,76 @@ namespace Deform.Masking.Editor
                 targetMask.MaskStrength = evt.newValue;
                 EditorUtility.SetDirty(targetMask);
             });
-            
+
             maskContainer.Add(invertMaskToggle);
             maskContainer.Add(maskStrengthSlider);
             root.Add(maskContainer);
+        }
+
+        private void CreateSubmeshSelector()
+        {
+            var submeshContainer = CreateSection("Submesh Selection / サブメッシュ選択");
+
+            if (selector == null || selector.SubmeshCount == 0)
+            {
+                var noSubmeshLabel = new Label("No submeshes available / 利用可能なサブメッシュがありません");
+                submeshContainer.Add(noSubmeshLabel);
+                root.Add(submeshContainer);
+                return;
+            }
+
+            // Create submesh choice list
+            var choices = new List<string>();
+            for (int i = 0; i < selector.SubmeshCount; i++)
+            {
+                choices.Add($"Submesh {i}");
+            }
+
+            // Calculate initial mask value from selected submeshes
+            int initialMask = 0;
+            foreach (int submeshIndex in targetMask.SelectedSubmeshes)
+            {
+                if (submeshIndex < selector.SubmeshCount)
+                    initialMask |= (1 << submeshIndex);
+            }
+
+            // Create MaskField for multi-selection
+            var maskField = new MaskField("Selected Submeshes", choices, initialMask)
+            {
+                tooltip = "複数のサブメッシュを選択できます (少なくとも1つ必須)"
+            };
+
+            maskField.RegisterValueChangedCallback(evt =>
+            {
+                Undo.RecordObject(targetMask, "Change Submesh Selection");
+                var submeshes = new List<int>();
+
+                // Convert mask to list of indices
+                for (int i = 0; i < selector.SubmeshCount; i++)
+                {
+                    if ((evt.newValue & (1 << i)) != 0)
+                    {
+                        submeshes.Add(i);
+                    }
+                }
+
+                // Ensure at least one submesh is selected
+                if (submeshes.Count == 0)
+                {
+                    submeshes.Add(0);
+                    // Update mask field value
+                    maskField.SetValueWithoutNotify(1);
+                }
+
+                targetMask.SetSelectedSubmeshes(submeshes);
+                selector.SetSelectedSubmeshes(submeshes);
+                EditorUtility.SetDirty(targetMask);
+                UpdateSubmeshNavigationVisibility();
+                RefreshUI(false);
+            });
+
+            submeshContainer.Add(maskField);
+            root.Add(submeshContainer);
         }
         
         private void CreateDisplaySettings()
@@ -363,16 +447,84 @@ namespace Deform.Masking.Editor
         
         private void CreateUVMapArea()
         {
+            // Header with submesh navigation
+            var headerContainer = new VisualElement
+            {
+                name = "uvMapHeader",
+                style = {
+                    flexDirection = FlexDirection.Row,
+                    alignItems = Align.Center,
+                    marginBottom = 5
+                }
+            };
+
             var uvMapLabel = new Label();
             SetLocalizedContent(uvMapLabel, "header_preview");
             uvMapLabel.style.fontSize = 14;
             uvMapLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
-            uvMapLabel.style.marginBottom = 5;
-            root.Add(uvMapLabel);
+            uvMapLabel.style.flexGrow = 1;
+            headerContainer.Add(uvMapLabel);
+
+            // Submesh preview navigation - always create, control visibility
+            submeshSelector = new VisualElement
+            {
+                name = "submeshNavigationContainer",
+                style = {
+                    flexDirection = FlexDirection.Row,
+                    alignItems = Align.Center
+                }
+            };
+
+            prevSubmeshButton = new Button(() =>
+            {
+                selector.PreviousPreviewSubmesh();
+                UpdateSubmeshLabel();
+                RebuildIslandList();
+                RefreshUVMapImage();
+            })
+            {
+                text = "◀",
+                style = { width = 30, marginRight = 5 }
+            };
+            prevSubmeshButton.tooltip = "Previous submesh / 前のサブメッシュ";
+
+            currentSubmeshLabel = new Label($"Submesh {selector?.CurrentPreviewSubmesh ?? 0}")
+            {
+                style = {
+                    fontSize = 11,
+                    unityTextAlign = TextAnchor.MiddleCenter,
+                    minWidth = 80
+                }
+            };
+
+            nextSubmeshButton = new Button(() =>
+            {
+                selector.NextPreviewSubmesh();
+                UpdateSubmeshLabel();
+                RebuildIslandList();
+                RefreshUVMapImage();
+            })
+            {
+                text = "▶",
+                style = { width = 30, marginLeft = 5 }
+            };
+            nextSubmeshButton.tooltip = "Next submesh / 次のサブメッシュ";
+
+            submeshSelector.Add(prevSubmeshButton);
+            submeshSelector.Add(currentSubmeshLabel);
+            submeshSelector.Add(nextSubmeshButton);
+
+            headerContainer.Add(submeshSelector);
+
+            // Update visibility based on selection
+            UpdateSubmeshNavigationVisibility();
+
+            root.Add(headerContainer);
             
             // UV map preview settings
             var previewSettings = new VisualElement
             {
+	            name = "previewSettings",
                 style = { 
                     flexDirection = FlexDirection.Row,
                     alignItems = Align.Center,
@@ -792,15 +944,15 @@ namespace Deform.Masking.Editor
                 var detailsContainer = container[2];
                 var vertexCountLabel = detailsContainer[0] as Label;
                 var faceCountLabel = detailsContainer[1] as Label;
-                
+
                 colorBox.style.backgroundColor = island.maskColor;
-                label.text = UVIslandLocalization.Get("island_info", island.islandID);
+                label.text = $"Island {island.islandID} (SM{island.submeshIndex})";
                 vertexCountLabel.text = UVIslandLocalization.Get("vertex_count", island.vertexIndices.Count);
                 faceCountLabel.text = UVIslandLocalization.Get("face_count", island.faceCount);
-                
+
                 // Selection state
                 var isSelected = selector.SelectedIslandIDs.Contains(island.islandID);
-                container.style.backgroundColor = isSelected ? 
+                container.style.backgroundColor = isSelected ?
                     new Color(0.3f, 0.5f, 0.8f, 0.3f) : Color.clear;
             }
         }
@@ -965,19 +1117,19 @@ namespace Deform.Masking.Editor
             {
                 // User interaction detected - switch to full resolution mode
                 OnUserInteraction();
-                
+
                 Undo.RecordObject(targetMask, "Toggle UV Island Selection");
                 selector.ToggleIslandSelection(islandID);
-                targetMask.SetSelectedIslands(selector.SelectedIslandIDs);
+                UpdateMaskComponent();
                 EditorUtility.SetDirty(targetMask);
-                
+
                 // Generate full texture and update display
                 if (selector.AutoUpdatePreview)
                 {
                     selector.GenerateUVMapTexture();
                     RefreshUVMapImage();
                 }
-                
+
                 // Save low-res texture to cache after selection changes
                 SaveLowResTextureToCache();
                 
@@ -1616,14 +1768,24 @@ namespace Deform.Masking.Editor
         {
             if (selector == null) return;
             
-            var selectedCount = selector.SelectedIslandIDs?.Count ?? 0;
+            // Show total selected islands across all submeshes
+            var totalSelectedCount = selector.AllSelectedIslandIDs?.Count ?? 0;
+            var currentSubmeshSelectedCount = selector.SelectedIslandIDs?.Count ?? 0;
             var maskedVertexCount = selector.VertexMask?.Length ?? 0;
             var maskedFaceCount = (selector.TriangleMask?.Length ?? 0) / 3;
-            
-            if (selectedCount > 0)
+
+            if (totalSelectedCount > 0)
             {
-                statusLabel.text = UVIslandLocalization.Get("status_islands_selected", 
-                    selectedCount, maskedVertexCount, maskedFaceCount);
+                // Show both current submesh selection and total across all submeshes
+                if (selector.SelectedSubmeshIndices.Count > 1)
+                {
+                    statusLabel.text = $"Selected: {currentSubmeshSelectedCount} islands (Submesh {selector.CurrentPreviewSubmesh}) | Total: {totalSelectedCount} islands across all submeshes | {maskedVertexCount} vertices, {maskedFaceCount} faces";
+                }
+                else
+                {
+                    statusLabel.text = UVIslandLocalization.Get("status_islands_selected",
+                        currentSubmeshSelectedCount, maskedVertexCount, maskedFaceCount);
+                }
             }
             else
             {
@@ -1635,10 +1797,10 @@ namespace Deform.Masking.Editor
         private void ClearSelection()
         {
             if (selector == null) return;
-            
+
             Undo.RecordObject(targetMask, "Clear UV Island Selection");
             selector.ClearSelection();
-            targetMask.SetSelectedIslands(selector.SelectedIslandIDs);
+            UpdateMaskComponent();
             EditorUtility.SetDirty(targetMask);
             RefreshUI(false);
         }
@@ -1675,7 +1837,7 @@ namespace Deform.Masking.Editor
             rangeSelectionOverlay.style.display = DisplayStyle.None;
             isRangeSelecting = false;
             isRangeDeselecting = false;
-            targetMask.SetSelectedIslands(selector.SelectedIslandIDs);
+            UpdateMaskComponent();
             EditorUtility.SetDirty(targetMask);
             RefreshUI(false);
         }
@@ -1794,7 +1956,7 @@ namespace Deform.Masking.Editor
             {
                 Undo.RecordObject(targetMask, "Select UV Island from Magnifying Glass");
                 selector.ToggleIslandSelection(islandID);
-                targetMask.SetSelectedIslands(selector.SelectedIslandIDs);
+                UpdateMaskComponent();
                 EditorUtility.SetDirty(targetMask);
                 RefreshUIFast();
             }
@@ -1817,8 +1979,8 @@ namespace Deform.Masking.Editor
                     selector.ToggleIslandSelection(islandID);
                 }
             }
-            
-            targetMask.SetSelectedIslands(selector.SelectedIslandIDs);
+
+            UpdateMaskComponent();
             EditorUtility.SetDirty(targetMask);
             RefreshUIFast();
         }
@@ -1837,7 +1999,7 @@ namespace Deform.Masking.Editor
                     var oldEditor = activeEditors[targetID];
                     if (oldEditor != this && oldEditor != null)
                     {
-                        Debug.Log($"[UVIslandMaskEditor] Replacing duplicate editor instance for target {targetID}");
+                        //Debug.Log($"[UVIslandMaskEditor] Replacing duplicate editor instance for target {targetID}");
                         oldEditor.CleanupEditor();
                     }
                 }
@@ -1995,6 +2157,36 @@ namespace Deform.Masking.Editor
                 selector.MagnifyingGlassZoom = zoomLevel;
             }
         }
+
+        private void UpdateSubmeshLabel()
+        {
+            if (currentSubmeshLabel != null && selector != null)
+            {
+                currentSubmeshLabel.text = $"Submesh {selector.CurrentPreviewSubmesh}";
+            }
+        }
+
+        private void UpdateSubmeshNavigationVisibility()
+        {
+            if (submeshSelector == null) return;
+
+            bool shouldShow = selector != null && selector.SelectedSubmeshIndices.Count > 1;
+            submeshSelector.style.display = shouldShow ? DisplayStyle.Flex : DisplayStyle.None;
+
+            if (shouldShow)
+            {
+                UpdateSubmeshLabel();
+            }
+        }
+
+        private void RebuildIslandList()
+        {
+            if (islandListView != null && selector != null)
+            {
+                islandListView.itemsSource = selector.UVIslands;
+                islandListView.Rebuild();
+            }
+        }
         
         private void OnSceneGUI(SceneView sceneView)
         {
@@ -2037,18 +2229,34 @@ namespace Deform.Masking.Editor
             if (shouldShowLowResUntilInteraction)
             {
                 shouldShowLowResUntilInteraction = false;
-                
+
                 // Generate full texture when user interacts
                 if (selector != null && selector.UvMapTexture == null)
                 {
                     selector.GenerateUVMapTexture();
                     textureInitialized = true;
                 }
-                
+
                 RefreshUVMapImage();
             }
         }
-        
+
+        /// <summary>
+        /// Update mask component with current selection data including vertex list
+        /// マスクコンポーネントを現在の選択データ（頂点リスト含む）で更新
+        /// </summary>
+        private void UpdateMaskComponent()
+        {
+            if (selector == null || targetMask == null) return;
+
+            // Update island IDs (for backward compatibility and display)
+            targetMask.SetSelectedIslands(selector.AllSelectedIslandIDs);
+
+            // Update vertex list (most efficient for mask processing)
+            var vertexList = new List<int>(selector.VertexMask);
+            targetMask.SetSelectedVertexIndices(vertexList);
+        }
+
         /// <summary>
         /// Load low-resolution UV texture from robust cache system
         /// 堅牢なキャッシュシステムから低解像度UVテクスチャを読み込み
@@ -2169,7 +2377,7 @@ namespace Deform.Masking.Editor
                 // Only log in debug mode to avoid spam
                 if (Debug.isDebugBuild)
                 {
-                    Debug.Log(logMessage);
+                    //Debug.Log(logMessage);
                 }
             }
         }
