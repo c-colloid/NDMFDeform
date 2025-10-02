@@ -91,8 +91,15 @@ namespace Deform.Masking.Editor
         // Cache health monitoring
         private static DateTime lastCacheHealthCheck = DateTime.MinValue;
         private const double CACHE_HEALTH_CHECK_INTERVAL_HOURS = 1.0;
+
+        // UI element references for post-initialization updates
+        private VisualElement submeshSelectorContainer;
+        private VisualElement noSubmeshLabel;
+        private VisualElement highlightSettingsContainer;
+        private VisualElement noSelectorLabel;
+        private Slider highlightOpacitySlider;
         #endregion
-        
+
         // EditorApplication callback management
         private EditorApplication.CallbackFunction pendingTextureUpdate;
         
@@ -116,17 +123,38 @@ namespace Deform.Masking.Editor
             
             // Get original mesh for UV mapping and cache key generation
             var originalMesh = GetOriginalMesh();
-            currentCacheKey = GenerateCacheKey(originalMesh);
-            
-            // Try to get selector from persistent cache first
-            if (currentCacheKey != null && persistentCache.TryGetValue(currentCacheKey, out var cachedSelector))
+
+            // Generate mesh-only cache key for selector (not submesh-specific)
+            string meshCacheKey = GenerateCacheKey(originalMesh, 0); // Use submesh 0 as base key
+            if (meshCacheKey != null && meshCacheKey.EndsWith("_sm0"))
+            {
+                meshCacheKey = meshCacheKey.Substring(0, meshCacheKey.Length - 4); // Remove "_sm0" suffix
+            }
+
+            // Generate submesh-specific cache key for low-res texture
+            int currentSubmesh = targetMask?.CurrentPreviewSubmesh ?? 0;
+            currentCacheKey = GenerateCacheKey(originalMesh, currentSubmesh);
+
+            // Try to get selector from persistent cache first (mesh-based, not submesh-based)
+            if (meshCacheKey != null && persistentCache.TryGetValue(meshCacheKey, out var cachedSelector))
             {
                 // Reuse cached selector with UV data
                 selector = cachedSelector;
                 selector.SetSelectedSubmeshes(targetMask.SelectedSubmeshes);
 
-                // Load island IDs - for backward compatibility, load all saved IDs into current preview submesh
-                if (targetMask.SelectedIslandIDs.Count > 0)
+                // Restore current preview submesh from saved state (without triggering texture generation)
+                bool wasAutoUpdate = selector.AutoUpdatePreview;
+                selector.AutoUpdatePreview = false;
+                selector.SetPreviewSubmesh(targetMask.CurrentPreviewSubmesh);
+                selector.AutoUpdatePreview = wasAutoUpdate;
+
+                // Load per-submesh selections (new format)
+                if (targetMask.PerSubmeshSelections.Count > 0)
+                {
+                    selector.SetAllSelectedIslands(targetMask.GetPerSubmeshSelections());
+                }
+                // Fallback to legacy flat list if new format is empty (backward compatibility)
+                else if (targetMask.SelectedIslandIDs.Count > 0)
                 {
                     selector.SetSelectedIslands(targetMask.SelectedIslandIDs);
                 }
@@ -143,26 +171,12 @@ namespace Deform.Masking.Editor
             }
             else if (originalMesh != null)
             {
-                // Create new selector based on original mesh
-                selector = new UVIslandSelector(originalMesh);
-                selector.SetSelectedSubmeshes(targetMask.SelectedSubmeshes);
+                // Don't create selector synchronously to avoid blocking Inspector UI (300-1000ms)
+                // Selector will be created in background via delayCall
+                selector = null;
 
-                // Load island IDs - for backward compatibility, load all saved IDs into current preview submesh
-                if (targetMask.SelectedIslandIDs.Count > 0)
-                {
-                    selector.SetSelectedIslands(targetMask.SelectedIslandIDs);
-                }
-
-                selector.TargetTransform = GetRendererTransform();
-
-                // Cache the selector for future use
-                if (currentCacheKey != null)
-                {
-                    persistentCache[currentCacheKey] = selector;
-                }
-
-                // Try to load cached texture even for new selectors
-                // This handles the case where selector cache was cleared but binary cache remains
+                // Try to load cached texture even without selector
+                // This allows immediate display if low-res cache is available
                 LoadLowResTextureFromCache();
 
                 isInitialized = false;
@@ -191,6 +205,7 @@ namespace Deform.Masking.Editor
             CreateHeader();
             CreateMaskSettings();
             CreateSubmeshSelector();
+            CreateHighlightSettings();
             CreateDisplaySettings();
             CreateUVMapArea();
             CreateIslandList();
@@ -204,9 +219,9 @@ namespace Deform.Masking.Editor
             // Initialize with low-res cache if available, full-res only on user interaction
             if (selector != null)
             {
-                // Load low-res texture from cache for immediate display
+                // Selector exists (cached): try to load low-res cache for immediate display
                 LoadLowResTextureFromCache();
-                
+
                 if (currentLowResTexture != null)
                 {
                     // Show cached low-res texture until user interaction
@@ -216,9 +231,74 @@ namespace Deform.Masking.Editor
                 }
                 else
                 {
-                    // No cache available, generate full texture immediately
-                    RefreshDataWithImmediteTexture();
+                    // No cache available for existing selector: generate texture asynchronously
+                    ShowPlaceholderMessage("Initializing UV Map...");
+
+                    EditorApplication.delayCall += () =>
+                    {
+                        if (selector != null && targetMask != null)
+                        {
+                            RefreshDataWithImmediteTexture();
+                        }
+                    };
                 }
+            }
+            else if (originalMesh != null)
+            {
+                // Selector doesn't exist yet: create in background to avoid blocking UI
+                ShowPlaceholderMessage("Initializing UV Map...");
+
+                EditorApplication.delayCall += () =>
+                {
+                    // Null check in case Inspector was closed
+                    if (targetMask == null) return;
+
+                    // Get mesh again to ensure it's still valid
+                    var mesh = GetOriginalMesh();
+                    if (mesh == null) return;
+
+                    // Create new selector with full mesh analysis (300-1000ms, now in background)
+                    selector = new UVIslandSelector(mesh);
+                    selector.SetSelectedSubmeshes(targetMask.SelectedSubmeshes);
+
+                    // Restore current preview submesh from saved state (without triggering texture generation)
+                    bool wasAutoUpdate = selector.AutoUpdatePreview;
+                    selector.AutoUpdatePreview = false;
+                    selector.SetPreviewSubmesh(targetMask.CurrentPreviewSubmesh);
+                    selector.AutoUpdatePreview = wasAutoUpdate;
+
+                    // Load per-submesh selections (new format)
+                    if (targetMask.PerSubmeshSelections.Count > 0)
+                    {
+                        selector.SetAllSelectedIslands(targetMask.GetPerSubmeshSelections());
+                    }
+                    // Fallback to legacy flat list if new format is empty (backward compatibility)
+                    else if (targetMask.SelectedIslandIDs.Count > 0)
+                    {
+                        selector.SetSelectedIslands(targetMask.SelectedIslandIDs);
+                    }
+
+                    selector.TargetTransform = GetRendererTransform();
+
+                    // Cache the selector for future use (using mesh-based key, not submesh-based)
+                    string cacheKey = GenerateCacheKey(mesh, 0); // Use submesh 0 as base key
+                    if (cacheKey != null && cacheKey.EndsWith("_sm0"))
+                    {
+                        cacheKey = cacheKey.Substring(0, cacheKey.Length - 4); // Remove "_sm0" suffix
+                    }
+                    if (cacheKey != null)
+                    {
+                        persistentCache[cacheKey] = selector;
+                    }
+
+                    cachedSelector = selector;
+                    lastTargetMask = targetMask;
+                    lastCachedMesh = mesh;
+                    lastMeshInstanceID = mesh?.GetInstanceID() ?? -1;
+
+                    // Now refresh with full data
+                    RefreshDataWithImmediteTexture();
+                };
             }
             else
             {
@@ -324,13 +404,14 @@ namespace Deform.Masking.Editor
 
         private void CreateSubmeshSelector()
         {
-            var submeshContainer = CreateSection("Submesh Selection / サブメッシュ選択");
+            submeshSelectorContainer = CreateSection("Submesh Selection / サブメッシュ選択");
 
             if (selector == null || selector.SubmeshCount == 0)
             {
-                var noSubmeshLabel = new Label("No submeshes available / 利用可能なサブメッシュがありません");
-                submeshContainer.Add(noSubmeshLabel);
-                root.Add(submeshContainer);
+                noSubmeshLabel = new Label("Initializing submesh data... / サブメッシュデータを初期化中...");
+                noSubmeshLabel.style.color = new Color(0.7f, 0.7f, 0.7f, 1f);
+                submeshSelectorContainer.Add(noSubmeshLabel);
+                root.Add(submeshSelectorContainer);
                 return;
             }
 
@@ -384,10 +465,47 @@ namespace Deform.Masking.Editor
                 RefreshUI(false);
             });
 
-            submeshContainer.Add(maskField);
-            root.Add(submeshContainer);
+            submeshSelectorContainer.Add(maskField);
+            root.Add(submeshSelectorContainer);
         }
-        
+
+        private void CreateHighlightSettings()
+        {
+            highlightSettingsContainer = CreateSection("Highlight Settings / ハイライト設定");
+
+            if (selector == null)
+            {
+                noSelectorLabel = new Label("Initializing highlight settings... / ハイライト設定を初期化中...");
+                noSelectorLabel.style.color = new Color(0.7f, 0.7f, 0.7f, 1f);
+                highlightSettingsContainer.Add(noSelectorLabel);
+                root.Add(highlightSettingsContainer);
+                return;
+            }
+
+            // Highlight opacity slider
+            highlightOpacitySlider = new Slider("Highlight Opacity / ハイライト不透明度", 0f, 1f)
+            {
+                value = selector.HighlightOpacity,
+                showInputField = true
+            };
+            highlightOpacitySlider.tooltip = "ハイライトの不透明度を調整します (0 = 完全に透明, 1 = 不透明)\nAdjust highlight opacity (0 = fully transparent, 1 = opaque)";
+            highlightOpacitySlider.RegisterValueChangedCallback(evt =>
+            {
+                if (selector != null)
+                {
+                    selector.HighlightOpacity = evt.newValue;
+                    // Repaint scene view immediately to show opacity change
+                    if (selector.HasSelectedIslands)
+                    {
+                        SceneView.RepaintAll();
+                    }
+                }
+            });
+
+            highlightSettingsContainer.Add(highlightOpacitySlider);
+            root.Add(highlightSettingsContainer);
+        }
+
         private void CreateDisplaySettings()
         {
             var settingsContainer = CreateSection(UVIslandLocalization.Get("header_display"));
@@ -405,7 +523,11 @@ namespace Deform.Masking.Editor
                     selector.UseAdaptiveVertexSize = evt.newValue;
                     vertexSizeSlider.SetEnabled(!evt.newValue);
                     adaptiveMultiplierSlider.SetEnabled(evt.newValue);
-                    SceneView.RepaintAll();
+                    // Only repaint if there are selected islands to display
+                    if (selector.HasSelectedIslands)
+                    {
+                        SceneView.RepaintAll();
+                    }
                 }
             });
             
@@ -420,7 +542,11 @@ namespace Deform.Masking.Editor
                 if (selector != null)
                 {
                     selector.ManualVertexSphereSize = evt.newValue;
-                    SceneView.RepaintAll();
+                    // Only repaint if there are selected islands to display
+                    if (selector.HasSelectedIslands)
+                    {
+                        SceneView.RepaintAll();
+                    }
                 }
             });
             
@@ -435,7 +561,11 @@ namespace Deform.Masking.Editor
                 if (selector != null)
                 {
                     selector.AdaptiveSizeMultiplier = evt.newValue;
-                    SceneView.RepaintAll();
+                    // Only repaint if there are selected islands to display
+                    if (selector.HasSelectedIslands)
+                    {
+                        SceneView.RepaintAll();
+                    }
                 }
             });
             
@@ -477,10 +607,33 @@ namespace Deform.Masking.Editor
 
             prevSubmeshButton = new Button(() =>
             {
+                // Save current submesh's cache before switching
+                SaveLowResTextureToCache();
+
+                // Switch to previous submesh
                 selector.PreviousPreviewSubmesh();
+
+                // Update cache key for new submesh
+                var originalMesh = GetOriginalMesh();
+                currentCacheKey = GenerateCacheKey(originalMesh, selector.CurrentPreviewSubmesh);
+
+                // Load new submesh's cache
+                LoadLowResTextureFromCache();
+
+                // Update UI
                 UpdateSubmeshLabel();
                 RebuildIslandList();
-                RefreshUVMapImage();
+
+                // Show cached low-res texture if available, otherwise generate full
+                if (currentLowResTexture != null)
+                {
+                    shouldShowLowResUntilInteraction = true;
+                    RefreshUIFast();
+                }
+                else
+                {
+                    RefreshUVMapImage();
+                }
             })
             {
                 text = "◀",
@@ -499,10 +652,33 @@ namespace Deform.Masking.Editor
 
             nextSubmeshButton = new Button(() =>
             {
+                // Save current submesh's cache before switching
+                SaveLowResTextureToCache();
+
+                // Switch to next submesh
                 selector.NextPreviewSubmesh();
+
+                // Update cache key for new submesh
+                var originalMesh = GetOriginalMesh();
+                currentCacheKey = GenerateCacheKey(originalMesh, selector.CurrentPreviewSubmesh);
+
+                // Load new submesh's cache
+                LoadLowResTextureFromCache();
+
+                // Update UI
                 UpdateSubmeshLabel();
                 RebuildIslandList();
-                RefreshUVMapImage();
+
+                // Show cached low-res texture if available, otherwise generate full
+                if (currentLowResTexture != null)
+                {
+                    shouldShowLowResUntilInteraction = true;
+                    RefreshUIFast();
+                }
+                else
+                {
+                    RefreshUVMapImage();
+                }
             })
             {
                 text = "▶",
@@ -1437,62 +1613,51 @@ namespace Deform.Masking.Editor
             return null;
         }
         
-        private Mesh GetDynamicMesh()
-        {
-            // Get the current dynamic mesh for highlighting
-            if (targetMask?.CachedMesh != null)
-            {
-                return targetMask.CachedMesh;
-            }
-            
-            // Fallback to original mesh if dynamic mesh is not available
-            return GetOriginalMesh();
-        }
         
         /// <summary>
         /// Generate stable cache key with comprehensive error handling and validation
         /// 包括的エラー処理と検証機能付きの安定キャッシュキー生成
         /// </summary>
-        private string GenerateCacheKey(Mesh originalMesh)
+        private string GenerateCacheKey(Mesh originalMesh, int submeshIndex)
         {
-            if (originalMesh == null) 
+            if (originalMesh == null)
             {
                 LogCacheOperation("GenerateCacheKey called with null mesh", isError: true);
                 return null;
             }
-            
+
             try
             {
                 // Use stable mesh identifiers instead of instance ID for Unity restart persistence
-                string meshName = !string.IsNullOrEmpty(originalMesh.name) ? 
+                string meshName = !string.IsNullOrEmpty(originalMesh.name) ?
                     originalMesh.name.Replace("/", "_").Replace("\\", "_") : // Sanitize for file system
                     "unnamed_mesh";
-                
+
                 int uvHash = CalculateUVHash(originalMesh.uv);
                 int vertexCount = originalMesh.vertexCount;
-                
-                var key = $"{meshName}_{vertexCount}_{uvHash}";
-                
+
+                var key = $"{meshName}_{vertexCount}_{uvHash}_sm{submeshIndex}";
+
                 // Validate cache key integrity
                 if (string.IsNullOrEmpty(key) || key.Length < 3)
                 {
                     LogCacheOperation($"Invalid cache key generated: '{key}'", isError: true);
-                    return $"fallback_{originalMesh.GetHashCode()}"; // Fallback key
+                    return $"fallback_{originalMesh.GetHashCode()}_sm{submeshIndex}"; // Fallback key
                 }
-                
+
                 if (key.Length > 200) // Prevent filesystem issues
                 {
                     LogCacheOperation($"Cache key too long ({key.Length} chars), truncating", isError: false);
-                    key = key.Substring(0, 200);
+                    key = key.Substring(0, 195) + $"_sm{submeshIndex}"; // Keep submesh info
                 }
-                
+
                 return key;
             }
             catch (System.Exception e)
             {
                 LogCacheOperation($"Failed to generate cache key: {e.Message}", isError: true);
                 // Fallback to basic hash-based key
-                return $"fallback_{originalMesh.GetHashCode()}_{originalMesh.vertexCount}";
+                return $"fallback_{originalMesh.GetHashCode()}_{originalMesh.vertexCount}_sm{submeshIndex}";
             }
         }
         
@@ -1584,6 +1749,34 @@ namespace Deform.Masking.Editor
         }
         
         /// <summary>
+        /// Show placeholder message while UV map is being initialized
+        /// UV マップ初期化中のプレースホルダーメッセージを表示
+        /// </summary>
+        private void ShowPlaceholderMessage(string message)
+        {
+            // Update status label
+            if (statusLabel != null)
+            {
+                statusLabel.text = message;
+            }
+
+            // Show placeholder in UV map area
+            if (uvMapImage != null)
+            {
+                // Set a neutral gray background to indicate loading state
+                uvMapImage.style.backgroundColor = new StyleColor(new Color(0.22f, 0.22f, 0.22f, 1f));
+                // Image will be replaced when texture loads, no need to explicitly clear
+            }
+
+            // Clear island list during initialization
+            if (islandListView != null)
+            {
+                islandListView.itemsSource = null;
+                islandListView.Rebuild();
+            }
+        }
+
+        /// <summary>
         /// Force immediate data refresh with texture generation - used for initial load
         /// </summary>
         private void RefreshDataWithImmediteTexture()
@@ -1612,18 +1805,41 @@ namespace Deform.Masking.Editor
                 textureInitialized = true;
                 isInitialized = true;
                 isLoadingFromCache = false; // Clear cache loading flag since full texture is ready
-                
+                shouldShowLowResUntilInteraction = false; // Ensure we show full-res texture, not low-res
+
+                // Save low-res texture to cache for next reload
+                SaveLowResTextureToCache();
+
+                // Clear placeholder background color
+                if (uvMapImage != null)
+                {
+                    uvMapImage.style.backgroundColor = StyleKeyword.Null;
+                }
+
                 // Immediate UI refresh
                 RefreshUVMapImage();
-                
+
+                // Force repaint of UV map image to ensure it displays
+                if (uvMapImage != null)
+                {
+                    uvMapImage.MarkDirtyRepaint();
+                }
+
                 if (selector?.UVIslands != null)
                 {
                     islandListView.itemsSource = selector.UVIslands;
-                    islandListView.RefreshItems();
+                    islandListView.Rebuild(); // Use Rebuild instead of RefreshItems to ensure full update
                 }
-                
+
+                // Update UI elements that were created with null selector
+                UpdateSubmeshSelectorUI();
+                UpdateHighlightSettingsUI();
+                UpdateDisplaySettingsUI();
+                UpdateSubmeshLabel();
+                UpdateSubmeshNavigationVisibility();
+
                 UpdateStatus();
-                
+
                 int islandCount = selector.UVIslands?.Count ?? 0;
                 if (statusLabel != null)
                 {
@@ -1693,9 +1909,12 @@ namespace Deform.Masking.Editor
             
             // Always refresh image (may show low-res or full-res based on state)
             RefreshUVMapImage();
-            
-            // Force scene repaint for selection highlighting
-            SceneView.RepaintAll();
+
+            // Only repaint scene if there are selected islands to display
+            if (selector?.HasSelectedIslands ?? false)
+            {
+                SceneView.RepaintAll();
+            }
         }
         
         private void RefreshUVMapImage()
@@ -1839,6 +2058,14 @@ namespace Deform.Masking.Editor
             isRangeDeselecting = false;
             UpdateMaskComponent();
             EditorUtility.SetDirty(targetMask);
+
+            // Generate full texture and save to cache
+            if (selector.AutoUpdatePreview)
+            {
+                selector.GenerateUVMapTexture();
+            }
+            SaveLowResTextureToCache();
+
             RefreshUI(false);
         }
         
@@ -1949,15 +2176,27 @@ namespace Deform.Masking.Editor
         {
             // Use proper coordinate transformation that accounts for zoom and pan
             var uvCoordinate = LocalPosToUV(currentMagnifyingMousePos);
-            
+
             int islandID = selector.GetIslandAtUVCoordinate(uvCoordinate);
-            
+
             if (islandID >= 0)
             {
+                // User interaction detected - switch to full resolution mode
+                OnUserInteraction();
+
                 Undo.RecordObject(targetMask, "Select UV Island from Magnifying Glass");
                 selector.ToggleIslandSelection(islandID);
                 UpdateMaskComponent();
                 EditorUtility.SetDirty(targetMask);
+
+                // Generate full texture and save to cache
+                if (selector.AutoUpdatePreview)
+                {
+                    selector.GenerateUVMapTexture();
+                    RefreshUVMapImage();
+                }
+                SaveLowResTextureToCache();
+
                 RefreshUIFast();
             }
         }
@@ -2187,21 +2426,153 @@ namespace Deform.Masking.Editor
                 islandListView.Rebuild();
             }
         }
+
+        /// <summary>
+        /// Update Submesh Selector UI after background initialization
+        /// バックグラウンド初期化後にサブメッシュセレクターUIを更新
+        /// </summary>
+        private void UpdateSubmeshSelectorUI()
+        {
+            if (submeshSelectorContainer == null || selector == null) return;
+
+            // Remove placeholder message
+            if (noSubmeshLabel != null)
+            {
+                submeshSelectorContainer.Remove(noSubmeshLabel);
+                noSubmeshLabel = null;
+            }
+
+            // Create submesh choice list
+            var choices = new List<string>();
+            for (int i = 0; i < selector.SubmeshCount; i++)
+            {
+                choices.Add($"Submesh {i}");
+            }
+
+            // Calculate initial mask value from selected submeshes
+            int initialMask = 0;
+            foreach (int submeshIndex in targetMask.SelectedSubmeshes)
+            {
+                if (submeshIndex < selector.SubmeshCount)
+                    initialMask |= (1 << submeshIndex);
+            }
+
+            // Create MaskField for multi-selection
+            var maskField = new MaskField("Selected Submeshes", choices, initialMask)
+            {
+                tooltip = "複数のサブメッシュを選択できます (少なくとも1つ必須)"
+            };
+
+            maskField.RegisterValueChangedCallback(evt =>
+            {
+                Undo.RecordObject(targetMask, "Change Submesh Selection");
+                var submeshes = new List<int>();
+
+                // Convert mask to list of indices
+                for (int i = 0; i < selector.SubmeshCount; i++)
+                {
+                    if ((evt.newValue & (1 << i)) != 0)
+                    {
+                        submeshes.Add(i);
+                    }
+                }
+
+                // Ensure at least one submesh is selected
+                if (submeshes.Count == 0)
+                {
+                    submeshes.Add(0);
+                    // Update mask field value
+                    maskField.SetValueWithoutNotify(1);
+                }
+
+                targetMask.SetSelectedSubmeshes(submeshes);
+                selector.SetSelectedSubmeshes(submeshes);
+                EditorUtility.SetDirty(targetMask);
+                UpdateSubmeshNavigationVisibility();
+                RefreshUI(false);
+            });
+
+            submeshSelectorContainer.Add(maskField);
+        }
+
+        /// <summary>
+        /// Update Highlight Settings UI after background initialization
+        /// バックグラウンド初期化後にハイライト設定UIを更新
+        /// </summary>
+        private void UpdateHighlightSettingsUI()
+        {
+            if (highlightSettingsContainer == null || selector == null) return;
+
+            // Remove placeholder message
+            if (noSelectorLabel != null)
+            {
+                highlightSettingsContainer.Remove(noSelectorLabel);
+                noSelectorLabel = null;
+            }
+
+            // Update or create highlight opacity slider
+            if (highlightOpacitySlider == null)
+            {
+                highlightOpacitySlider = new Slider("Highlight Opacity / ハイライト不透明度", 0f, 1f)
+                {
+                    value = selector.HighlightOpacity,
+                    showInputField = true
+                };
+                highlightOpacitySlider.tooltip = "ハイライトの不透明度を調整します (0 = 完全に透明, 1 = 不透明)\nAdjust highlight opacity (0 = fully transparent, 1 = opaque)";
+                highlightOpacitySlider.RegisterValueChangedCallback(evt =>
+                {
+                    if (selector != null)
+                    {
+                        selector.HighlightOpacity = evt.newValue;
+                        // Repaint scene view immediately to show opacity change
+                        if (selector.HasSelectedIslands)
+                        {
+                            SceneView.RepaintAll();
+                        }
+                    }
+                });
+
+                highlightSettingsContainer.Add(highlightOpacitySlider);
+            }
+            else
+            {
+                // Update existing slider value
+                highlightOpacitySlider.value = selector.HighlightOpacity;
+            }
+        }
+
+        /// <summary>
+        /// Update Display Settings UI after background initialization
+        /// バックグラウンド初期化後に表示設定UIを更新
+        /// </summary>
+        private void UpdateDisplaySettingsUI()
+        {
+            if (selector == null) return;
+
+            // Update toggle and sliders with actual selector values
+            if (adaptiveVertexSizeToggle != null)
+            {
+                adaptiveVertexSizeToggle.value = selector.UseAdaptiveVertexSize;
+            }
+            if (vertexSizeSlider != null)
+            {
+                vertexSizeSlider.value = selector.ManualVertexSphereSize;
+            }
+            if (adaptiveMultiplierSlider != null)
+            {
+                adaptiveMultiplierSlider.value = selector.AdaptiveSizeMultiplier;
+            }
+        }
         
         private void OnSceneGUI(SceneView sceneView)
         {
             if (selector == null || !selector.HasSelectedIslands) return;
-            
+
             // Use proper renderer transform for scene highlighting
             var rendererTransform = GetRendererTransform();
             if (rendererTransform != null)
             {
                 selector.TargetTransform = rendererTransform;
-                
-                // Set dynamic mesh for highlighting if available
-                var dynamicMesh = GetDynamicMesh();
-                selector.DynamicMesh = dynamicMesh;
-                
                 selector.DrawSelectedFacesInScene();
             }
         }
@@ -2249,7 +2620,13 @@ namespace Deform.Masking.Editor
         {
             if (selector == null || targetMask == null) return;
 
-            // Update island IDs (for backward compatibility and display)
+            // Update current preview submesh (for cache key persistence)
+            targetMask.CurrentPreviewSubmesh = selector.CurrentPreviewSubmesh;
+
+            // Update per-submesh selections (new format)
+            targetMask.SetPerSubmeshSelections(selector.SelectedIslandsPerSubmesh);
+
+            // Legacy: also update flat list for backward compatibility
             targetMask.SetSelectedIslands(selector.AllSelectedIslandIDs);
 
             // Update vertex list (most efficient for mask processing)
@@ -2318,43 +2695,37 @@ namespace Deform.Masking.Editor
                 LogCacheOperation("SaveLowResTextureToCache called with null selector", isError: true);
                 return;
             }
-            
-            // Only create low-res cache when selection changes (color changes)
-            if (selector.HasSelectedIslands)
+
+            // Always save low-res cache regardless of selection state
+            // This ensures fast reload for both selected and unselected states
+            try
             {
-                try
+                // Use the new method that ignores zoom/pan state for cache generation
+                var lowResTexture = selector.GenerateLowResUVMapTexture(LOW_RES_TEXTURE_SIZE, LOW_RES_TEXTURE_SIZE);
+                if (lowResTexture != null)
                 {
-                    // Use the new method that ignores zoom/pan state for cache generation
-                    var lowResTexture = selector.GenerateLowResUVMapTexture(LOW_RES_TEXTURE_SIZE, LOW_RES_TEXTURE_SIZE);
-                    if (lowResTexture != null)
+                    bool saveSuccess = RobustUVCache.SaveTexture(currentCacheKey, lowResTexture);
+
+                    if (saveSuccess)
                     {
-                        bool saveSuccess = RobustUVCache.SaveTexture(currentCacheKey, lowResTexture);
-                        
-                        if (saveSuccess)
-                        {
-                            LogCacheOperation($"Successfully cached low-res texture for key: {currentCacheKey}");
-                        }
-                        else
-                        {
-                            LogCacheOperation($"Failed to cache texture for key: {currentCacheKey}", isError: true);
-                        }
-                        
-                        // Clean up temporary texture
-                        UnityEngine.Object.DestroyImmediate(lowResTexture);
+                        LogCacheOperation($"Successfully cached low-res texture for key: {currentCacheKey}");
                     }
                     else
                     {
-                        LogCacheOperation($"Failed to generate low-res texture for key: {currentCacheKey}", isError: true);
+                        LogCacheOperation($"Failed to cache texture for key: {currentCacheKey}", isError: true);
                     }
+
+                    // Clean up temporary texture
+                    UnityEngine.Object.DestroyImmediate(lowResTexture);
                 }
-                catch (System.Exception e)
+                else
                 {
-                    LogCacheOperation($"Exception in SaveLowResTextureToCache: {e.Message}", isError: true);
+                    LogCacheOperation($"Failed to generate low-res texture for key: {currentCacheKey}", isError: true);
                 }
             }
-            else
+            catch (System.Exception e)
             {
-                LogCacheOperation($"No selected islands, skipping cache save for key: {currentCacheKey}");
+                LogCacheOperation($"Exception in SaveLowResTextureToCache: {e.Message}", isError: true);
             }
         }
         
