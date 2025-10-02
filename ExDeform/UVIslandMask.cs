@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using Unity.Jobs;
 using Unity.Burst;
@@ -7,6 +8,23 @@ using Unity.Mathematics;
 
 namespace Deform.Masking
 {
+    /// <summary>
+    /// Serializable per-submesh island selection data
+    /// サブメッシュ毎のアイランド選択データ
+    /// </summary>
+    [System.Serializable]
+    public class SubmeshIslandSelection
+    {
+        public int submeshIndex;
+        public List<int> selectedIslandIDs = new List<int>();
+
+        public SubmeshIslandSelection(int submeshIndex, List<int> islandIDs)
+        {
+            this.submeshIndex = submeshIndex;
+            this.selectedIslandIDs = islandIDs ?? new List<int>();
+        }
+    }
+
     /// <summary>
     /// UV Island based mask for deformation
     /// UVアイランドに基づく変形マスク
@@ -17,7 +35,9 @@ namespace Deform.Masking
     {
         [Header("Mask Settings")]
         [SerializeField] private List<int> selectedSubmeshes = new List<int> { 0 };
-        [SerializeField] private List<int> selectedIslandIDs = new List<int>();
+        [SerializeField] private int currentPreviewSubmesh = 0; // Current submesh being previewed in editor
+        [SerializeField] private List<int> selectedIslandIDs = new List<int>(); // Legacy: flat list for backward compatibility
+        [SerializeField] private List<SubmeshIslandSelection> perSubmeshSelections = new List<SubmeshIslandSelection>(); // New: per-submesh selections
         [SerializeField] private List<int> selectedVertexIndices = new List<int>(); // Direct vertex list
         [SerializeField] private bool invertMask = false;
         [SerializeField, Range(0f, 1f)] private float maskStrength = 1f;
@@ -35,7 +55,9 @@ namespace Deform.Masking
         
         // Properties for editor access
         public List<int> SelectedSubmeshes => selectedSubmeshes;
-        public List<int> SelectedIslandIDs => selectedIslandIDs;
+        public int CurrentPreviewSubmesh { get => currentPreviewSubmesh; set => currentPreviewSubmesh = value; }
+        public List<int> SelectedIslandIDs => selectedIslandIDs; // Legacy property for backward compatibility
+        public List<SubmeshIslandSelection> PerSubmeshSelections => perSubmeshSelections;
         public List<int> SelectedVertexIndices => selectedVertexIndices;
         public bool InvertMask { get => invertMask; set => invertMask = value; }
 	    public float MaskStrength { get => maskStrength; set => maskStrength = Mathf.Clamp01(value); }
@@ -207,6 +229,42 @@ namespace Deform.Masking
         {
             selectedIslandIDs = islandIDs ?? new List<int>();
             maskDataReady = false;
+        }
+
+        /// <summary>
+        /// Set per-submesh island selections (new format)
+        /// サブメッシュ毎のアイランド選択を設定（新形式）
+        /// </summary>
+        public void SetPerSubmeshSelections(Dictionary<int, HashSet<int>> selections)
+        {
+            perSubmeshSelections.Clear();
+            foreach (var kvp in selections)
+            {
+                perSubmeshSelections.Add(new SubmeshIslandSelection(kvp.Key, kvp.Value.ToList()));
+            }
+
+            // Also update legacy flat list for backward compatibility
+            selectedIslandIDs.Clear();
+            foreach (var selection in perSubmeshSelections)
+            {
+                selectedIslandIDs.AddRange(selection.selectedIslandIDs);
+            }
+
+            maskDataReady = false;
+        }
+
+        /// <summary>
+        /// Get per-submesh selections as Dictionary (for editor use)
+        /// サブメッシュ毎の選択をDictionaryとして取得（エディタ用）
+        /// </summary>
+        public Dictionary<int, HashSet<int>> GetPerSubmeshSelections()
+        {
+            var result = new Dictionary<int, HashSet<int>>();
+            foreach (var selection in perSubmeshSelections)
+            {
+                result[selection.submeshIndex] = new HashSet<int>(selection.selectedIslandIDs);
+            }
+            return result;
         }
 
         public void SetSelectedSubmeshes(List<int> submeshIndices)
