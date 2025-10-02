@@ -54,6 +54,7 @@ namespace Deform.Masking.Editor
         private float manualVertexSphereSize = DEFAULT_MANUAL_VERTEX_SIZE;
         private float adaptiveSizeMultiplier = DEFAULT_ADAPTIVE_SIZE_MULTIPLIER;
         private float adaptiveVertexSphereSize = DEFAULT_MANUAL_VERTEX_SIZE;
+        private float highlightOpacity = 0.6f; // Highlight transparency (0.0 = fully transparent, 1.0 = opaque)
         
         // UV Map preview settings
         private bool autoUpdatePreview = true;
@@ -87,10 +88,16 @@ namespace Deform.Masking.Editor
         
         // Scene display
         private Transform targetTransform;
-        
-        // Dynamic mesh support for highlighting
-        private Mesh dynamicMesh;
-	    private bool useDynamicMeshForHighlight = false;
+
+        // Performance optimization: cached mesh data for rendering
+        private TriangleRenderData[] cachedTriangleData;
+        private bool meshDataDirty = true;
+        private int lastMeshInstanceID = -1;
+        private int lastSelectionHash = -1;
+
+
+        // Frustum culling optimization
+        private Bounds cachedHighlightBounds;
         #endregion
         
         // Properties
@@ -127,10 +134,10 @@ namespace Deform.Masking.Editor
         public Texture2D UvMapTexture => uvMapTexture;
         public Mesh TargetMesh => targetMesh;
         public bool HasSelectedIslands => selectedIslandsPerSubmesh.Values.Any(set => set.Count > 0);
+        public Dictionary<int, HashSet<int>> SelectedIslandsPerSubmesh => selectedIslandsPerSubmesh;
         public int[] TriangleMask => triangleMask;
         public Transform TargetTransform { get => targetTransform; set => targetTransform = value; }
         public int[] VertexMask => vertexMask;
-        public Mesh DynamicMesh { get => dynamicMesh; set { dynamicMesh = value; useDynamicMeshForHighlight = value != null; } }
         public int SubmeshCount => targetMesh?.subMeshCount ?? 0;
         
         // Display properties
@@ -140,6 +147,7 @@ namespace Deform.Masking.Editor
         public float AdaptiveVertexSphereSize => useAdaptiveVertexSize ? adaptiveVertexSphereSize : manualVertexSphereSize;
         public int MaxDisplayVertices => maxDisplayVertices;
         public bool EnablePerformanceOptimization => enablePerformanceOptimization;
+        public float HighlightOpacity { get => highlightOpacity; set => highlightOpacity = Mathf.Clamp01(value); }
         
         // Preview properties
         public bool AutoUpdatePreview { get => autoUpdatePreview; set => autoUpdatePreview = value; }
@@ -175,6 +183,12 @@ namespace Deform.Masking.Editor
             {
                 CalculateAdaptiveVertexSphereSize();
                 UpdateMeshData();
+
+                // Generate texture after mesh data update
+                if (autoUpdatePreview)
+                {
+                    GenerateUVMapTexture();
+                }
             }
         }
         
@@ -197,8 +211,8 @@ namespace Deform.Masking.Editor
 
             UpdateMasks();
 
-            // Always generate texture when mesh data is updated to ensure immediate visibility
-            GenerateUVMapTexture();
+            // Note: Texture generation is now controlled by the caller to avoid duplicate calls
+            // Caller should explicitly call GenerateUVMapTexture() if needed
         }
 
         private void FilterIslandsBySelectedSubmeshes()
@@ -264,6 +278,9 @@ namespace Deform.Masking.Editor
             {
                 MarkTextureForUpdate();
             }
+
+            // Mark mesh rendering data as dirty for scene view
+            MarkMeshDataDirty();
         }
         
         public void ClearSelection()
@@ -275,6 +292,12 @@ namespace Deform.Masking.Editor
             {
                 GenerateUVMapTexture();
             }
+
+            // Mark mesh rendering data as dirty for scene view
+            MarkMeshDataDirty();
+
+            // Explicitly clear cached triangle data to remove highlights
+            cachedTriangleData = null;
         }
 
         /// <summary>
@@ -295,6 +318,9 @@ namespace Deform.Masking.Editor
             {
                 GenerateUVMapTexture();
             }
+
+            // Mark mesh rendering data as dirty for scene view
+            MarkMeshDataDirty();
         }
 
         /// <summary>
@@ -708,13 +734,40 @@ namespace Deform.Masking.Editor
         {
             textureNeedsUpdate = true;
         }
-        
+
         public void UpdateTextureIfNeeded()
         {
             if (textureNeedsUpdate)
             {
                 GenerateUVMapTexture();
                 textureNeedsUpdate = false;
+            }
+        }
+
+        /// <summary>
+        /// Mark mesh rendering data as dirty to force recalculation
+        /// メッシュレンダリングデータをダーティとしてマークし、再計算を強制
+        /// </summary>
+        private void MarkMeshDataDirty()
+        {
+            meshDataDirty = true;
+        }
+
+        /// <summary>
+        /// Calculate selection hash for change detection
+        /// 変更検知用の選択ハッシュを計算
+        /// </summary>
+        private int CalculateSelectionHash()
+        {
+            unchecked
+            {
+                int hash = 17;
+                foreach (var kvp in triangleMaskPerSubmesh)
+                {
+                    hash = hash * 31 + kvp.Key;
+                    hash = hash * 31 + kvp.Value.Count;
+                }
+                return hash;
             }
         }
         
@@ -833,12 +886,57 @@ namespace Deform.Masking.Editor
             if (triangleMaskPerSubmesh == null || triangleMaskPerSubmesh.Count == 0 || targetTransform == null) return;
             if (!HasSelectedIslands) return;
 
-            // Use dynamic mesh for highlighting if available, otherwise fallback to original mesh
-            Mesh meshForHighlight = useDynamicMeshForHighlight && dynamicMesh != null ? dynamicMesh : targetMesh;
-            if (meshForHighlight == null) return;
+            // Always use original mesh for highlighting
+            if (targetMesh == null) return;
 
+            // Check if cached data needs to be rebuilt
+            int currentMeshID = targetMesh.GetInstanceID();
+            int currentSelectionHash = CalculateSelectionHash();
+
+            // Rebuild cache if mesh changed or selection changed
+            bool needsRebuild = meshDataDirty || cachedTriangleData == null ||
+                lastMeshInstanceID != currentMeshID ||
+                lastSelectionHash != currentSelectionHash;
+
+            if (needsRebuild)
+            {
+                // Rebuild cache
+                RebuildTriangleRenderCache(targetMesh);
+                lastMeshInstanceID = currentMeshID;
+                lastSelectionHash = currentSelectionHash;
+                meshDataDirty = false;
+            }
+
+            // Frustum culling: skip if outside camera view
+            var sceneView = SceneView.currentDrawingSceneView;
+            if (sceneView != null && sceneView.camera != null)
+            {
+                var frustumPlanes = GeometryUtility.CalculateFrustumPlanes(sceneView.camera);
+                if (!GeometryUtility.TestPlanesAABB(frustumPlanes, cachedHighlightBounds))
+                {
+                    return; // Skip rendering if outside camera view
+                }
+            }
+
+            // Use cached data for rendering
+            if (cachedTriangleData != null && cachedTriangleData.Length > 0)
+            {
+                DrawCachedTriangles(cachedTriangleData);
+            }
+        }
+
+        /// <summary>
+        /// Rebuild triangle rendering cache from mesh data
+        /// メッシュデータから三角形レンダリングキャッシュを再構築
+        /// </summary>
+        private void RebuildTriangleRenderCache(Mesh meshForHighlight)
+        {
+            var triangleDataList = new List<TriangleRenderData>();
             var vertices = new List<Vector3>();
             meshForHighlight.GetVertices(vertices);
+
+            Vector3 boundsMin = Vector3.one * float.MaxValue;
+            Vector3 boundsMax = Vector3.one * float.MinValue;
 
             // Draw faces only for submeshes that have selected islands
             foreach (var kvp in triangleMaskPerSubmesh)
@@ -858,8 +956,149 @@ namespace Deform.Masking.Editor
                 if (triangles.Length == 0)
                     continue;
 
-                DrawSelectedFacesWithGL(vertices, triangles, triangleMaskForSubmesh);
+                // Precompute triangle data
+                for (int maskIndex = 0; maskIndex < triangleMaskForSubmesh.Count; maskIndex++)
+                {
+                    int triangleIndex = triangleMaskForSubmesh[maskIndex];
+                    int baseIndex = triangleIndex * 3;
+
+                    if (baseIndex + 2 < triangles.Length)
+                    {
+                        var idx0 = triangles[baseIndex];
+                        var idx1 = triangles[baseIndex + 1];
+                        var idx2 = triangles[baseIndex + 2];
+
+                        // Transform vertices to world space
+                        var v0World = targetTransform.TransformPoint(vertices[idx0]);
+                        var v1World = targetTransform.TransformPoint(vertices[idx1]);
+                        var v2World = targetTransform.TransformPoint(vertices[idx2]);
+
+                        var data = new TriangleRenderData
+                        {
+                            v0Local = vertices[idx0],
+                            v1Local = vertices[idx1],
+                            v2Local = vertices[idx2],
+                            v0World = v0World,
+                            v1World = v1World,
+                            v2World = v2World
+                        };
+
+                        triangleDataList.Add(data);
+
+                        // Update bounds for frustum culling
+                        boundsMin = Vector3.Min(boundsMin, Vector3.Min(v0World, Vector3.Min(v1World, v2World)));
+                        boundsMax = Vector3.Max(boundsMax, Vector3.Max(v0World, Vector3.Max(v1World, v2World)));
+                    }
+                }
             }
+
+            cachedTriangleData = triangleDataList.ToArray();
+
+            // Calculate and cache bounds for frustum culling
+            if (triangleDataList.Count > 0)
+            {
+                Vector3 center = (boundsMin + boundsMax) * 0.5f;
+                Vector3 size = boundsMax - boundsMin;
+                cachedHighlightBounds = new Bounds(center, size);
+            }
+            else
+            {
+                cachedHighlightBounds = new Bounds(Vector3.zero, Vector3.zero);
+            }
+        }
+
+        /// <summary>
+        /// Draw cached triangles using optimized 2-pass rendering for front/back visual distinction
+        /// 前面/背面の視覚的判別のための最適化2パスレンダリング
+        /// </summary>
+        private void DrawCachedTriangles(TriangleRenderData[] triangles)
+        {
+            if (triangles == null || triangles.Length == 0) return;
+            if (!CreateGLMaterial()) return;
+
+            var sceneCamera = SceneView.currentDrawingSceneView?.camera;
+            if (sceneCamera == null) return;
+
+            var originalZTest = Handles.zTest;
+
+            // ===== Pass 1: Background (hidden/occluded parts) - Always visible =====
+            // 背景パス: 隠れている部分を薄い青で表示
+            Handles.zTest = UnityEngine.Rendering.CompareFunction.Greater; // Draw only behind geometry
+            float bgAlpha = 0.2f * highlightOpacity; // Scale alpha by opacity slider
+            Handles.color = new Color(0.2f, 0.7f, 1f, bgAlpha); // Light blue, adjustable transparency
+
+            foreach (var tri in triangles)
+            {
+                Handles.DrawAAConvexPolygon(tri.v0World, tri.v1World, tri.v2World);
+            }
+
+            // ===== Pass 2: Foreground (visible parts) - Solid fill with polygon offset =====
+            // 前景パス: 見えている部分をオレンジで表示（ハードウェアポリゴンオフセット）
+            GL.PushMatrix();
+            GL.MultMatrix(targetTransform.localToWorldMatrix);
+
+            float fgAlpha = 0.6f * highlightOpacity; // Scale alpha by opacity slider
+            glMaterial.SetColor("_Color", new Color(1f, 0.5f, 0f, fgAlpha)); // Orange, adjustable transparency
+            glMaterial.SetPass(0);
+
+            GL.Begin(GL.TRIANGLES);
+            foreach (var tri in triangles)
+            {
+                GL.Color(new Color(1f, 1f, 1f, 1f)); // White (multiplied with material color)
+                GL.Vertex(tri.v0Local);
+                GL.Vertex(tri.v1Local);
+                GL.Vertex(tri.v2Local);
+            }
+            GL.End();
+
+            GL.PopMatrix();
+
+            // ===== Pass 3: Wireframe outline (for edge emphasis) =====
+            // ワイヤーフレームパス: 輪郭を強調
+            Handles.zTest = UnityEngine.Rendering.CompareFunction.LessEqual;
+            float wireAlpha = 0.9f * highlightOpacity; // Scale alpha by opacity slider
+            Handles.color = new Color(1f, 0.3f, 0f, wireAlpha); // Stronger orange for edges, adjustable transparency
+
+            // Draw wireframe using batched lines for better performance
+            DrawWireframeOptimized(triangles);
+
+            Handles.zTest = originalZTest;
+        }
+
+
+        /// <summary>
+        /// Draw wireframe with optimized batch processing using Handles.DrawLines
+        /// Handles.DrawLinesを使用した最適化バッチ処理でワイヤーフレームを描画
+        /// </summary>
+        private void DrawWireframeOptimized(TriangleRenderData[] triangles)
+        {
+            if (triangles == null || triangles.Length == 0) return;
+
+            // Pre-allocate line array (each triangle has 3 edges, each edge has 2 points)
+            int lineCount = triangles.Length * 3;
+            Vector3[] linePoints = new Vector3[lineCount * 2];
+
+            // Build line points array
+            for (int i = 0; i < triangles.Length; i++)
+            {
+                var tri = triangles[i];
+                int baseIdx = i * 6; // 3 lines * 2 points per line
+
+                // Edge 0-1
+                linePoints[baseIdx] = tri.v0World;
+                linePoints[baseIdx + 1] = tri.v1World;
+
+                // Edge 1-2
+                linePoints[baseIdx + 2] = tri.v1World;
+                linePoints[baseIdx + 3] = tri.v2World;
+
+                // Edge 2-0
+                linePoints[baseIdx + 4] = tri.v2World;
+                linePoints[baseIdx + 5] = tri.v0World;
+            }
+
+            // Draw all lines in a single batch call
+            Handles.DrawLines(linePoints);
         }
 
         /// <summary>
@@ -870,92 +1109,6 @@ namespace Deform.Masking.Editor
         {
             public Vector3 v0Local, v1Local, v2Local;  // Local coordinates for GL
             public Vector3 v0World, v1World, v2World;  // World coordinates for Handles
-        }
-
-        /// <summary>
-        /// Draw selected faces using GL immediate mode with hardware polygon offset
-        /// ハードウェアポリゴンオフセットを使用したGL即時モードで選択された面を描画
-        /// </summary>
-        private void DrawSelectedFacesWithGL(List<Vector3> vertices, int[] triangles, List<int> triangleMaskForSubmesh)
-        {
-            // Create material for GL rendering if needed
-            if (!CreateGLMaterial())
-                return;
-
-            var sceneCamera = SceneView.currentDrawingSceneView?.camera;
-            if (sceneCamera == null) return;
-
-            // Precompute all triangle data in a single pass
-            var triangleDataList = new List<TriangleRenderData>(triangleMaskForSubmesh.Count);
-
-            for (int maskIndex = 0; maskIndex < triangleMaskForSubmesh.Count; maskIndex++)
-            {
-                int triangleIndex = triangleMaskForSubmesh[maskIndex];
-                int baseIndex = triangleIndex * 3;
-
-                if (baseIndex + 2 < triangles.Length)
-                {
-                    var idx0 = triangles[baseIndex];
-                    var idx1 = triangles[baseIndex + 1];
-                    var idx2 = triangles[baseIndex + 2];
-
-                    var data = new TriangleRenderData
-                    {
-                        v0Local = vertices[idx0],
-                        v1Local = vertices[idx1],
-                        v2Local = vertices[idx2],
-                        v0World = targetTransform.TransformPoint(vertices[idx0]),
-                        v1World = targetTransform.TransformPoint(vertices[idx1]),
-                        v2World = targetTransform.TransformPoint(vertices[idx2])
-                    };
-
-                    triangleDataList.Add(data);
-                }
-            }
-
-            var originalZTest = Handles.zTest;
-
-            // Method 1: Background pass - always visible (no depth test)
-            Handles.zTest = UnityEngine.Rendering.CompareFunction.Always;
-            Handles.color = new Color(0.2f, 0.7f, 1f, 0.25f);
-
-            foreach (var tri in triangleDataList)
-            {
-                Handles.DrawAAConvexPolygon(tri.v0World, tri.v1World, tri.v2World);
-            }
-
-            // Method 2: Foreground pass with hardware polygon offset (GL with custom shader)
-            GL.PushMatrix();
-            GL.MultMatrix(targetTransform.localToWorldMatrix);
-
-            glMaterial.SetColor("_Color", new Color(1f, 0.5f, 0f, 0.7f));
-            glMaterial.SetPass(0);
-
-            GL.Begin(GL.TRIANGLES);
-            GL.Color(new Color(1f, 1f, 1f, 1f));  // GL.Color is multiplied with material color
-
-            foreach (var tri in triangleDataList)
-            {
-                GL.Vertex(tri.v0Local);
-                GL.Vertex(tri.v1Local);
-                GL.Vertex(tri.v2Local);
-            }
-
-            GL.End();
-	        GL.PopMatrix();
-
-            // Method 3: Wireframe outline
-            Handles.zTest = UnityEngine.Rendering.CompareFunction.LessEqual;
-            Handles.color = new Color(1f, 0.3f, 0f, 1f);
-
-            foreach (var tri in triangleDataList)
-            {
-                Handles.DrawLine(tri.v0World, tri.v1World);
-                Handles.DrawLine(tri.v1World, tri.v2World);
-                Handles.DrawLine(tri.v2World, tri.v0World);
-            }
-
-            Handles.zTest = originalZTest;
         }
 
         // GL material for rendering
@@ -999,6 +1152,8 @@ namespace Deform.Masking.Editor
                 Object.DestroyImmediate(uvMapTexture);
                 uvMapTexture = null;
             }
+
+            // Clean up cached render mesh
         }
     }
 }
