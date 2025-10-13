@@ -10,29 +10,40 @@ namespace Deform.Masking
     /// </summary>
     public static class UVIslandAnalyzer
     {
+        #region Constants and Configuration
+        // 定数と設定
+        // Configuration fields for algorithm behavior
+
         /// <summary>
         /// UV tolerance for connecting islands. Increased to allow better island merging.
         /// UVアイランドの接続許容範囲。アイランドの結合を改善するため増加。
         /// </summary>
 	    public static float UVTolerance = 0.005f; // Further increased from 0.001f to solve remaining splitting issues
-        
+
         /// <summary>
         /// Triangle degenerate tolerance. Relaxed to include more triangles in analysis.
         /// 三角形の縮退判定許容値。解析により多くの三角形を含むため緩和。
         /// </summary>
         public static float TriangleTolerance = 1e-5f;
-        
+
         /// <summary>
         /// Use advanced topology-aware algorithm. Set to false for legacy compatibility.
 	    /// 高度なトポロジー認識アルゴリズムを使用 = true。レガシー互換性 = false
         /// </summary>
         public static bool UseAdvancedAlgorithm = true;
-        
+
         /// <summary>
 	    /// Debug logging for UV island analysis troubleshooting.
         /// UVアイランド解析のトラブルシューティング用デバッグログ
         /// </summary>
         public static bool EnableDebugLogging = false;
+
+        #endregion
+
+        #region Data Structures
+        // データ構造
+        // Nested classes and structs for UV island representation
+
         /// <summary>
         /// UV Island data structure
         /// UVアイランドデータ構造
@@ -49,7 +60,13 @@ namespace Deform.Masking
             public Color maskColor = Color.red;
             public int faceCount => triangleIndices.Count;
         }
-        
+
+        #endregion
+
+        #region Public API
+        // 公開API
+        // Main entry points for UV island analysis
+
         /// <summary>
         /// Analyze UV islands from mesh using configurable algorithm
         /// 設定可能なアルゴリズムを使用してメッシュからUVアイランドを解析
@@ -88,7 +105,13 @@ namespace Deform.Masking
                 return AnalyzeUVIslandsLegacy(mesh, submeshIndices);
             }
         }
-        
+
+        #endregion
+
+        #region Advanced Algorithm
+        // 高度なアルゴリズム
+        // Advanced topology-aware UV island analysis with improved connectivity detection
+
         /// <summary>
         /// Advanced topology-aware UV island analysis
         /// 高度なトポロジー認識UVアイランド解析
@@ -209,7 +232,13 @@ namespace Deform.Masking
 
             return islands;
         }
-        
+
+        #endregion
+
+        #region Legacy Algorithm
+        // レガシーアルゴリズム
+        // Legacy UV island analysis for backward compatibility
+
         /// <summary>
         /// Legacy UV island analysis for compatibility
         /// 互換性のためのレガシーUVアイランド解析
@@ -321,7 +350,13 @@ namespace Deform.Masking
 
             return islands;
         }
-        
+
+        #endregion
+
+        #region Vertex and Triangle Mapping
+        // 頂点と三角形のマッピング
+        // Data structure building for efficient adjacency lookup
+
         private static Dictionary<int, List<int>> BuildVertexToTriangleMapping(int[] triangles, int vertexCount)
         {
             var mapping = new Dictionary<int, List<int>>();
@@ -343,7 +378,13 @@ namespace Deform.Masking
             
             return mapping;
         }
-        
+
+        #endregion
+
+        #region Triangle Adjacency Graph
+        // 三角形隣接グラフ
+        // Advanced connectivity analysis using edge-based and proximity-based methods
+
         /// <summary>
         /// Build advanced triangle adjacency graph using multiple connectivity criteria
         /// 複数の接続基準を使用して高度な三角形隣接グラフを構築
@@ -514,7 +555,13 @@ namespace Deform.Masking
                 }
             }
         }
-        
+
+        #endregion
+
+        #region Aggressive Proximity Connections
+        // 積極的な近接接続
+        // Union-Find algorithm with weighted connections for island merging
+
         /// <summary>
         /// Add connections using Union-Find with weighted edge analysis
         /// 重み付きエッジ解析とUnion-Findを使用した接続追加
@@ -874,8 +921,14 @@ namespace Deform.Masking
             var uv2 = uvs[triangles[baseIndex + 2]];
             return (uv0 + uv1 + uv2) / 3f;
         }
-        
-        private static void FindAdjacentTrianglesOptimized(int triangleIndex, int[] triangles, List<Vector2> uvs, 
+
+        #endregion
+
+        #region Legacy Algorithm Helpers
+        // レガシーアルゴリズムヘルパー
+        // Helper methods for legacy UV island analysis
+
+        private static void FindAdjacentTrianglesOptimized(int triangleIndex, int[] triangles, List<Vector2> uvs,
             Queue<int> trianglesToProcess, HashSet<int> processedTriangles, Dictionary<int, List<int>> vertexToTriangles)
         {
             int triStart = triangleIndex * 3;
@@ -943,8 +996,13 @@ namespace Deform.Masking
                 trianglesToProcess.Enqueue(adjTri);
             }
         }
-        
-        
+
+        #endregion
+
+        #region Utility Methods
+        // ユーティリティメソッド
+        // General utility methods for bounds, colors, and other helpers
+
         private static Bounds CalculateUVBounds(List<Vector2> uvCoordinates)
         {
             if (uvCoordinates.Count == 0)
@@ -979,7 +1037,13 @@ namespace Deform.Masking
             };
             return colors[index % colors.Length];
         }
-        
+
+        #endregion
+
+        #region Hit Testing
+        // ヒットテスト
+        // Point-in-island testing for UV coordinate-based selection
+
         /// <summary>
         /// Check if point is inside UV island
         /// 点がUVアイランド内にあるかチェック
@@ -1058,7 +1122,13 @@ namespace Deform.Masking
             }
             return false;
         }
-        
+
+        #endregion
+
+        #region Ray Casting Algorithm
+        // レイキャスティングアルゴリズム
+        // Geometric algorithms for complex polygon hit testing
+
         /// <summary>
         /// Ray casting algorithm - reliable for large complex islands
         /// レイキャスティングアルゴリズム - 大きな複雑なアイランドに対して信頼性が高い
@@ -1129,7 +1199,13 @@ namespace Deform.Masking
             return Mathf.Min(a.x, b.x) <= c.x && c.x <= Mathf.Max(a.x, b.x) &&
                    Mathf.Min(a.y, b.y) <= c.y && c.y <= Mathf.Max(a.y, b.y);
         }
-        
+
+        #endregion
+
+        #region Triangle Testing
+        // 三角形テスト
+        // Barycentric coordinate-based point-in-triangle test
+
         public static bool IsPointInTriangle(Vector2 point, Vector2 a, Vector2 b, Vector2 c)
         {
             Vector2 v0 = c - a;
@@ -1151,5 +1227,7 @@ namespace Deform.Masking
             
             return (u >= 0) && (v >= 0) && (u + v <= 1);
         }
+
+        #endregion
     }
 }

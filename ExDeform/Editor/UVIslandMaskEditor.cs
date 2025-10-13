@@ -5,6 +5,7 @@ using UnityEditor;
 using UnityEditor.UIElements;
 using System.Linq;
 using System.Collections.Generic;
+using Deform.Masking.Editor.Views;
 
 namespace Deform.Masking.Editor
 {
@@ -15,7 +16,7 @@ namespace Deform.Masking.Editor
     [CustomEditor(typeof(UVIslandMask))]
     public class UVIslandMaskEditor : UnityEditor.Editor
 	{
-    	#region variables
+        #region Fields and Constants
         private UVIslandMask targetMask;
         private UVIslandSelector selector;
         private VisualElement root;
@@ -32,9 +33,6 @@ namespace Deform.Masking.Editor
         private Label currentSubmeshLabel;
         private Button prevSubmeshButton;
         private Button nextSubmeshButton;
-        private Toggle adaptiveVertexSizeToggle;
-        private Slider vertexSizeSlider;
-        private Slider adaptiveMultiplierSlider;
         private Toggle autoUpdateToggle;
         private Slider zoomSlider;
         private Button resetZoomButton;
@@ -92,30 +90,82 @@ namespace Deform.Masking.Editor
         private static DateTime lastCacheHealthCheck = DateTime.MinValue;
         private const double CACHE_HEALTH_CHECK_INTERVAL_HOURS = 1.0;
 
-        // UI element references for post-initialization updates
-        private VisualElement submeshSelectorContainer;
-        private VisualElement noSubmeshLabel;
-        private VisualElement highlightSettingsContainer;
-        private VisualElement noSelectorLabel;
-        private Slider highlightOpacitySlider;
+        // Async initialization
+        private AsyncInitializationManager asyncInitManager;
+        private InitializationProgressView progressView;
+        private bool asyncInitializationInProgress = false;
+
+        // Custom Views
+        private HighlightSettingsView highlightSettingsView;
+        private SubmeshSelectorView submeshSelectorView;
         #endregion
 
         // EditorApplication callback management
         private EditorApplication.CallbackFunction pendingTextureUpdate;
-        
+
+        #region Editor Lifecycle
+        // エディタのライフサイクル管理
+        // Editor lifecycle management
+
+        /// <summary>
+        /// Override to enable constant repaint for UI Toolkit inspectors
+        /// UI Toolkit inspectors require constant repaint to update dynamic UI elements
+        /// UITKインスペクターは動的UI要素の更新に継続的な再描画が必要
+        /// </summary>
+        public override bool RequiresConstantRepaint()
+        {
+            // CRITICAL: Always return true for UI Toolkit inspectors
+            // UI Toolkit does not automatically repaint when UI elements change
+            // Only Repaint() or RequiresConstantRepaint()=true will update the display
+            return true;
+        }
+
         public override VisualElement CreateInspectorGUI()
         {
             targetMask = target as UVIslandMask;
             int targetID = targetMask != null ? targetMask.GetInstanceID() : 0;
-            
+
+            Debug.Log($"[UVIslandMaskEditor] CreateInspectorGUI called for target {targetID}, this instance: {this.GetInstanceID()}");
+
+            // CRITICAL: Register this instance IMMEDIATELY to prevent OnEnable from cleaning up wrong instance
+            // OnEnable may be called after CreateInspectorGUI, and we need to ensure it sees the correct instance
+            if (targetID != 0)
+            {
+                if (activeEditors.ContainsKey(targetID))
+                {
+                    var oldEditor = activeEditors[targetID];
+                    if (oldEditor != this && oldEditor != null)
+                    {
+                        Debug.Log($"[UVIslandMaskEditor] Replacing old editor instance {oldEditor.GetInstanceID()} with new {this.GetInstanceID()}");
+                        oldEditor.CleanupEditor();
+                    }
+                }
+                activeEditors[targetID] = this;
+                Debug.Log($"[UVIslandMaskEditor] Registered editor instance {this.GetInstanceID()} in CreateInspectorGUI");
+            }
+
             // Log CreateInspectorGUI calls for debugging
             LogCacheOperation($"CreateInspectorGUI called for target {targetID}, existing root: {(root != null)}, same target: {lastTargetMask == targetMask}");
-            
-            // Prevent multiple UI creation for the same target
+
+            // CRITICAL: Reuse UI for same instance and same target
+            // This ensures progressBar field references match the actual displayed UI elements
+            // Without this, progressBar field would point to orphaned UI elements
             if (root != null && lastTargetMask == targetMask)
             {
                 LogCacheOperation($"Reusing existing UI for target {targetID}");
+
+                // UI elements (including progressContainer) are reused as-is
+                // Async initialization continues with correct callback references
+
                 return root;
+            }
+
+            // If creating new UI, cancel any ongoing async initialization from previous UI
+            if (asyncInitManager != null && asyncInitManager.IsRunning)
+            {
+                Debug.Log($"[UVIslandMaskEditor] Cancelling async initialization before creating new UI");
+                asyncInitManager.Cancel();
+                asyncInitManager = null;
             }
             
             // Lightweight cache system initialization - only when UI is created
@@ -200,7 +250,16 @@ namespace Deform.Masking.Editor
             root.style.paddingBottom = 10;
             root.style.paddingLeft = 10;
             root.style.paddingRight = 10;
-            
+
+            // Create progress view for async initialization
+            progressView = new InitializationProgressView
+            {
+                Progress = 0f,
+                StatusMessage = "Initializing..."
+            };
+            progressView.style.display = DisplayStyle.None; // Hidden by default
+            root.Add(progressView);
+
             CreateLanguageSelector();
             CreateHeader();
             CreateMaskSettings();
@@ -216,89 +275,101 @@ namespace Deform.Masking.Editor
             root.RegisterCallback<MouseMoveEvent>(OnRootMouseMove, TrickleDown.TrickleDown);
             root.RegisterCallback<MouseUpEvent>(OnRootMouseUp, TrickleDown.TrickleDown);
             
-            // Initialize with low-res cache if available, full-res only on user interaction
-            if (selector != null)
+            // CRITICAL: Determine initialization strategy based on MESH CACHE, not instance fields
+            // Check if we have a cached selector for this mesh (NOT whether selector field is set)
+            bool hasMeshCache = (meshCacheKey != null && persistentCache.ContainsKey(meshCacheKey));
+            bool hasLowResCache = (currentLowResTexture != null);
+
+            if (hasMeshCache && hasLowResCache)
             {
-                // Selector exists (cached): try to load low-res cache for immediate display
-                LoadLowResTextureFromCache();
-
-                if (currentLowResTexture != null)
-                {
-                    // Show cached low-res texture until user interaction
-                    shouldShowLowResUntilInteraction = true;
-                    isLoadingFromCache = true;
-                    RefreshUIFast(); // Quick UI update with low-res
-                }
-                else
-                {
-                    // No cache available for existing selector: generate texture asynchronously
-                    ShowPlaceholderMessage("Initializing UV Map...");
-
-                    EditorApplication.delayCall += () =>
-                    {
-                        if (selector != null && targetMask != null)
-                        {
-                            RefreshDataWithImmediteTexture();
-                        }
-                    };
-                }
+                // Case 1: Both mesh and texture cache exist
+                // Show cached low-res texture immediately, no async initialization needed
+                Debug.Log($"[UVIslandMaskEditor] Using mesh cache + texture cache for {meshCacheKey}");
+                shouldShowLowResUntilInteraction = true;
+                isLoadingFromCache = true;
+                RefreshUIFast(); // Quick UI update with low-res
             }
-            else if (originalMesh != null)
+            else if (hasMeshCache && !hasLowResCache)
             {
-                // Selector doesn't exist yet: create in background to avoid blocking UI
-                ShowPlaceholderMessage("Initializing UV Map...");
+                // Case 2: Mesh cache exists but no texture cache
+                // Selector has UV data, but need to generate texture asynchronously
+                Debug.Log($"[UVIslandMaskEditor] Mesh cache exists but no texture cache, starting async texture generation");
 
-                EditorApplication.delayCall += () =>
+                // Show progress view
+                if (progressView != null)
                 {
-                    // Null check in case Inspector was closed
-                    if (targetMask == null) return;
+                    progressView.Progress = 0f;
+                    progressView.StatusMessage = "Initializing UV Map...";
+                    progressView.style.display = DisplayStyle.Flex;
+                }
 
-                    // Get mesh again to ensure it's still valid
-                    var mesh = GetOriginalMesh();
-                    if (mesh == null) return;
+                // Use async initialization for texture generation only (selector already has UV data)
+                asyncInitializationInProgress = true;
+                asyncInitManager = new AsyncInitializationManager();
+                asyncInitManager.StartInitialization(
+                    originalMesh,
+                    selector,
+                    OnAsyncInitializationCompleted
+                );
 
-                    // Create new selector with full mesh analysis (300-1000ms, now in background)
-                    selector = new UVIslandSelector(mesh);
-                    selector.SetSelectedSubmeshes(targetMask.SelectedSubmeshes);
+                // Start monitoring async initialization progress
+                EditorApplication.update += MonitorAsyncInitialization;
+            }
+            else if (!hasMeshCache && originalMesh != null)
+            {
+                // Case 3: No mesh cache - need full async initialization from scratch
+                Debug.Log($"[UVIslandMaskEditor] No mesh cache, starting full async initialization");
 
-                    // Restore current preview submesh from saved state (without triggering texture generation)
-                    bool wasAutoUpdate = selector.AutoUpdatePreview;
-                    selector.AutoUpdatePreview = false;
-                    selector.SetPreviewSubmesh(targetMask.CurrentPreviewSubmesh);
-                    selector.AutoUpdatePreview = wasAutoUpdate;
+                // Show progress view
+                if (progressView != null)
+                {
+                    progressView.Progress = 0f;
+                    progressView.StatusMessage = "Initializing UV Map...";
+                    progressView.style.display = DisplayStyle.Flex;
+                }
 
-                    // Load per-submesh selections (new format)
-                    if (targetMask.PerSubmeshSelections.Count > 0)
-                    {
-                        selector.SetAllSelectedIslands(targetMask.GetPerSubmeshSelections());
-                    }
-                    // Fallback to legacy flat list if new format is empty (backward compatibility)
-                    else if (targetMask.SelectedIslandIDs.Count > 0)
-                    {
-                        selector.SetSelectedIslands(targetMask.SelectedIslandIDs);
-                    }
+                // Create selector WITHOUT mesh initialization (empty constructor)
+                selector = new UVIslandSelector();
+                selector.AutoUpdatePreview = false; // Prevent automatic texture generation
 
-                    selector.TargetTransform = GetRendererTransform();
+                // Set mesh without analysis - analysis will be done asynchronously
+                selector.SetMeshWithoutAnalysis(originalMesh);
 
-                    // Cache the selector for future use (using mesh-based key, not submesh-based)
-                    string cacheKey = GenerateCacheKey(mesh, 0); // Use submesh 0 as base key
-                    if (cacheKey != null && cacheKey.EndsWith("_sm0"))
-                    {
-                        cacheKey = cacheKey.Substring(0, cacheKey.Length - 4); // Remove "_sm0" suffix
-                    }
-                    if (cacheKey != null)
-                    {
-                        persistentCache[cacheKey] = selector;
-                    }
+                // Set submesh configuration (safe before UV analysis)
+                selector.SetSelectedSubmeshes(targetMask.SelectedSubmeshes);
+                selector.SetPreviewSubmesh(targetMask.CurrentPreviewSubmesh);
+                selector.TargetTransform = GetRendererTransform();
 
-                    cachedSelector = selector;
-                    lastTargetMask = targetMask;
-                    lastCachedMesh = mesh;
-                    lastMeshInstanceID = mesh?.GetInstanceID() ?? -1;
+                // NOTE: Island selections will be restored in OnAsyncInitializationCompleted()
+                // after UV analysis completes, because we need the islands to exist first
 
-                    // Now refresh with full data
-                    RefreshDataWithImmediteTexture();
-                };
+                // Cache the selector for future use (using mesh-based key, not submesh-based)
+                string cacheKey = GenerateCacheKey(originalMesh, 0); // Use submesh 0 as base key
+                if (cacheKey != null && cacheKey.EndsWith("_sm0"))
+                {
+                    cacheKey = cacheKey.Substring(0, cacheKey.Length - 4); // Remove "_sm0" suffix
+                }
+                if (cacheKey != null)
+                {
+                    persistentCache[cacheKey] = selector;
+                }
+
+                cachedSelector = selector;
+                lastTargetMask = targetMask;
+                lastCachedMesh = originalMesh;
+                lastMeshInstanceID = originalMesh?.GetInstanceID() ?? -1;
+
+                // Start async initialization with UV analysis and texture generation
+                asyncInitializationInProgress = true;
+                asyncInitManager = new AsyncInitializationManager();
+                asyncInitManager.StartInitialization(
+                    originalMesh,
+                    selector,
+                    OnAsyncInitializationCompleted
+                );
+
+                // Start monitoring async initialization progress
+                EditorApplication.update += MonitorAsyncInitialization;
             }
             else
             {
@@ -311,7 +382,13 @@ namespace Deform.Masking.Editor
             
             return root;
         }
-        
+
+        #endregion
+
+        #region UI Creation - Inspector Setup
+        // UIの作成 - インスペクターのセットアップ
+        // UI creation methods for building the inspector interface
+
         private void CreateLanguageSelector()
         {
             var languageContainer = new VisualElement
@@ -404,96 +481,102 @@ namespace Deform.Masking.Editor
 
         private void CreateSubmeshSelector()
         {
-            submeshSelectorContainer = CreateSection("Submesh Selection / サブメッシュ選択");
+            var submeshSection = CreateSection("Submesh Selection / サブメッシュ選択");
 
-            if (selector == null || selector.SubmeshCount == 0)
-            {
-                noSubmeshLabel = new Label("Initializing submesh data... / サブメッシュデータを初期化中...");
-                noSubmeshLabel.style.color = new Color(0.7f, 0.7f, 0.7f, 1f);
-                submeshSelectorContainer.Add(noSubmeshLabel);
-                root.Add(submeshSelectorContainer);
-                return;
-            }
+            // Calculate initial mask from selected submeshes
+            int initialMask = SubmeshSelectorView.ListToMask(targetMask.SelectedSubmeshes);
 
-            // Create submesh choice list
-            var choices = new List<string>();
-            for (int i = 0; i < selector.SubmeshCount; i++)
+            // Create SubmeshSelectorView
+            var submeshSelector = new SubmeshSelectorView
             {
-                choices.Add($"Submesh {i}");
-            }
-
-            // Calculate initial mask value from selected submeshes
-            int initialMask = 0;
-            foreach (int submeshIndex in targetMask.SelectedSubmeshes)
-            {
-                if (submeshIndex < selector.SubmeshCount)
-                    initialMask |= (1 << submeshIndex);
-            }
-
-            // Create MaskField for multi-selection
-            var maskField = new MaskField("Selected Submeshes", choices, initialMask)
-            {
-                tooltip = "複数のサブメッシュを選択できます (少なくとも1つ必須)"
+                TotalSubmeshes = selector?.SubmeshCount ?? 1,
+                CurrentSubmesh = selector?.CurrentPreviewSubmesh ?? 0,
+                SelectedMask = initialMask
             };
 
-            maskField.RegisterValueChangedCallback(evt =>
-            {
-                Undo.RecordObject(targetMask, "Change Submesh Selection");
-                var submeshes = new List<int>();
+            // Set localized labels and tooltips
+            submeshSelector.SetMaskFieldLabel("Selected Submeshes");
+            submeshSelector.SetPrevButtonTooltip("Previous submesh / 前のサブメッシュ");
+            submeshSelector.SetNextButtonTooltip("Next submesh / 次のサブメッシュ");
 
-                // Convert mask to list of indices
-                for (int i = 0; i < selector.SubmeshCount; i++)
+            // Register event handlers
+            submeshSelector.RegisterCallback<SubmeshChangedEvent>(evt =>
+            {
+                if (selector != null)
                 {
-                    if ((evt.newValue & (1 << i)) != 0)
+                    Undo.RecordObject(targetMask, "Change Preview Submesh");
+                    selector.SetPreviewSubmesh(evt.NewSubmeshIndex);
+                    targetMask.CurrentPreviewSubmesh = evt.NewSubmeshIndex;
+                    EditorUtility.SetDirty(targetMask);
+
+                    // Load cache for new submesh
+                    LoadLowResTextureFromCache();
+
+                    // Update UI
+                    UpdateSubmeshLabel();
+                    RebuildIslandList();
+
+                    // Show cached texture or generate full
+                    if (currentLowResTexture != null)
                     {
-                        submeshes.Add(i);
+                        shouldShowLowResUntilInteraction = true;
+                        RefreshUIFast();
+                    }
+                    else
+                    {
+                        RefreshUVMapImage();
                     }
                 }
+            });
+
+            submeshSelector.RegisterCallback<SubmeshMaskChangedEvent>(evt =>
+            {
+                Undo.RecordObject(targetMask, "Change Submesh Selection");
+                var submeshes = evt.SelectedSubmeshes;
 
                 // Ensure at least one submesh is selected
                 if (submeshes.Count == 0)
                 {
                     submeshes.Add(0);
-                    // Update mask field value
-                    maskField.SetValueWithoutNotify(1);
+                    submeshSelector.SelectedMask = 1;
                 }
 
                 targetMask.SetSelectedSubmeshes(submeshes);
-                selector.SetSelectedSubmeshes(submeshes);
+                if (selector != null)
+                {
+                    selector.SetSelectedSubmeshes(submeshes);
+                }
                 EditorUtility.SetDirty(targetMask);
-                UpdateSubmeshNavigationVisibility();
                 RefreshUI(false);
             });
 
-            submeshSelectorContainer.Add(maskField);
-            root.Add(submeshSelectorContainer);
+            submeshSection.Add(submeshSelector);
+            root.Add(submeshSection);
+
+            // Store reference for later updates
+            submeshSelectorView = submeshSelector;
         }
 
         private void CreateHighlightSettings()
         {
-            highlightSettingsContainer = CreateSection("Highlight Settings / ハイライト設定");
+            var highlightSection = CreateSection("Highlight Settings / ハイライト設定");
 
-            if (selector == null)
+            // Create HighlightSettingsView
+            var highlightSettings = new HighlightSettingsView
             {
-                noSelectorLabel = new Label("Initializing highlight settings... / ハイライト設定を初期化中...");
-                noSelectorLabel.style.color = new Color(0.7f, 0.7f, 0.7f, 1f);
-                highlightSettingsContainer.Add(noSelectorLabel);
-                root.Add(highlightSettingsContainer);
-                return;
-            }
-
-            // Highlight opacity slider
-            highlightOpacitySlider = new Slider("Highlight Opacity / ハイライト不透明度", 0f, 1f)
-            {
-                value = selector.HighlightOpacity,
-                showInputField = true
+                HighlightOpacity = selector?.HighlightOpacity ?? 0.6f
             };
-            highlightOpacitySlider.tooltip = "ハイライトの不透明度を調整します (0 = 完全に透明, 1 = 不透明)\nAdjust highlight opacity (0 = fully transparent, 1 = opaque)";
-            highlightOpacitySlider.RegisterValueChangedCallback(evt =>
+
+            // Set localized labels and tooltips
+            highlightSettings.SetOpacitySliderLabel("Highlight Opacity / ハイライト不透明度");
+            highlightSettings.SetOpacitySliderTooltip("ハイライトの不透明度を調整します (0 = 完全に透明, 1 = 不透明)\nAdjust highlight opacity (0 = fully transparent, 1 = opaque)");
+
+            // Register event handler
+            highlightSettings.RegisterCallback<HighlightOpacityChangedEvent>(evt =>
             {
                 if (selector != null)
                 {
-                    selector.HighlightOpacity = evt.newValue;
+                    selector.HighlightOpacity = evt.Opacity;
                     // Repaint scene view immediately to show opacity change
                     if (selector.HasSelectedIslands)
                     {
@@ -502,76 +585,20 @@ namespace Deform.Masking.Editor
                 }
             });
 
-            highlightSettingsContainer.Add(highlightOpacitySlider);
-            root.Add(highlightSettingsContainer);
+            highlightSection.Add(highlightSettings);
+            root.Add(highlightSection);
+
+            // Store reference for later updates
+            highlightSettingsView = highlightSettings;
         }
 
         private void CreateDisplaySettings()
         {
             var settingsContainer = CreateSection(UVIslandLocalization.Get("header_display"));
-            
-            // Adaptive vertex size
-            adaptiveVertexSizeToggle = new Toggle()
-            {
-                value = selector?.UseAdaptiveVertexSize ?? true
-            };
-            SetLocalizedContent(adaptiveVertexSizeToggle, "adaptive_vertex_size", "tooltip_adaptive_size");
-            adaptiveVertexSizeToggle.RegisterValueChangedCallback(evt =>
-            {
-                if (selector != null)
-                {
-                    selector.UseAdaptiveVertexSize = evt.newValue;
-                    vertexSizeSlider.SetEnabled(!evt.newValue);
-                    adaptiveMultiplierSlider.SetEnabled(evt.newValue);
-                    // Only repaint if there are selected islands to display
-                    if (selector.HasSelectedIslands)
-                    {
-                        SceneView.RepaintAll();
-                    }
-                }
-            });
-            
-            // Manual vertex size
-            vertexSizeSlider = new Slider("", 0.001f, 0.1f)
-            {
-                value = selector?.ManualVertexSphereSize ?? 0.01f
-            };
-            SetLocalizedContent(vertexSizeSlider, "manual_vertex_size", "tooltip_manual_size");
-            vertexSizeSlider.RegisterValueChangedCallback(evt =>
-            {
-                if (selector != null)
-                {
-                    selector.ManualVertexSphereSize = evt.newValue;
-                    // Only repaint if there are selected islands to display
-                    if (selector.HasSelectedIslands)
-                    {
-                        SceneView.RepaintAll();
-                    }
-                }
-            });
-            
-            // Adaptive multiplier
-            adaptiveMultiplierSlider = new Slider("", 0.001f, 0.02f)
-            {
-                value = selector?.AdaptiveSizeMultiplier ?? 0.007f
-            };
-            SetLocalizedContent(adaptiveMultiplierSlider, "size_multiplier", "tooltip_size_multiplier");
-            adaptiveMultiplierSlider.RegisterValueChangedCallback(evt =>
-            {
-                if (selector != null)
-                {
-                    selector.AdaptiveSizeMultiplier = evt.newValue;
-                    // Only repaint if there are selected islands to display
-                    if (selector.HasSelectedIslands)
-                    {
-                        SceneView.RepaintAll();
-                    }
-                }
-            });
-            
-            settingsContainer.Add(adaptiveVertexSizeToggle);
-            settingsContainer.Add(vertexSizeSlider);
-            settingsContainer.Add(adaptiveMultiplierSlider);
+
+            // Display settings section is now empty (adaptive vertex size removed)
+            // Will be populated with HighlightSettingsView in Phase 3
+
             root.Add(settingsContainer);
         }
         
@@ -691,9 +718,6 @@ namespace Deform.Masking.Editor
             submeshSelector.Add(nextSubmeshButton);
 
             headerContainer.Add(submeshSelector);
-
-            // Update visibility based on selection
-            UpdateSubmeshNavigationVisibility();
 
             root.Add(headerContainer);
             
@@ -1171,6 +1195,7 @@ namespace Deform.Masking.Editor
         {
             statusLabel = new Label(UVIslandLocalization.Get("status_ready"))
             {
+                name = "status-label",
                 style = {
                     fontSize = 11,
                     color = Color.gray,
@@ -1206,7 +1231,13 @@ namespace Deform.Masking.Editor
             
             return section;
         }
-        
+
+        #endregion
+
+        #region Localization and Utilities
+        // ローカリゼーションとユーティリティ
+        // Localization and utility helper methods
+
         private void SetLocalizedContent(VisualElement element, string textKey, string tooltipKey = null)
         {
             if (element is TextElement textElement)
@@ -1224,7 +1255,13 @@ namespace Deform.Masking.Editor
         {
             element.tooltip = UVIslandLocalization.Get(tooltipKey);
         }
-        
+
+        #endregion
+
+        #region UI Updates and Refresh
+        // UI更新とリフレッシュ
+        // UI update and refresh methods
+
         private void RefreshUIText()
         {
             // This would refresh all UI text when language changes
@@ -1237,8 +1274,13 @@ namespace Deform.Masking.Editor
                 parent.Add(newRoot);
             }
         }
-        
-        // Mouse event handlers (simplified versions)
+
+        #endregion
+
+        #region Mouse Event Handlers
+        // マウスイベントハンドラ
+        // Mouse event handling for UV map interaction
+
         private void OnUVMapMouseDown(MouseDownEvent evt)
         {
             if (selector == null) return;
@@ -1539,8 +1581,13 @@ namespace Deform.Masking.Editor
                 }
             }
         }
-        
-        // Helper methods
+
+        #endregion
+
+        #region Mesh and Data Access
+        // メッシュとデータアクセス
+        // Mesh and data access helper methods
+
         private Vector2 LocalPosToUV(Vector2 localPos)
         {
             if (selector == null) return Vector2.zero;
@@ -1612,8 +1659,13 @@ namespace Deform.Masking.Editor
             
             return null;
         }
-        
-        
+
+        #endregion
+
+        #region Cache Key Generation
+        // キャッシュキー生成
+        // Cache key generation methods
+
         /// <summary>
         /// Generate stable cache key with comprehensive error handling and validation
         /// 包括的エラー処理と検証機能付きの安定キャッシュキー生成
@@ -1715,7 +1767,12 @@ namespace Deform.Masking.Editor
             }
         }
         
-        // UI update methods
+        #endregion
+
+        #region Data Management
+        // データ管理
+        // Data refresh and component update methods
+
         private void RefreshData()
         {
             if (selector == null) 
@@ -1747,7 +1804,13 @@ namespace Deform.Masking.Editor
                 Debug.LogError($"[UVIslandMaskEditor] Error refreshing data: {ex}");
             }
         }
-        
+
+        #endregion
+
+        #region Async Initialization
+        // 非同期初期化
+        // Async initialization and progress monitoring
+
         /// <summary>
         /// Show placeholder message while UV map is being initialized
         /// UV マップ初期化中のプレースホルダーメッセージを表示
@@ -1774,6 +1837,133 @@ namespace Deform.Masking.Editor
                 islandListView.itemsSource = null;
                 islandListView.Rebuild();
             }
+        }
+
+        // ShowProgressUI and HideProgressUI methods removed - replaced with InitializationProgressView
+
+        /// <summary>
+        /// Monitor async initialization progress and update UI elements
+        /// 非同期初期化の進捗を監視し、UI要素を更新
+        /// </summary>
+        private void MonitorAsyncInitialization()
+        {
+            if (asyncInitManager == null || !asyncInitManager.IsRunning)
+            {
+                // Stop monitoring when initialization is not running
+                EditorApplication.update -= MonitorAsyncInitialization;
+
+                // Hide progress view when monitoring stops
+                if (progressView != null)
+                {
+                    progressView.style.display = DisplayStyle.None;
+                }
+                return;
+            }
+
+            // Update progress view with latest status
+            if (progressView != null)
+            {
+                progressView.Progress = asyncInitManager.Progress;
+                progressView.StatusMessage = asyncInitManager.StatusMessage;
+            }
+
+            // Update status label
+            if (statusLabel != null)
+            {
+                statusLabel.text = asyncInitManager.StatusMessage;
+            }
+
+            // Update UV image with incremental textures
+            if (selector != null && selector.UvMapTexture != null && uvMapImage != null)
+            {
+                uvMapImage.style.backgroundImage = new StyleBackground(selector.UvMapTexture);
+            }
+        }
+
+        /// <summary>
+        /// Callback when async initialization is completed
+        /// 非同期初期化完了時のコールバック
+        /// </summary>
+        private void OnAsyncInitializationCompleted(UVIslandSelector completedSelector)
+        {
+            Debug.Log("[UVIslandMaskEditor] OnAsyncInitializationCompleted called");
+
+            // Stop monitoring async initialization
+            EditorApplication.update -= MonitorAsyncInitialization;
+
+            // Clear async initialization flag
+            asyncInitializationInProgress = false;
+
+            if (completedSelector == null)
+            {
+                Debug.LogError("[UVIslandMaskEditor] Completion callback received null selector");
+                if (progressView != null)
+                {
+                    progressView.style.display = DisplayStyle.None;
+                }
+                if (statusLabel != null)
+                {
+                    statusLabel.text = "Initialization failed";
+                }
+                return;
+            }
+
+            Debug.Log($"[UVIslandMaskEditor] Selector initialized with {completedSelector.UVIslands?.Count ?? 0} islands");
+
+            // Step 1: Restore island selections now that UV analysis is complete
+            if (targetMask != null)
+            {
+                // Load per-submesh selections (new format)
+                if (targetMask.PerSubmeshSelections.Count > 0)
+                {
+                    Debug.Log($"[UVIslandMaskEditor] Restoring {targetMask.PerSubmeshSelections.Count} per-submesh selections");
+                    selector.SetAllSelectedIslands(targetMask.GetPerSubmeshSelections());
+                }
+                // Fallback to legacy flat list if new format is empty (backward compatibility)
+                else if (targetMask.SelectedIslandIDs.Count > 0)
+                {
+                    Debug.Log($"[UVIslandMaskEditor] Restoring {targetMask.SelectedIslandIDs.Count} legacy island selections");
+                    selector.SetSelectedIslands(targetMask.SelectedIslandIDs);
+                }
+            }
+
+            // Step 2: Update flags BEFORE UI refresh
+            textureInitialized = true;
+            isInitialized = true;
+            isLoadingFromCache = false;
+            shouldShowLowResUntilInteraction = false;
+
+            // Step 3: Re-enable auto preview
+            selector.AutoUpdatePreview = true;
+
+            // Step 4: Clear placeholder background color
+            if (uvMapImage != null)
+            {
+                uvMapImage.style.backgroundColor = StyleKeyword.Null;
+                uvMapImage.MarkDirtyRepaint();
+            }
+
+            // Step 5: Save low-res texture to cache for next reload
+            SaveLowResTextureToCache();
+
+            // Step 6: Full UI refresh to update all elements
+            Debug.Log("[UVIslandMaskEditor] Refreshing UI after initialization");
+            RefreshUI(false);
+
+            // Step 7: Update status message
+            if (statusLabel != null)
+            {
+                int islandCount = selector.UVIslands?.Count ?? 0;
+                statusLabel.text = UVIslandLocalization.Get("status_islands_found", islandCount);
+            }
+
+            // Step 8: Hide progress view LAST to ensure all UI is updated first
+            if (progressView != null)
+            {
+                progressView.style.display = DisplayStyle.None;
+            }
+
+            Debug.Log("[UVIslandMaskEditor] Async initialization completed successfully");
         }
 
         /// <summary>
@@ -1819,12 +2009,6 @@ namespace Deform.Masking.Editor
                 // Immediate UI refresh
                 RefreshUVMapImage();
 
-                // Force repaint of UV map image to ensure it displays
-                if (uvMapImage != null)
-                {
-                    uvMapImage.MarkDirtyRepaint();
-                }
-
                 if (selector?.UVIslands != null)
                 {
                     islandListView.itemsSource = selector.UVIslands;
@@ -1836,7 +2020,6 @@ namespace Deform.Masking.Editor
                 UpdateHighlightSettingsUI();
                 UpdateDisplaySettingsUI();
                 UpdateSubmeshLabel();
-                UpdateSubmeshNavigationVisibility();
 
                 UpdateStatus();
 
@@ -2012,7 +2195,13 @@ namespace Deform.Masking.Editor
                 statusLabel.text = UVIslandLocalization.Get("status_islands_found", islandCount);
             }
         }
-        
+
+        #endregion
+
+        #region Island Selection and Interaction
+        // アイランド選択とインタラクション
+        // Island selection and user interaction methods
+
         private void ClearSelection()
         {
             if (selector == null) return;
@@ -2024,8 +2213,14 @@ namespace Deform.Masking.Editor
             RefreshUI(false);
         }
         
-        
-        // Range selection methods (simplified)
+
+
+        #endregion
+
+        #region Range Selection
+        // 範囲選択
+        // Range selection methods
+
         private void StartRangeSelection(Vector2 localPos)
         {
             // Use proper coordinate transformation that accounts for zoom and pan
@@ -2115,8 +2310,13 @@ namespace Deform.Masking.Editor
             rangeSelectionOverlay.style.height = height;
             rangeSelectionOverlay.style.display = DisplayStyle.Flex;
         }
-        
-        // Magnifying glass methods (simplified)
+
+        #endregion
+
+        #region Magnifying Glass
+        // 拡大鏡
+        // Magnifying glass feature methods
+
         private void StartMagnifyingGlass(Vector2 localPos)
         {
             if (!selector.EnableMagnifyingGlass) return;
@@ -2223,28 +2423,47 @@ namespace Deform.Masking.Editor
             EditorUtility.SetDirty(targetMask);
             RefreshUIFast();
         }
-        
+
+        #endregion
+
+        #region Editor Lifecycle (continued)
+        // エディタライフサイクル（続き）
+        // Editor lifecycle callbacks
+
         private void OnEnable()
         {
             targetMask = target as UVIslandMask;
-            
+
             // Track active editor instances to prevent duplicates
             int targetID = targetMask != null ? targetMask.GetInstanceID() : 0;
+            Debug.Log($"[UVIslandMaskEditor] OnEnable called for target {targetID}, this instance: {this.GetInstanceID()}");
+
             if (targetID != 0)
             {
                 if (activeEditors.ContainsKey(targetID))
                 {
-                    // Another editor instance exists for this target, dispose the old one
+                    // Another editor instance exists for this target
                     var oldEditor = activeEditors[targetID];
+                    Debug.Log($"[UVIslandMaskEditor] Found existing editor instance: {oldEditor.GetInstanceID()}, current: {this.GetInstanceID()}, same: {oldEditor == this}");
+
                     if (oldEditor != this && oldEditor != null)
                     {
-                        //Debug.Log($"[UVIslandMaskEditor] Replacing duplicate editor instance for target {targetID}");
+                        Debug.Log($"[UVIslandMaskEditor] Cleaning up old editor instance {oldEditor.GetInstanceID()}");
                         oldEditor.CleanupEditor();
+                    }
+                    else if (oldEditor == this)
+                    {
+                        Debug.Log($"[UVIslandMaskEditor] Old editor is the same as current editor, skipping cleanup");
                     }
                 }
                 activeEditors[targetID] = this;
+                Debug.Log($"[UVIslandMaskEditor] Registered this editor instance {this.GetInstanceID()} for target {targetID}");
             }
-            
+
+            // DO NOT call CleanupEditor() here!
+            // OnDisable already handles cleanup, and calling it here would cancel
+            // async initialization that was just started in CreateInspectorGUI()
+
             Undo.undoRedoPerformed += OnUndoRedo;
             SceneView.duringSceneGui += OnSceneGUI;
         }
@@ -2256,42 +2475,66 @@ namespace Deform.Masking.Editor
         
         private void CleanupEditor()
         {
+            Debug.Log("[UVIslandMaskEditor] CleanupEditor called");
+
+            // Stop monitoring async initialization
+            EditorApplication.update -= MonitorAsyncInitialization;
+
+            // Cancel any ongoing async initialization
+            if (asyncInitManager != null && asyncInitManager.IsRunning)
+            {
+                Debug.Log("[UVIslandMaskEditor] Cancelling ongoing async initialization");
+                // Just cancel - callbacks will be cleared in the manager itself
+                asyncInitManager.Cancel();
+                asyncInitManager = null;
+            }
+
+            // Clear async initialization flag
+            asyncInitializationInProgress = false;
+
+            // DO NOT touch UI elements here - they may still be in use
+            // UI cleanup is only done in OnDestroy()
+
             // Remove from active editors tracking
             int targetID = targetMask != null ? targetMask.GetInstanceID() : 0;
             if (targetID != 0 && activeEditors.ContainsKey(targetID) && activeEditors[targetID] == this)
             {
                 activeEditors.Remove(targetID);
             }
-            
+
             // Clean up resources
             if (magnifyingGlassTexture != null)
             {
                 DestroyImmediate(magnifyingGlassTexture);
                 magnifyingGlassTexture = null;
             }
-            
+
             // Keep cached selector for reuse - only dispose when editor is destroyed
             // cachedSelector will be reused for better performance
-            
+
             Undo.undoRedoPerformed -= OnUndoRedo;
             SceneView.duringSceneGui -= OnSceneGUI;
         }
         
         private void OnDestroy()
         {
+            Debug.Log("[UVIslandMaskEditor] OnDestroy called - cleaning up all resources");
+
             // Clean up cached selector only when editor is destroyed
             if (cachedSelector != null)
             {
                 cachedSelector.Dispose();
                 cachedSelector = null;
             }
-            
+
             // Clean up current low-res texture
             if (currentLowResTexture != null)
             {
                 UnityEngine.Object.DestroyImmediate(currentLowResTexture);
                 currentLowResTexture = null;
             }
+
+            // Note: progressView is part of root VisualElement hierarchy and will be cleaned up automatically
         }
         
 		/*
@@ -2323,7 +2566,13 @@ namespace Deform.Masking.Editor
             }
 		}
 		*/
-        
+
+        #endregion
+
+        #region Cache Initialization
+        // キャッシュ初期化
+        // Cache system initialization
+
         /// <summary>
         /// Lightweight cache system initialization - called only when needed
         /// 軽量キャッシュシステム初期化 - 必要時のみ呼び出し
@@ -2383,12 +2632,18 @@ namespace Deform.Masking.Editor
                 isCacheSystemInitialized = true;
             }
         }
-        
+
+        #endregion
+
+        #region UI Updates and Refresh (continued)
+        // UI更新とリフレッシュ（続き）
+        // Additional UI update methods
+
         private void OnUndoRedo()
         {
             RefreshUI(false);
         }
-        
+
         private void SetMagnifyingZoom(float zoomLevel)
         {
             if (selector != null)
@@ -2402,19 +2657,6 @@ namespace Deform.Masking.Editor
             if (currentSubmeshLabel != null && selector != null)
             {
                 currentSubmeshLabel.text = $"Submesh {selector.CurrentPreviewSubmesh}";
-            }
-        }
-
-        private void UpdateSubmeshNavigationVisibility()
-        {
-            if (submeshSelector == null) return;
-
-            bool shouldShow = selector != null && selector.SelectedSubmeshIndices.Count > 1;
-            submeshSelector.style.display = shouldShow ? DisplayStyle.Flex : DisplayStyle.None;
-
-            if (shouldShow)
-            {
-                UpdateSubmeshLabel();
             }
         }
 
@@ -2433,66 +2675,18 @@ namespace Deform.Masking.Editor
         /// </summary>
         private void UpdateSubmeshSelectorUI()
         {
-            if (submeshSelectorContainer == null || selector == null) return;
+            if (selector == null) return;
 
-            // Remove placeholder message
-            if (noSubmeshLabel != null)
+            // Update SubmeshSelectorView with current selector values
+            if (submeshSelectorView != null)
             {
-                submeshSelectorContainer.Remove(noSubmeshLabel);
-                noSubmeshLabel = null;
+                submeshSelectorView.TotalSubmeshes = selector.SubmeshCount;
+                submeshSelectorView.CurrentSubmesh = selector.CurrentPreviewSubmesh;
+
+                // Calculate current mask from selected submeshes
+                int currentMask = SubmeshSelectorView.ListToMask(targetMask.SelectedSubmeshes);
+                submeshSelectorView.SelectedMask = currentMask;
             }
-
-            // Create submesh choice list
-            var choices = new List<string>();
-            for (int i = 0; i < selector.SubmeshCount; i++)
-            {
-                choices.Add($"Submesh {i}");
-            }
-
-            // Calculate initial mask value from selected submeshes
-            int initialMask = 0;
-            foreach (int submeshIndex in targetMask.SelectedSubmeshes)
-            {
-                if (submeshIndex < selector.SubmeshCount)
-                    initialMask |= (1 << submeshIndex);
-            }
-
-            // Create MaskField for multi-selection
-            var maskField = new MaskField("Selected Submeshes", choices, initialMask)
-            {
-                tooltip = "複数のサブメッシュを選択できます (少なくとも1つ必須)"
-            };
-
-            maskField.RegisterValueChangedCallback(evt =>
-            {
-                Undo.RecordObject(targetMask, "Change Submesh Selection");
-                var submeshes = new List<int>();
-
-                // Convert mask to list of indices
-                for (int i = 0; i < selector.SubmeshCount; i++)
-                {
-                    if ((evt.newValue & (1 << i)) != 0)
-                    {
-                        submeshes.Add(i);
-                    }
-                }
-
-                // Ensure at least one submesh is selected
-                if (submeshes.Count == 0)
-                {
-                    submeshes.Add(0);
-                    // Update mask field value
-                    maskField.SetValueWithoutNotify(1);
-                }
-
-                targetMask.SetSelectedSubmeshes(submeshes);
-                selector.SetSelectedSubmeshes(submeshes);
-                EditorUtility.SetDirty(targetMask);
-                UpdateSubmeshNavigationVisibility();
-                RefreshUI(false);
-            });
-
-            submeshSelectorContainer.Add(maskField);
         }
 
         /// <summary>
@@ -2501,43 +2695,12 @@ namespace Deform.Masking.Editor
         /// </summary>
         private void UpdateHighlightSettingsUI()
         {
-            if (highlightSettingsContainer == null || selector == null) return;
+            if (selector == null) return;
 
-            // Remove placeholder message
-            if (noSelectorLabel != null)
+            // Update HighlightSettingsView with current selector value
+            if (highlightSettingsView != null)
             {
-                highlightSettingsContainer.Remove(noSelectorLabel);
-                noSelectorLabel = null;
-            }
-
-            // Update or create highlight opacity slider
-            if (highlightOpacitySlider == null)
-            {
-                highlightOpacitySlider = new Slider("Highlight Opacity / ハイライト不透明度", 0f, 1f)
-                {
-                    value = selector.HighlightOpacity,
-                    showInputField = true
-                };
-                highlightOpacitySlider.tooltip = "ハイライトの不透明度を調整します (0 = 完全に透明, 1 = 不透明)\nAdjust highlight opacity (0 = fully transparent, 1 = opaque)";
-                highlightOpacitySlider.RegisterValueChangedCallback(evt =>
-                {
-                    if (selector != null)
-                    {
-                        selector.HighlightOpacity = evt.newValue;
-                        // Repaint scene view immediately to show opacity change
-                        if (selector.HasSelectedIslands)
-                        {
-                            SceneView.RepaintAll();
-                        }
-                    }
-                });
-
-                highlightSettingsContainer.Add(highlightOpacitySlider);
-            }
-            else
-            {
-                // Update existing slider value
-                highlightOpacitySlider.value = selector.HighlightOpacity;
+                highlightSettingsView.HighlightOpacity = selector.HighlightOpacity;
             }
         }
 
@@ -2549,21 +2712,16 @@ namespace Deform.Masking.Editor
         {
             if (selector == null) return;
 
-            // Update toggle and sliders with actual selector values
-            if (adaptiveVertexSizeToggle != null)
-            {
-                adaptiveVertexSizeToggle.value = selector.UseAdaptiveVertexSize;
-            }
-            if (vertexSizeSlider != null)
-            {
-                vertexSizeSlider.value = selector.ManualVertexSphereSize;
-            }
-            if (adaptiveMultiplierSlider != null)
-            {
-                adaptiveMultiplierSlider.value = selector.AdaptiveSizeMultiplier;
-            }
+            // Display settings UI update (adaptive vertex size removed)
+            // Will be populated with HighlightSettingsView in Phase 3
         }
-        
+
+        #endregion
+
+        #region Scene View Integration
+        // シーンビュー統合
+        // Scene view integration for 3D mesh highlighting
+
         private void OnSceneGUI(SceneView sceneView)
         {
             if (selector == null || !selector.HasSelectedIslands) return;
@@ -2591,12 +2749,25 @@ namespace Deform.Masking.Editor
             // Return the updated cached transform
             return targetMask?.CachedRendererTransform;
         }
-        
+
+        #endregion
+
+        #region Data Management (continued)
+        // データ管理（続き）
+        // User interaction and component update methods
+
         /// <summary>
         /// Centralized handler for user interactions that should trigger full-resolution mode
         /// </summary>
         private void OnUserInteraction()
         {
+            // Force async initialization to complete with full resolution
+            if (asyncInitManager != null && asyncInitManager.IsRunning)
+            {
+                asyncInitManager.ForceFullResolution();
+                return;
+            }
+
             if (shouldShowLowResUntilInteraction)
             {
                 shouldShowLowResUntilInteraction = false;
@@ -2633,6 +2804,12 @@ namespace Deform.Masking.Editor
             var vertexList = new List<int>(selector.VertexMask);
             targetMask.SetSelectedVertexIndices(vertexList);
         }
+
+        #endregion
+
+        #region Texture and Cache Operations
+        // テクスチャとキャッシュ操作
+        // Texture caching and loading operations
 
         /// <summary>
         /// Load low-resolution UV texture from robust cache system
@@ -2728,9 +2905,13 @@ namespace Deform.Masking.Editor
                 LogCacheOperation($"Exception in SaveLowResTextureToCache: {e.Message}", isError: true);
             }
         }
-        
+
+        #endregion
+
         #region Cache Management and Health Monitoring
-        
+        // キャッシュ管理とヘルスモニタリング
+        // Cache health monitoring and logging
+
         /// <summary>
         /// Log cache operations for debugging and monitoring
         /// デバッグと監視のためのキャッシュ操作ログ

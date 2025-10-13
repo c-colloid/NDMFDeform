@@ -14,13 +14,9 @@ namespace Deform.Masking.Editor
         #region Constants
         private const float MIN_ZOOM = 1f;
         private const float MAX_ZOOM = 8f;
-        private const float DEFAULT_MANUAL_VERTEX_SIZE = 0.01f;
-        private const float DEFAULT_ADAPTIVE_SIZE_MULTIPLIER = 0.007f;
         private const float DEFAULT_MAGNIFYING_GLASS_ZOOM = 8f;
         private const float DEFAULT_MAGNIFYING_GLASS_SIZE = 100f;
         private const int DEFAULT_MAX_DISPLAY_VERTICES = 1000;
-        private const float MIN_ADAPTIVE_VERTEX_SIZE = 0.001f;
-        private const float MAX_ADAPTIVE_VERTEX_SIZE = 0.05f;
         private const float UV_DISTANCE_THRESHOLD = 0.1f;
         private const float CENTER_OFFSET = -0.5f;
         private const float RECENTER_OFFSET = 0.5f;
@@ -36,6 +32,11 @@ namespace Deform.Masking.Editor
         private static readonly Color GRID_COLOR = new Color(0.3f, 0.3f, 0.3f, 1.0f);
         private static readonly Color UNSELECTED_ISLAND_COLOR = new Color(0.5f, 0.5f, 0.5f, 0.3f);
         #endregion
+
+        #region Fields
+        // フィールド定義
+        // Field declarations
+
         // Core data
         private Mesh targetMesh;
         private List<UVIslandAnalyzer.UVIsland> uvIslands = new List<UVIslandAnalyzer.UVIsland>();
@@ -47,13 +48,7 @@ namespace Deform.Masking.Editor
         private Dictionary<int, HashSet<int>> selectedIslandsPerSubmesh = new Dictionary<int, HashSet<int>>();
 
         private Texture2D uvMapTexture;
-        
-        #region Fields
         // Display settings
-        private bool useAdaptiveVertexSize = true;
-        private float manualVertexSphereSize = DEFAULT_MANUAL_VERTEX_SIZE;
-        private float adaptiveSizeMultiplier = DEFAULT_ADAPTIVE_SIZE_MULTIPLIER;
-        private float adaptiveVertexSphereSize = DEFAULT_MANUAL_VERTEX_SIZE;
         private float highlightOpacity = 0.6f; // Highlight transparency (0.0 = fully transparent, 1.0 = opaque)
         
         // UV Map preview settings
@@ -99,8 +94,11 @@ namespace Deform.Masking.Editor
         // Frustum culling optimization
         private Bounds cachedHighlightBounds;
         #endregion
-        
-        // Properties
+
+        #region Properties
+        // プロパティ
+        // Public properties for accessing internal state
+
         public List<UVIslandAnalyzer.UVIsland> UVIslands => uvIslands;
         public List<UVIslandAnalyzer.UVIsland> AllUVIslands => allUVIslands;
         public List<int> SelectedSubmeshIndices => selectedSubmeshIndices;
@@ -139,12 +137,8 @@ namespace Deform.Masking.Editor
         public Transform TargetTransform { get => targetTransform; set => targetTransform = value; }
         public int[] VertexMask => vertexMask;
         public int SubmeshCount => targetMesh?.subMeshCount ?? 0;
-        
+
         // Display properties
-        public bool UseAdaptiveVertexSize { get => useAdaptiveVertexSize; set => useAdaptiveVertexSize = value; }
-        public float ManualVertexSphereSize { get => manualVertexSphereSize; set => manualVertexSphereSize = value; }
-        public float AdaptiveSizeMultiplier { get => adaptiveSizeMultiplier; set => adaptiveSizeMultiplier = value; }
-        public float AdaptiveVertexSphereSize => useAdaptiveVertexSize ? adaptiveVertexSphereSize : manualVertexSphereSize;
         public int MaxDisplayVertices => maxDisplayVertices;
         public bool EnablePerformanceOptimization => enablePerformanceOptimization;
         public float HighlightOpacity { get => highlightOpacity; set => highlightOpacity = Mathf.Clamp01(value); }
@@ -160,7 +154,31 @@ namespace Deform.Masking.Editor
         // Selection properties
         public bool EnableRangeSelection { get => enableRangeSelection; set => enableRangeSelection = value; }
         public bool IsRangeSelecting => isRangeSelecting;
-        
+
+        #endregion
+
+        #region Initialization & Lifecycle
+        // 初期化とライフサイクル
+        // Initialization and resource management
+
+        /// <summary>
+        /// Creates a new UVIslandSelector without mesh initialization
+        /// Used for async initialization to avoid blocking
+        /// メッシュ初期化なしで新しいUVIslandSelectorを作成
+        /// 非同期初期化用（ブロッキング回避）
+        /// </summary>
+        public UVIslandSelector()
+        {
+            // Initialize only essential fields
+            selectedSubmeshIndices = new List<int> { 0 };
+            selectedIslandsPerSubmesh = new Dictionary<int, HashSet<int>>();
+            uvIslands = new List<UVIslandAnalyzer.UVIsland>();
+            allUVIslands = new List<UVIslandAnalyzer.UVIsland>();
+            triangleMaskPerSubmesh = new Dictionary<int, List<int>>();
+
+            // Do not analyze mesh - will be done asynchronously
+        }
+
         /// <summary>
         /// Creates a new UVIslandSelector with the specified mesh
         /// 指定されたメッシュで新しいUVIslandSelectorを作成
@@ -170,7 +188,13 @@ namespace Deform.Masking.Editor
         {
             SetMesh(mesh);
         }
-        
+
+        #endregion
+
+        #region Mesh Data Management
+        // メッシュデータ管理
+        // Mesh setup and UV island analysis
+
         /// <summary>
         /// Sets the target mesh and updates UV island data
         /// ターゲットメッシュを設定し、UVアイランドデータを更新
@@ -181,7 +205,6 @@ namespace Deform.Masking.Editor
             targetMesh = mesh;
             if (mesh != null)
             {
-                CalculateAdaptiveVertexSphereSize();
                 UpdateMeshData();
 
                 // Generate texture after mesh data update
@@ -190,6 +213,19 @@ namespace Deform.Masking.Editor
                     GenerateUVMapTexture();
                 }
             }
+        }
+
+        /// <summary>
+        /// Sets the target mesh without analyzing UV islands
+        /// Used for async initialization where analysis happens separately
+        /// UV解析なしでターゲットメッシュを設定
+        /// 非同期初期化用（解析は別途実行）
+        /// </summary>
+        /// <param name="mesh">The mesh to set</param>
+        public void SetMeshWithoutAnalysis(Mesh mesh)
+        {
+            targetMesh = mesh;
+            // Do NOT call UpdateMeshData() - will be done asynchronously
         }
         
         public void UpdateMeshData()
@@ -215,6 +251,54 @@ namespace Deform.Masking.Editor
             // Caller should explicitly call GenerateUVMapTexture() if needed
         }
 
+        /// <summary>
+        /// Set pre-analyzed UV islands (used by AsyncInitializationManager)
+        /// This method allows incremental island loading without re-analyzing the entire mesh
+        /// 事前解析されたUVアイランドを設定（AsyncInitializationManagerで使用）
+        /// </summary>
+        public void SetAnalyzedIslands(List<UVIslandAnalyzer.UVIsland> islands)
+        {
+            if (islands == null) return;
+
+            allUVIslands = islands;
+
+            // Initialize current preview submesh if not set
+            if (selectedSubmeshIndices != null && selectedSubmeshIndices.Count > 0 &&
+                !selectedSubmeshIndices.Contains(currentPreviewSubmesh))
+            {
+                currentPreviewSubmesh = selectedSubmeshIndices[0];
+            }
+
+            // Filter islands for current preview submesh only
+            FilterIslandsByCurrentPreviewSubmesh();
+
+            UpdateMasks();
+
+            // Mark mesh data as dirty for rendering
+            MarkMeshDataDirty();
+        }
+
+        /// <summary>
+        /// Update mesh data without re-analyzing islands (for incremental initialization)
+        /// アイランドを再解析せずにメッシュデータを更新（段階的初期化用）
+        /// </summary>
+        public void UpdateMeshDataWithoutAnalysis()
+        {
+            if (targetMesh == null) return;
+
+            // Initialize current preview submesh if not set
+            if (selectedSubmeshIndices != null && selectedSubmeshIndices.Count > 0 &&
+                !selectedSubmeshIndices.Contains(currentPreviewSubmesh))
+            {
+                currentPreviewSubmesh = selectedSubmeshIndices[0];
+            }
+
+            // Filter islands for current preview submesh only
+            FilterIslandsByCurrentPreviewSubmesh();
+
+            UpdateMasks();
+        }
+
         private void FilterIslandsBySelectedSubmeshes()
         {
             if (selectedSubmeshIndices == null || selectedSubmeshIndices.Count == 0)
@@ -236,16 +320,13 @@ namespace Deform.Masking.Editor
 
             uvIslands = allUVIslands.Where(island => island.submeshIndex == currentPreviewSubmesh).ToList();
         }
-        
-        private void CalculateAdaptiveVertexSphereSize()
-        {
-            if (targetMesh == null) return;
-            
-            var bounds = targetMesh.bounds;
-            var maxBoundsSize = Mathf.Max(bounds.size.x, bounds.size.y, bounds.size.z);
-            adaptiveVertexSphereSize = Mathf.Clamp(maxBoundsSize * adaptiveSizeMultiplier, MIN_ADAPTIVE_VERTEX_SIZE, MAX_ADAPTIVE_VERTEX_SIZE);
-        }
-        
+
+        #endregion
+
+        #region Selection Management
+        // 選択管理
+        // Island selection operations
+
         /// <summary>
         /// Toggles the selection state of a UV island in current preview submesh
         /// 現在のプレビューサブメッシュ内のUVアイランドの選択状態を切り替え
@@ -338,6 +419,12 @@ namespace Deform.Masking.Editor
             }
         }
 
+        #endregion
+
+        #region Submesh Operations
+        // サブメッシュ操作
+        // Submesh filtering and preview control
+
         public void SetSelectedSubmeshes(List<int> submeshIndices)
         {
             selectedSubmeshIndices = submeshIndices ?? new List<int> { 0 };
@@ -391,8 +478,13 @@ namespace Deform.Masking.Editor
             int prevIndex = (currentIndex - 1 + selectedSubmeshIndices.Count) % selectedSubmeshIndices.Count;
             SetPreviewSubmesh(selectedSubmeshIndices[prevIndex]);
         }
-        
-        // Range selection methods
+
+        #endregion
+
+        #region Range Selection
+        // 範囲選択
+        // Range/box selection functionality
+
         public void StartRangeSelection(Vector2 startPoint)
         {
             if (!enableRangeSelection) return;
@@ -490,8 +582,13 @@ namespace Deform.Masking.Editor
             
             return islandsInRect;
         }
-        
-        // Coordinate transformation
+
+        #endregion
+
+        #region View Transform & Navigation
+        // ビュー変換とナビゲーション
+        // Zoom, pan, and coordinate transformation
+
         public Matrix4x4 CalculateUVTransformMatrix()
         {
             var centerOffset = Matrix4x4.Translate(new Vector3(CENTER_OFFSET, CENTER_OFFSET, 0f));
@@ -540,7 +637,13 @@ namespace Deform.Masking.Editor
             uvMapZoom = newZoom;
             SetPanOffset(newOffset);
         }
-        
+
+        #endregion
+
+        #region Hit Testing & Picking
+        // ヒットテストとピッキング
+        // UV coordinate-based island selection
+
         public int GetIslandAtUVCoordinate(Vector2 uvCoord)
         {
             // Phase 1: Try exact triangle hit detection for all islands
@@ -590,7 +693,13 @@ namespace Deform.Masking.Editor
             float dy = Mathf.Max(0, Mathf.Max(bounds.min.y - point.y, point.y - bounds.max.y));
             return Mathf.Sqrt(dx * dx + dy * dy);
         }
-        
+
+        #endregion
+
+        #region Mask System
+        // マスクシステム
+        // Vertex and triangle mask management
+
         private void UpdateMasks()
         {
             if (allUVIslands.Count == 0)
@@ -728,8 +837,13 @@ namespace Deform.Masking.Editor
                 triangleMask = triangleMaskList.ToArray();
             }
         }
-        
-        // Deferred texture update
+
+        #endregion
+
+        #region Dirty Tracking & Update System
+        // ダーティトラッキングと更新システム
+        // Change detection and deferred updates
+
         private void MarkTextureForUpdate()
         {
             textureNeedsUpdate = true;
@@ -770,8 +884,13 @@ namespace Deform.Masking.Editor
                 return hash;
             }
         }
-        
-        // Simplified texture generation for preview only
+
+        #endregion
+
+        #region Texture Generation
+        // テクスチャ生成
+        // UV map and magnifying glass texture rendering
+
         public Texture2D GenerateUVMapTexture(int width = DEFAULT_TEXTURE_SIZE, int height = DEFAULT_TEXTURE_SIZE)
         {
             // Properly dispose of old texture to prevent memory leaks
@@ -875,8 +994,13 @@ namespace Deform.Masking.Editor
 
             return texture;
         }
-        
-        
+
+        #endregion
+
+        #region Scene View Rendering
+        // シーンビューレンダリング
+        // 3D scene mesh highlighting with optimized rendering
+
         /// <summary>
         /// Draw selected faces in scene view using GL with polygon offset for perfect Z-fighting prevention
         /// GLとポリゴンオフセットを使用してシーンビューで選択された面を描画（完全なZファイティング防止）
@@ -1141,7 +1265,13 @@ namespace Deform.Masking.Editor
 
             return true;
         }
-        
+
+        #endregion
+
+        #region Resource Management
+        // リソース管理
+        // Memory cleanup and disposal
+
         /// <summary>
         /// Clean up resources to prevent memory leaks
         /// </summary>
@@ -1155,5 +1285,7 @@ namespace Deform.Masking.Editor
 
             // Clean up cached render mesh
         }
+
+        #endregion
     }
 }

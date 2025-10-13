@@ -9,20 +9,30 @@ namespace Deform.Masking.Editor
     /// </summary>
     public static class UVIslandLocalization
     {
+        #region Language Definition
+        // 言語定義
+        // Language enumeration and settings
+
         public enum Language
         {
             English,
             Japanese
         }
-        
+
         private static Language currentLanguage = Language.Japanese; // デフォルトは日本語
-        
-        public static Language CurrentLanguage 
-        { 
-            get => currentLanguage; 
-            set => currentLanguage = value; 
+
+        public static Language CurrentLanguage
+        {
+            get => currentLanguage;
+            set => currentLanguage = value;
         }
-        
+
+        #endregion
+
+        #region Localized Strings
+        // ローカライズ文字列
+        // Localized text dictionary
+
         private static readonly Dictionary<string, Dictionary<Language, string>> localizedText = 
             new Dictionary<string, Dictionary<Language, string>>
         {
@@ -225,7 +235,13 @@ namespace Deform.Masking.Editor
                 [Language.Japanese] = "{0}面"
             }
         };
-        
+
+        #endregion
+
+        #region Public API
+        // 公開API
+        // Public methods for text retrieval
+
         public static string Get(string key, params object[] args)
         {
             if (localizedText.TryGetValue(key, out var translations))
@@ -246,5 +262,7 @@ namespace Deform.Masking.Editor
             var tooltip = !string.IsNullOrEmpty(tooltipKey) ? Get(tooltipKey) : "";
             return new GUIContent(text, tooltip);
         }
+
+        #endregion
     }
 }

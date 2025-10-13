@@ -8,6 +8,10 @@ using Unity.Mathematics;
 
 namespace Deform.Masking
 {
+    #region Data Structures
+    // データ構造
+    // Data structures for UV island selection
+
     /// <summary>
     /// Serializable per-submesh island selection data
     /// サブメッシュ毎のアイランド選択データ
@@ -25,6 +29,8 @@ namespace Deform.Masking
         }
     }
 
+    #endregion
+
     /// <summary>
     /// UV Island based mask for deformation
     /// UVアイランドに基づく変形マスク
@@ -33,6 +39,10 @@ namespace Deform.Masking
     [Deformer(Name = "UV Island Mask", Description = "Masks deformation based on UV island selection", Type = typeof(UVIslandMask), Category = Category.Mask)]
     public class UVIslandMask : Deformer
     {
+        #region Serialized Fields
+        // シリアライズフィールド
+        // Inspector-visible settings
+
         [Header("Mask Settings")]
         [SerializeField] private List<int> selectedSubmeshes = new List<int> { 0 };
         [SerializeField] private int currentPreviewSubmesh = 0; // Current submesh being previewed in editor
@@ -41,19 +51,30 @@ namespace Deform.Masking
         [SerializeField] private List<int> selectedVertexIndices = new List<int>(); // Direct vertex list
         [SerializeField] private bool invertMask = false;
         [SerializeField, Range(0f, 1f)] private float maskStrength = 1f;
-        
+
+        #endregion
+
+        #region Runtime Data
+        // ランタイムデータ
+        // Non-serialized runtime state
+
         // Runtime data
         [System.NonSerialized] private NativeArray<float> maskValues;
         [System.NonSerialized] private bool maskDataReady = false;
         [System.NonSerialized] private bool isDisposing = false;
 	    [System.NonSerialized] private Mesh cachedMesh;
 	    [System.NonSerialized] private Mesh originalMesh;
-        
+
         // Cached renderer for editor access
         [System.NonSerialized] private Renderer cachedRenderer;
         [System.NonSerialized] private Transform cachedRendererTransform;
-        
-        // Properties for editor access
+
+        #endregion
+
+        #region Properties
+        // プロパティ
+        // Public properties for editor access
+
         public List<int> SelectedSubmeshes => selectedSubmeshes;
         public int CurrentPreviewSubmesh { get => currentPreviewSubmesh; set => currentPreviewSubmesh = value; }
         public List<int> SelectedIslandIDs => selectedIslandIDs; // Legacy property for backward compatibility
@@ -65,8 +86,14 @@ namespace Deform.Masking
 	    public Mesh OriginalMesh => originalMesh;
 	    public Renderer CachedRenderer => cachedRenderer;
 	    public Transform CachedRendererTransform => cachedRendererTransform;
-        
+
         public override DataFlags DataFlags => DataFlags.Vertices;
+
+        #endregion
+
+        #region Deformation Processing
+        // 変形処理
+        // Main deformation processing and mask updates
         
         public override JobHandle Process(MeshData data, JobHandle dependency = default)
         {
@@ -224,7 +251,13 @@ namespace Deform.Masking
             
             maskDataReady = false;
         }
-        
+
+        #endregion
+
+        #region Public API
+        // 公開API
+        // Public methods for selection management
+
         public void SetSelectedIslands(List<int> islandIDs)
         {
             selectedIslandIDs = islandIDs ?? new List<int>();
@@ -295,8 +328,14 @@ namespace Deform.Masking
                 cachedRendererTransform = cachedRenderer?.transform;
             }
         }
+
+        #endregion
     }
-    
+
+    #region Jobs
+    // ジョブ
+    // Burst-compiled parallel jobs for performance
+
     [BurstCompile(CompileSynchronously = true)]
     public struct UVIslandMaskJob : IJobParallelFor
     {
@@ -322,4 +361,6 @@ namespace Deform.Masking
             currentVertices[index] = math.lerp(currentVertices[index], maskVertices[index], t);
         }
     }
+
+    #endregion
 }
