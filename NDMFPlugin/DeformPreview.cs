@@ -30,7 +30,7 @@ namespace MeshModifier.NDMFDeform.Preview
 			return groups.ToImmutableList();
 		}
 
-		public async Task<IRenderFilterNode> Instantiate(
+		public Task<IRenderFilterNode> Instantiate(
 			RenderGroup group,
 			IEnumerable<(Renderer, Renderer)> proxyPairs,
 			ComputeContext context)
@@ -83,7 +83,7 @@ namespace MeshModifier.NDMFDeform.Preview
 					return null;
                 
 				// ノードを作成して返す
-				return new DeformPreviewNode(deformable, originalRenderer, proxyRenderer);
+				return Task.FromResult<IRenderFilterNode>(new DeformPreviewNode(deformable, originalRenderer, proxyRenderer));
 			}
             
 			// MeshRenderer + MeshFilterの場合
@@ -96,7 +96,7 @@ namespace MeshModifier.NDMFDeform.Preview
 					return null;
 
 				// ノードを作成して返す
-				return new DeformPreviewNode(deformable, originalRenderer, proxyRenderer);
+				return Task.FromResult<IRenderFilterNode>(new DeformPreviewNode(deformable, originalRenderer, proxyRenderer));
 			}
 
 			return null;
