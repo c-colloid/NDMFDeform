@@ -71,7 +71,8 @@ namespace MeshModifier.NDMFDeform.NDMFPlugin
 			})
 				.PreviewingWith(ConfigurePreview());
 			
-			InPhase(BuildPhase.Optimizing).Run("Destroy Deformable",ctx =>{
+			//Deformableとそこに登録されているDeformerを削除
+			InPhase(BuildPhase.Optimizing).BeforePlugin("com.anatawa12.avatar-optimizer").Run("Destroy Deformable",ctx =>{
 				var target = VRChatContextExtensions.VRChatAvatarDescriptor(ctx).GetComponentsInChildren<Deformable>(true);
 				if (target is null) return;
 				var defomers = new HashSet<Deformer>();
@@ -84,7 +85,8 @@ namespace MeshModifier.NDMFDeform.NDMFPlugin
 				defomers.ToList().ForEach(d =>Object.DestroyImmediate(d?.gameObject));
 			});
 			
-			InPhase(BuildPhase.Optimizing).Run("Destroy Deformer",ctx =>{
+			//残ったDeformerを削除
+			InPhase(BuildPhase.Optimizing).BeforePlugin("com.anatawa12.avatar-optimizer").Run("Destroy Deformer",ctx =>{
 				var target = VRChatContextExtensions.VRChatAvatarDescriptor(ctx).GetComponentsInChildren<Deformer>(true);
 				if (target is null) return;
 				target.ToList().ForEach(d => Object.DestroyImmediate(d?.gameObject));
