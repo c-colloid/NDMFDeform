@@ -625,6 +625,7 @@ namespace DeformEditor.Masking
             uvMapLabel.style.flexGrow = 1;
             headerContainer.Add(uvMapLabel);
 
+	        /*
             // Submesh preview navigation - always create, control visibility
             submeshSelector = new VisualElement
             {
@@ -720,7 +721,8 @@ namespace DeformEditor.Masking
             submeshSelector.Add(currentSubmeshLabel);
             submeshSelector.Add(nextSubmeshButton);
 
-            headerContainer.Add(submeshSelector);
+	        headerContainer.Add(submeshSelector);
+	        */
 
             root.Add(headerContainer);
             
@@ -737,7 +739,8 @@ namespace DeformEditor.Masking
             
             autoUpdateToggle = new Toggle()
             {
-                value = selector?.AutoUpdatePreview ?? true
+	            value = selector?.AutoUpdatePreview ?? true,
+	            text = "Auto Update"
             };
             SetLocalizedContent(autoUpdateToggle, "auto_update", "tooltip_auto_update");
             autoUpdateToggle.RegisterValueChangedCallback(evt =>
