@@ -6,15 +6,18 @@ using UnityEditor.UIElements;
 using System.Linq;
 using System.Collections.Generic;
 using Deform.Masking.Editor.Views;
+using Deform.Masking;
+using Deform.Masking.Editor;
 
-namespace Deform.Masking.Editor
+
+namespace DeformEditor.Masking
 {
     /// <summary>
     /// Custom editor for UV Island Mask with improved UI and localization
     /// 改良されたUI・多言語化対応のUVアイランドマスクカスタムエディタ
     /// </summary>
     [CustomEditor(typeof(UVIslandMask))]
-    public class UVIslandMaskEditor : UnityEditor.Editor
+	public class UVIslandMaskEditor : DeformerEditor
 	{
         #region Fields and Constants
         private UVIslandMask targetMask;
@@ -2465,7 +2468,6 @@ namespace Deform.Masking.Editor
             // async initialization that was just started in CreateInspectorGUI()
 
             Undo.undoRedoPerformed += OnUndoRedo;
-            SceneView.duringSceneGui += OnSceneGUI;
         }
         
         private void OnDisable()
@@ -2513,7 +2515,6 @@ namespace Deform.Masking.Editor
             // cachedSelector will be reused for better performance
 
             Undo.undoRedoPerformed -= OnUndoRedo;
-            SceneView.duringSceneGui -= OnSceneGUI;
         }
         
         private void OnDestroy()
@@ -2722,8 +2723,11 @@ namespace Deform.Masking.Editor
         // シーンビュー統合
         // Scene view integration for 3D mesh highlighting
 
-        private void OnSceneGUI(SceneView sceneView)
-        {
+        private void OnSceneGUI()
+		{
+			if (target == null) return;
+			base.OnSceneGUI();
+			
             if (selector == null || !selector.HasSelectedIslands) return;
 
             // Use proper renderer transform for scene highlighting
