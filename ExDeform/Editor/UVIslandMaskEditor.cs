@@ -1588,6 +1588,8 @@ namespace DeformEditor.Masking
 
         private void OnEnable()
         {
+            base.OnEnable(); // Call parent class initialization
+
             targetMask = target as UVIslandMask;
 
             // Track active editor instances to prevent duplicates
