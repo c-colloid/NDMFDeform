@@ -149,10 +149,10 @@ namespace DeformEditor.Masking
                     RebuildIslandList();
 
                     // Show cached texture or generate full
-                    if (currentLowResTexture != null)
+                    if (false) // currentLowResTexture removed
                     {
-                        shouldShowLowResUntilInteraction = true;
-                        RefreshUIFast();
+                        // shouldShowLowResUntilInteraction = ... (removed)
+                        RefreshUI(false);
                     }
                     else
                     {
@@ -268,14 +268,14 @@ namespace DeformEditor.Masking
             prevSubmeshButton = new Button(() =>
             {
                 // Save current submesh's cache before switching
-                SaveLowResTextureToCache();
+                
 
                 // Switch to previous submesh
                 selector.PreviousPreviewSubmesh();
 
                 // Update cache key for new submesh
                 var originalMesh = GetOriginalMesh();
-                currentCacheKey = GenerateCacheKey(originalMesh, selector.CurrentPreviewSubmesh);
+                // currentCacheKey = ... (removed)
 
                 // Load new submesh's cache
                 LoadLowResTextureFromCache();
@@ -285,10 +285,10 @@ namespace DeformEditor.Masking
                 RebuildIslandList();
 
                 // Show cached low-res texture if available, otherwise generate full
-                if (currentLowResTexture != null)
+                if (false) // currentLowResTexture removed
                 {
-                    shouldShowLowResUntilInteraction = true;
-                    RefreshUIFast();
+                    // shouldShowLowResUntilInteraction = ... (removed)
+                    RefreshUI(false);
                 }
                 else
                 {
@@ -313,14 +313,14 @@ namespace DeformEditor.Masking
             nextSubmeshButton = new Button(() =>
             {
                 // Save current submesh's cache before switching
-                SaveLowResTextureToCache();
+                
 
                 // Switch to next submesh
                 selector.NextPreviewSubmesh();
 
                 // Update cache key for new submesh
                 var originalMesh = GetOriginalMesh();
-                currentCacheKey = GenerateCacheKey(originalMesh, selector.CurrentPreviewSubmesh);
+                // currentCacheKey = ... (removed)
 
                 // Load new submesh's cache
                 LoadLowResTextureFromCache();
@@ -330,10 +330,10 @@ namespace DeformEditor.Masking
                 RebuildIslandList();
 
                 // Show cached low-res texture if available, otherwise generate full
-                if (currentLowResTexture != null)
+                if (false) // currentLowResTexture removed
                 {
-                    shouldShowLowResUntilInteraction = true;
-                    RefreshUIFast();
+                    // shouldShowLowResUntilInteraction = ... (removed)
+                    RefreshUI(false);
                 }
                 else
                 {

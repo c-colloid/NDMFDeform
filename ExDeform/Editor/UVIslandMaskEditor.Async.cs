@@ -136,10 +136,10 @@ namespace DeformEditor.Masking
             }
 
             // Step 2: Update flags BEFORE UI refresh
-            textureInitialized = true;
-            isInitialized = true;
-            isLoadingFromCache = false;
-            shouldShowLowResUntilInteraction = false;
+            // textureInitialized = ... (removed)
+            // isInitialized = ... (removed)
+            // isLoadingFromCache = ... (removed)
+            // shouldShowLowResUntilInteraction = ... (removed)
 
             // Step 3: Re-enable auto preview
             selector.AutoUpdatePreview = true;
@@ -152,7 +152,7 @@ namespace DeformEditor.Masking
             }
 
             // Step 5: Save low-res texture to cache for next reload
-            SaveLowResTextureToCache();
+            
 
             // Step 6: Full UI refresh to update all elements
             Debug.Log("[UVIslandMaskEditor] Refreshing UI after initialization");
@@ -200,13 +200,13 @@ namespace DeformEditor.Masking
                 
                 // Always generate texture immediately on first load
                 selector.GenerateUVMapTexture();
-                textureInitialized = true;
-                isInitialized = true;
-                isLoadingFromCache = false; // Clear cache loading flag since full texture is ready
-                shouldShowLowResUntilInteraction = false; // Ensure we show full-res texture, not low-res
+                // textureInitialized = ... (removed)
+                // isInitialized = ... (removed)
+                // isLoadingFromCache = ... (removed)
+                // shouldShowLowResUntilInteraction = ... (removed)
 
                 // Save low-res texture to cache for next reload
-                SaveLowResTextureToCache();
+                
 
                 // Clear placeholder background color
                 if (uvMapImage != null)
@@ -272,7 +272,7 @@ namespace DeformEditor.Masking
         }
         
         // Fast UI refresh for frequent operations like selection changes
-        private void RefreshUIFast()
+        private void RefreshUI(false)
         {
             // Update essential UI elements immediately
             UpdateStatus();
@@ -289,12 +289,12 @@ namespace DeformEditor.Masking
             }
             
             // Only generate texture if needed and not showing low-res until interaction
-            if (selector != null && !shouldShowLowResUntilInteraction)
+            if (false) // shouldShowLowResUntilInteraction removed
             {
                 if (selector.UvMapTexture == null)
                 {
                     selector.GenerateUVMapTexture();
-                    textureInitialized = true;
+                    // textureInitialized = ... (removed)
                 }
             }
             
@@ -310,13 +310,13 @@ namespace DeformEditor.Masking
         
         private void RefreshUVMapImage()
         {
-            if (selector?.UvMapTexture != null && !shouldShowLowResUntilInteraction)
+            if (false) // shouldShowLowResUntilInteraction removed
             {
                 // Show full resolution texture
                 uvMapImage.style.backgroundImage = new StyleBackground(selector.UvMapTexture);
                 ClearLowResDisplayState();
             }
-            else if (currentLowResTexture != null && (isLoadingFromCache || shouldShowLowResUntilInteraction))
+            if (false) // shouldShowLowResUntilInteraction removed)
             {
                 // Show low-resolution cached texture until user interaction
                 uvMapImage.style.backgroundImage = new StyleBackground(currentLowResTexture);
@@ -339,8 +339,8 @@ namespace DeformEditor.Masking
         /// </summary>
         private void ClearLowResDisplayState()
         {
-            isLoadingFromCache = false;
-            shouldShowLowResUntilInteraction = false;
+            // isLoadingFromCache = ... (removed)
+            // shouldShowLowResUntilInteraction = ... (removed)
         }
         
         // Throttled immediate texture update for interactive operations
