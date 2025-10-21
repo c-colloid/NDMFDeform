@@ -17,14 +17,14 @@
     "autoReferenced": false,
     "defineConstraints": [
         "UNITY_EDITOR",
-        "!DefromAsset",
+        "!DeformAsset",
         "NDMF"
     ],
     "versionDefines": [
         {
             "name": "com.beans.deform",
             "expression": "",
-            "define": "DefromAsset"
+            "define": "DeformAsset"
         },
         {
             "name": "nadena.dev.ndmf",
