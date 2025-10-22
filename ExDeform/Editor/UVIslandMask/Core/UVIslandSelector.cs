@@ -1248,7 +1248,7 @@ namespace Deform.Masking.Editor
                 return true;
 
             // Use custom shader with polygon offset support
-            var shader = Shader.Find("Hidden/UVIslandHighlight");
+            var shader = Shader.Find("Hidden/ExDeform/MeshSelectionOverlay");
             if (shader == null)
             {
                 // Fallback to built-in shader
