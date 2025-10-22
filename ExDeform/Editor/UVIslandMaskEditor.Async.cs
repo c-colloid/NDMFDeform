@@ -135,32 +135,40 @@ namespace DeformEditor.Masking
             // Step 2: Re-enable auto preview
             selector.AutoUpdatePreview = true;
 
-            // Step 3: Clear placeholder background color
+            // Step 3: Generate UV map texture with selected islands highlighted
+            // CRITICAL: Must generate texture AFTER restoring selections
+            if (selector.UVIslands != null && selector.UVIslands.Count > 0)
+            {
+                Debug.Log("[UVIslandMaskEditor] Generating UV map texture with selections");
+                selector.GenerateUVMapTexture();
+            }
+
+            // Step 4: Clear placeholder background color
             if (uvMapImage != null)
             {
                 uvMapImage.style.backgroundColor = StyleKeyword.Null;
                 uvMapImage.MarkDirtyRepaint();
             }
 
-            // Step 4: Update UI elements that depend on initialized selector
+            // Step 5: Update UI elements that depend on initialized selector
             UpdateSubmeshSelectorUI();
             UpdateHighlightSettingsUI();
             UpdateDisplaySettingsUI();
             UpdateSubmeshLabel();
             RebuildIslandList();
 
-            // Step 5: Full UI refresh to update all elements
+            // Step 6: Full UI refresh to update all elements
             Debug.Log("[UVIslandMaskEditor] Refreshing UI after initialization");
             RefreshUI(false);
 
-            // Step 6: Update status message
+            // Step 7: Update status message
             if (statusLabel != null)
             {
                 int islandCount = selector.UVIslands?.Count ?? 0;
                 statusLabel.text = UVIslandLocalization.Get("status_islands_found", islandCount);
             }
 
-            // Step 7: Hide progress view LAST to ensure all UI is updated first
+            // Step 8: Hide progress view LAST to ensure all UI is updated first
             if (progressView != null)
             {
                 progressView.style.display = DisplayStyle.None;
