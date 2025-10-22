@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using UnityEngine;
 using UnityEngine.UIElements;
 using UnityEditor;
@@ -86,7 +86,7 @@ namespace DeformEditor.Masking
                     RefreshUVMapImage();
                 }
 
-                RefreshUIFast();
+                RefreshUI();
             }
             // Removed automatic pan start on left click - pan is now middle button only
         }
