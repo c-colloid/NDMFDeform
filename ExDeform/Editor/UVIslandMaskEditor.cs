@@ -863,37 +863,6 @@ namespace DeformEditor.Masking
             base.OnEnable(); // Call parent class initialization
 
             targetMask = target as UVIslandMask;
-
-            // Track active editor instances to prevent duplicates
-            int targetID = targetMask != null ? targetMask.GetInstanceID() : 0;
-            Debug.Log($"[UVIslandMaskEditor] OnEnable called for target {targetID}, this instance: {this.GetInstanceID()}");
-
-            if (targetID != 0)
-            {
-                if (activeEditors.ContainsKey(targetID))
-                {
-                    // Another editor instance exists for this target
-                    var oldEditor = activeEditors[targetID];
-                    Debug.Log($"[UVIslandMaskEditor] Found existing editor instance: {oldEditor.GetInstanceID()}, current: {this.GetInstanceID()}, same: {oldEditor == this}");
-
-                    if (oldEditor != this && oldEditor != null)
-                    {
-                        Debug.Log($"[UVIslandMaskEditor] Cleaning up old editor instance {oldEditor.GetInstanceID()}");
-                        oldEditor.CleanupEditor();
-                    }
-                    else if (oldEditor == this)
-                    {
-                        Debug.Log($"[UVIslandMaskEditor] Old editor is the same as current editor, skipping cleanup");
-                    }
-                }
-                activeEditors[targetID] = this;
-                Debug.Log($"[UVIslandMaskEditor] Registered this editor instance {this.GetInstanceID()} for target {targetID}");
-            }
-
-            // DO NOT call CleanupEditor() here!
-            // OnDisable already handles cleanup, and calling it here would cancel
-            // async initialization that was just started in CreateInspectorGUI()
-
             Undo.undoRedoPerformed += OnUndoRedo;
         }
         
