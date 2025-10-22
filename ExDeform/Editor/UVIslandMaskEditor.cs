@@ -94,128 +94,21 @@ namespace DeformEditor.Masking
         public override VisualElement CreateInspectorGUI()
         {
             targetMask = target as UVIslandMask;
-            int targetID = targetMask != null ? targetMask.GetInstanceID() : 0;
 
-            Debug.Log($"[UVIslandMaskEditor] CreateInspectorGUI called for target {targetID}, this instance: {this.GetInstanceID()}");
-
-            // CRITICAL: Register this instance IMMEDIATELY to prevent OnEnable from cleaning up wrong instance
-            // OnEnable may be called after CreateInspectorGUI, and we need to ensure it sees the correct instance
-            if (targetID != 0)
-            {
-                if (activeEditors.ContainsKey(targetID))
-                {
-                    var oldEditor = activeEditors[targetID];
-                    if (oldEditor != this && oldEditor != null)
-                    {
-                        Debug.Log($"[UVIslandMaskEditor] Replacing old editor instance {oldEditor.GetInstanceID()} with new {this.GetInstanceID()}");
-                        oldEditor.CleanupEditor();
-                    }
-                }
-                activeEditors[targetID] = this;
-                Debug.Log($"[UVIslandMaskEditor] Registered editor instance {this.GetInstanceID()} in CreateInspectorGUI");
-            }
-
-            // Log CreateInspectorGUI calls for debugging
-            LogCacheOperation($"CreateInspectorGUI called for target {targetID}, existing root: {(root != null)}, same target: {lastTargetMask == targetMask}");
-
-            // CRITICAL: Reuse UI for same instance and same target
-            // This ensures progressBar field references match the actual displayed UI elements
-            // Without this, progressBar field would point to orphaned UI elements
-            if (root != null && lastTargetMask == targetMask)
-            {
-                LogCacheOperation($"Reusing existing UI for target {targetID}");
-
-                // UI elements (including progressContainer) are reused as-is
-                // Async initialization continues with correct callback references
-
-                return root;
-            }
-
-            // If creating new UI, cancel any ongoing async initialization from previous UI
+            // Cancel any ongoing async initialization
             if (asyncInitManager != null && asyncInitManager.IsRunning)
             {
-                Debug.Log($"[UVIslandMaskEditor] Cancelling async initialization before creating new UI");
                 asyncInitManager.Cancel();
                 asyncInitManager = null;
             }
-            
-            // Lightweight cache system initialization - only when UI is created
-            InitializeCacheSystem();
-            
-            // Get original mesh for UV mapping and cache key generation
+
+            // Get original mesh for UV mapping
             var originalMesh = GetOriginalMesh();
 
-            // Generate mesh-only cache key for selector (not submesh-specific)
-            string meshCacheKey = GenerateCacheKey(originalMesh, 0); // Use submesh 0 as base key
-            if (meshCacheKey != null && meshCacheKey.EndsWith("_sm0"))
-            {
-                meshCacheKey = meshCacheKey.Substring(0, meshCacheKey.Length - 4); // Remove "_sm0" suffix
-            }
+            // Create empty selector (will be initialized asynchronously)
+            selector = new UVIslandSelector();
 
-            // Generate submesh-specific cache key for low-res texture
-            int currentSubmesh = targetMask?.CurrentPreviewSubmesh ?? 0;
-            currentCacheKey = GenerateCacheKey(originalMesh, currentSubmesh);
-
-            // Try to get selector from persistent cache first (mesh-based, not submesh-based)
-            if (meshCacheKey != null && persistentCache.TryGetValue(meshCacheKey, out var cachedSelector))
-            {
-                // Reuse cached selector with UV data
-                selector = cachedSelector;
-                selector.SetSelectedSubmeshes(targetMask.SelectedSubmeshes);
-
-                // Restore current preview submesh from saved state (without triggering texture generation)
-                bool wasAutoUpdate = selector.AutoUpdatePreview;
-                selector.AutoUpdatePreview = false;
-                selector.SetPreviewSubmesh(targetMask.CurrentPreviewSubmesh);
-                selector.AutoUpdatePreview = wasAutoUpdate;
-
-                // Load per-submesh selections (new format)
-                if (targetMask.PerSubmeshSelections.Count > 0)
-                {
-                    selector.SetAllSelectedIslands(targetMask.GetPerSubmeshSelections());
-                }
-                // Fallback to legacy flat list if new format is empty (backward compatibility)
-                else if (targetMask.SelectedIslandIDs.Count > 0)
-                {
-                    selector.SetSelectedIslands(targetMask.SelectedIslandIDs);
-                }
-
-                // Update target transform for dynamic mesh highlighting
-                selector.TargetTransform = GetRendererTransform();
-
-                // Load low-resolution cached texture for immediate display
-                LoadLowResTextureFromCache();
-
-                // Always regenerate texture for cached selector to ensure freshness
-                isInitialized = false;
-                textureInitialized = false;
-            }
-            else if (originalMesh != null)
-            {
-                // Don't create selector synchronously to avoid blocking Inspector UI (300-1000ms)
-                // Selector will be created in background via delayCall
-                selector = null;
-
-                // Try to load cached texture even without selector
-                // This allows immediate display if low-res cache is available
-                LoadLowResTextureFromCache();
-
-                isInitialized = false;
-                textureInitialized = false;
-            }
-            else
-            {
-                selector = null;
-                isInitialized = false;
-                textureInitialized = false;
-            }
-            
-            // Update references for instance-based caching (legacy)
-            cachedSelector = selector;
-            lastTargetMask = targetMask;
-            lastCachedMesh = originalMesh;
-            lastMeshInstanceID = originalMesh?.GetInstanceID() ?? -1;
-            
+            // Create UI root
             root = new VisualElement();
             root.style.paddingTop = 10;
             root.style.paddingBottom = 10;
@@ -241,31 +134,14 @@ namespace DeformEditor.Masking
             CreateIslandList();
             CreateControlButtons();
             CreateStatusArea();
-            
+
             // Register global mouse events
             root.RegisterCallback<MouseMoveEvent>(OnRootMouseMove, TrickleDown.TrickleDown);
             root.RegisterCallback<MouseUpEvent>(OnRootMouseUp, TrickleDown.TrickleDown);
-            
-            // CRITICAL: Determine initialization strategy based on MESH CACHE, not instance fields
-            // Check if we have a cached selector for this mesh (NOT whether selector field is set)
-            bool hasMeshCache = (meshCacheKey != null && persistentCache.ContainsKey(meshCacheKey));
-            bool hasLowResCache = (currentLowResTexture != null);
 
-            if (hasMeshCache && hasLowResCache)
+            // Start async initialization if we have a mesh
+            if (originalMesh != null)
             {
-                // Case 1: Both mesh and texture cache exist
-                // Show cached low-res texture immediately, no async initialization needed
-                Debug.Log($"[UVIslandMaskEditor] Using mesh cache + texture cache for {meshCacheKey}");
-                shouldShowLowResUntilInteraction = true;
-                isLoadingFromCache = true;
-                RefreshUIFast(); // Quick UI update with low-res
-            }
-            else if (hasMeshCache && !hasLowResCache)
-            {
-                // Case 2: Mesh cache exists but no texture cache
-                // Selector has UV data, but need to generate texture asynchronously
-                Debug.Log($"[UVIslandMaskEditor] Mesh cache exists but no texture cache, starting async texture generation");
-
                 // Show progress view
                 if (progressView != null)
                 {
@@ -274,72 +150,16 @@ namespace DeformEditor.Masking
                     progressView.style.display = DisplayStyle.Flex;
                 }
 
-                // Use async initialization for texture generation only (selector already has UV data)
-                asyncInitializationInProgress = true;
-                asyncInitManager = new AsyncInitializationManager();
-                asyncInitManager.StartInitialization(
-                    originalMesh,
-                    selector,
-                    OnAsyncInitializationCompleted
-                );
-
-                // Start monitoring async initialization progress
-                EditorApplication.update += MonitorAsyncInitialization;
-            }
-            else if (!hasMeshCache && originalMesh != null)
-            {
-                // Case 3: No mesh cache - need full async initialization from scratch
-                Debug.Log($"[UVIslandMaskEditor] No mesh cache, starting full async initialization");
-
-                // Show progress view
-                if (progressView != null)
-                {
-                    progressView.Progress = 0f;
-                    progressView.StatusMessage = "Initializing UV Map...";
-                    progressView.style.display = DisplayStyle.Flex;
-                }
-
-                // Create selector WITHOUT mesh initialization (empty constructor)
-                selector = new UVIslandSelector();
-                selector.AutoUpdatePreview = false; // Prevent automatic texture generation
-
-                // Set mesh without analysis - analysis will be done asynchronously
+                // Configure selector before initialization
+                selector.AutoUpdatePreview = false;
                 selector.SetMeshWithoutAnalysis(originalMesh);
-
-                // Set submesh configuration (safe before UV analysis)
                 selector.SetSelectedSubmeshes(targetMask.SelectedSubmeshes);
                 selector.SetPreviewSubmesh(targetMask.CurrentPreviewSubmesh);
                 selector.TargetTransform = GetRendererTransform();
 
-                // NOTE: Island selections will be restored in OnAsyncInitializationCompleted()
-                // after UV analysis completes, because we need the islands to exist first
-
-                // Cache the selector for future use (using mesh-based key, not submesh-based)
-                string cacheKey = GenerateCacheKey(originalMesh, 0); // Use submesh 0 as base key
-                if (cacheKey != null && cacheKey.EndsWith("_sm0"))
-                {
-                    cacheKey = cacheKey.Substring(0, cacheKey.Length - 4); // Remove "_sm0" suffix
-                }
-                if (cacheKey != null)
-                {
-                    persistentCache[cacheKey] = selector;
-                }
-
-                cachedSelector = selector;
-                lastTargetMask = targetMask;
-                lastCachedMesh = originalMesh;
-                lastMeshInstanceID = originalMesh?.GetInstanceID() ?? -1;
-
-                // Start async initialization with UV analysis and texture generation
-                asyncInitializationInProgress = true;
+                // Start async initialization
                 asyncInitManager = new AsyncInitializationManager();
-                asyncInitManager.StartInitialization(
-                    originalMesh,
-                    selector,
-                    OnAsyncInitializationCompleted
-                );
-
-                // Start monitoring async initialization progress
+                asyncInitManager.StartInitialization(originalMesh, selector, OnAsyncInitializationCompleted);
                 EditorApplication.update += MonitorAsyncInitialization;
             }
             else
@@ -350,7 +170,7 @@ namespace DeformEditor.Masking
                     statusLabel.text = "No mesh data available - please assign a mesh to the GameObject";
                 }
             }
-            
+
             return root;
         }
 
@@ -480,112 +300,6 @@ namespace DeformEditor.Masking
 
         #endregion
 
-        #region Cache Key Generation
-        // キャッシュキー生成
-        // Cache key generation methods
-
-        /// <summary>
-        /// Generate stable cache key with comprehensive error handling and validation
-        /// 包括的エラー処理と検証機能付きの安定キャッシュキー生成
-        /// </summary>
-        private string GenerateCacheKey(Mesh originalMesh, int submeshIndex)
-        {
-            if (originalMesh == null)
-            {
-                LogCacheOperation("GenerateCacheKey called with null mesh", isError: true);
-                return null;
-            }
-
-            try
-            {
-                // Use stable mesh identifiers instead of instance ID for Unity restart persistence
-                string meshName = !string.IsNullOrEmpty(originalMesh.name) ?
-                    originalMesh.name.Replace("/", "_").Replace("\\", "_") : // Sanitize for file system
-                    "unnamed_mesh";
-
-                int uvHash = CalculateUVHash(originalMesh.uv);
-                int vertexCount = originalMesh.vertexCount;
-
-                var key = $"{meshName}_{vertexCount}_{uvHash}_sm{submeshIndex}";
-
-                // Validate cache key integrity
-                if (string.IsNullOrEmpty(key) || key.Length < 3)
-                {
-                    LogCacheOperation($"Invalid cache key generated: '{key}'", isError: true);
-                    return $"fallback_{originalMesh.GetHashCode()}_sm{submeshIndex}"; // Fallback key
-                }
-
-                if (key.Length > 200) // Prevent filesystem issues
-                {
-                    LogCacheOperation($"Cache key too long ({key.Length} chars), truncating", isError: false);
-                    key = key.Substring(0, 195) + $"_sm{submeshIndex}"; // Keep submesh info
-                }
-
-                return key;
-            }
-            catch (System.Exception e)
-            {
-                LogCacheOperation($"Failed to generate cache key: {e.Message}", isError: true);
-                // Fallback to basic hash-based key
-                return $"fallback_{originalMesh.GetHashCode()}_{originalMesh.vertexCount}_sm{submeshIndex}";
-            }
-        }
-        
-        /// <summary>
-        /// Safe UV hash calculation with comprehensive error handling and performance optimization
-        /// 包括的エラー処理とパフォーマンス最適化を備えた安全なUVハッシュ計算
-        /// </summary>
-        private int CalculateUVHash(Vector2[] uvs)
-        {
-            if (uvs == null) 
-            {
-                LogCacheOperation("CalculateUVHash called with null UV array");
-                return 0;
-            }
-            
-            if (uvs.Length == 0)
-            {
-                LogCacheOperation("CalculateUVHash called with empty UV array");
-                return 1; // Return distinct value for empty array to differentiate from null
-            }
-            
-            try
-            {
-                unchecked
-                {
-                    int hash = 17;
-                    // Sample UV coordinates with performance limit to balance accuracy and speed
-                    int step = Mathf.Max(1, uvs.Length / 100);
-                    int sampleCount = 0;
-                    const int MAX_SAMPLES = 100; // Prevent excessive computation
-                    
-                    for (int i = 0; i < uvs.Length && sampleCount < MAX_SAMPLES; i += step)
-                    {
-                        // Additional safety check for corrupted UV data
-                        var uv = uvs[i];
-                        if (!float.IsNaN(uv.x) && !float.IsNaN(uv.y) && 
-                            !float.IsInfinity(uv.x) && !float.IsInfinity(uv.y))
-                        {
-                            hash = hash * 31 + uv.GetHashCode();
-                            sampleCount++;
-                        }
-                    }
-                    
-                    // Include array length in hash to distinguish different sized meshes
-                    hash = hash * 31 + uvs.Length;
-                    
-                    return hash;
-                }
-            }
-            catch (System.Exception e)
-            {
-                LogCacheOperation($"Exception in CalculateUVHash: {e.Message}", isError: true);
-                // Fallback: use array length as hash if UV data is corrupted
-                return uvs.Length.GetHashCode() + 42; // Add constant to avoid collision with length-only hashes
-            }
-        }
-        
-        #endregion
 
         #region Data Management
         // データ管理
@@ -687,7 +401,7 @@ namespace DeformEditor.Masking
             {
                 selector.GenerateUVMapTexture();
             }
-            SaveLowResTextureToCache();
+            
 
             RefreshUI(false);
         }
@@ -823,9 +537,9 @@ namespace DeformEditor.Masking
                     selector.GenerateUVMapTexture();
                     RefreshUVMapImage();
                 }
-                SaveLowResTextureToCache();
+                
 
-                RefreshUIFast();
+                RefreshUI(false);
             }
         }
         
@@ -849,7 +563,7 @@ namespace DeformEditor.Masking
 
             UpdateMaskComponent();
             EditorUtility.SetDirty(targetMask);
-            RefreshUIFast();
+            RefreshUI(false);
         }
 
         #endregion
@@ -895,103 +609,9 @@ namespace DeformEditor.Masking
             Undo.undoRedoPerformed -= OnUndoRedo;
         }
         
-		/*
-        // Clean up persistent cache when domain reloads
-        [UnityEditor.Callbacks.DidReloadScripts]
-        private static void OnScriptsReloaded()
-        {
-            // Clear persistent cache on domain reload to prevent stale data
-            if (persistentCache != null)
-            {
-                foreach (var kvp in persistentCache)
-                {
-                    kvp.Value?.Dispose();
-                }
-                persistentCache.Clear();
-            }
-            
-            // Clear low-res texture cache
-            if (lowResUVCache != null)
-            {
-                foreach (var kvp in lowResUVCache)
-                {
-                    if (kvp.Value != null)
-                    {
-                        UnityEngine.Object.DestroyImmediate(kvp.Value);
-                    }
-                }
-                lowResUVCache.Clear();
-            }
-		}
-		*/
 
         #endregion
 
-        #region Cache Initialization
-        // キャッシュ初期化
-        // Cache system initialization
-
-        /// <summary>
-        /// Lightweight cache system initialization - called only when needed
-        /// 軽量キャッシュシステム初期化 - 必要時のみ呼び出し
-        /// </summary>
-        private static void InitializeCacheSystem()
-        {
-            if (isCacheSystemInitialized) return;
-            
-            try
-            {
-                // Just set the flag - actual cache initialization happens lazily in RobustUVCache
-                isCacheSystemInitialized = true;
-            }
-            catch (System.Exception e)
-            {
-                Debug.LogError($"[UVIslandMaskEditor] Failed to initialize cache system: {e.Message}");
-            }
-        }
-        
-        // Clean up on editor shutdown
-        static UVIslandMaskEditor()
-        {
-            EditorApplication.quitting += () =>
-            {
-                // Clean up all active editors
-                if (activeEditors != null)
-                {
-                    foreach (var kvp in activeEditors)
-                    {
-                        kvp.Value?.CleanupEditor();
-                    }
-                    activeEditors.Clear();
-                }
-                
-                // Clean up persistent cache
-                if (persistentCache != null)
-                {
-                    foreach (var kvp in persistentCache)
-                    {
-                        kvp.Value?.Dispose();
-                    }
-                    persistentCache.Clear();
-                }
-            };
-        }
-        
-        /// <summary>
-        /// Lightweight cache system readiness check - no heavy operations
-        /// 軽量キャッシュシステム準備確認 - 重い操作なし
-        /// </summary>
-        private static void EnsureCacheSystemInitialized()
-        {
-            // The RobustUVCache has its own lazy initialization
-            // We don't need to do anything heavy here
-            if (!isCacheSystemInitialized)
-            {
-                isCacheSystemInitialized = true;
-            }
-        }
-
-        #endregion
 
         #region UI Updates and Refresh (continued)
         // UI更新とリフレッシュ（続き）
@@ -1126,21 +746,6 @@ namespace DeformEditor.Masking
             if (asyncInitManager != null && asyncInitManager.IsRunning)
             {
                 asyncInitManager.ForceFullResolution();
-                return;
-            }
-
-            if (shouldShowLowResUntilInteraction)
-            {
-                shouldShowLowResUntilInteraction = false;
-
-                // Generate full texture when user interacts
-                if (selector != null && selector.UvMapTexture == null)
-                {
-                    selector.GenerateUVMapTexture();
-                    textureInitialized = true;
-                }
-
-                RefreshUVMapImage();
             }
         }
 
@@ -1168,179 +773,7 @@ namespace DeformEditor.Masking
 
         #endregion
 
-        #region Texture and Cache Operations
-        // テクスチャとキャッシュ操作
-        // Texture caching and loading operations
 
-        /// <summary>
-        /// Load low-resolution UV texture from robust cache system
-        /// 堅牢なキャッシュシステムから低解像度UVテクスチャを読み込み
-        /// </summary>
-        private void LoadLowResTextureFromCache()
-        {
-            if (string.IsNullOrEmpty(currentCacheKey))
-            {
-                LogCacheOperation("LoadLowResTextureFromCache called with null cache key", isError: true);
-                return;
-            }
-            
-            try
-            {
-                // Lightweight cache system check
-                EnsureCacheSystemInitialized();
-                
-                currentLowResTexture = RobustUVCache.LoadTexture(currentCacheKey);
-                isLoadingFromCache = (currentLowResTexture != null && selector?.UvMapTexture == null);
-                
-                if (currentLowResTexture != null)
-                {
-                    LogCacheOperation($"Successfully loaded low-res texture for key: {currentCacheKey}");
-                    // Mark that we have valid cached data to display immediately
-                    shouldShowLowResUntilInteraction = true;
-                }
-                else
-                {
-                    LogCacheOperation($"No cached texture found for key: {currentCacheKey}");
-                    shouldShowLowResUntilInteraction = false;
-                }
-                
-                // Periodic cache health check
-                CheckCacheHealth();
-            }
-            catch (System.Exception e)
-            {
-                LogCacheOperation($"Failed to load cached texture: {e.Message}", isError: true);
-                currentLowResTexture = null;
-                isLoadingFromCache = false;
-                shouldShowLowResUntilInteraction = false;
-            }
-        }
-        
-        /// <summary>
-        /// Save low-resolution UV texture to robust cache system
-        /// 堅牢なキャッシュシステムに低解像度UVテクスチャを保存
-        /// </summary>
-        private void SaveLowResTextureToCache()
-        {
-            if (string.IsNullOrEmpty(currentCacheKey))
-            {
-                LogCacheOperation("SaveLowResTextureToCache called with null cache key", isError: true);
-                return;
-            }
-            
-            if (selector == null)
-            {
-                LogCacheOperation("SaveLowResTextureToCache called with null selector", isError: true);
-                return;
-            }
-
-            // Always save low-res cache regardless of selection state
-            // This ensures fast reload for both selected and unselected states
-            try
-            {
-                // Use the new method that ignores zoom/pan state for cache generation
-                var lowResTexture = selector.GenerateLowResUVMapTexture(LOW_RES_TEXTURE_SIZE, LOW_RES_TEXTURE_SIZE);
-                if (lowResTexture != null)
-                {
-                    bool saveSuccess = RobustUVCache.SaveTexture(currentCacheKey, lowResTexture);
-
-                    if (saveSuccess)
-                    {
-                        LogCacheOperation($"Successfully cached low-res texture for key: {currentCacheKey}");
-                    }
-                    else
-                    {
-                        LogCacheOperation($"Failed to cache texture for key: {currentCacheKey}", isError: true);
-                    }
-
-                    // Clean up temporary texture
-                    UnityEngine.Object.DestroyImmediate(lowResTexture);
-                }
-                else
-                {
-                    LogCacheOperation($"Failed to generate low-res texture for key: {currentCacheKey}", isError: true);
-                }
-            }
-            catch (System.Exception e)
-            {
-                LogCacheOperation($"Exception in SaveLowResTextureToCache: {e.Message}", isError: true);
-            }
-        }
-
-        #endregion
-
-        #region Cache Management and Health Monitoring
-        // キャッシュ管理とヘルスモニタリング
-        // Cache health monitoring and logging
-
-        /// <summary>
-        /// Log cache operations for debugging and monitoring
-        /// デバッグと監視のためのキャッシュ操作ログ
-        /// </summary>
-        private void LogCacheOperation(string message, bool isError = false)
-        {
-            var logMessage = $"[UVIslandCache] {message}";
-            
-            if (isError)
-            {
-                Debug.LogError(logMessage);
-            }
-            else
-            {
-                // Only log in debug mode to avoid spam
-                if (Debug.isDebugBuild)
-                {
-                    //Debug.Log(logMessage);
-                }
-            }
-        }
-        
-        /// <summary>
-        /// Periodic cache health check to ensure optimal performance
-        /// 最適なパフォーマンスを確保するための定期的キャッシュヘルスチェック
-        /// </summary>
-        private void CheckCacheHealth()
-        {
-            var now = DateTime.UtcNow;
-            if ((now - lastCacheHealthCheck).TotalHours >= CACHE_HEALTH_CHECK_INTERVAL_HOURS)
-            {
-                lastCacheHealthCheck = now;
-                
-                try
-                {
-                    var stats = RobustUVCache.GetCacheStatistics();
-                    
-                    // Log performance metrics
-                    LogCacheOperation($"Cache Health Check: {stats}");
-                    
-                    // Check for performance issues
-                    if (stats.overallHitRate < 0.5f && stats.totalHitCount + stats.totalMissCount > 10)
-                    {
-                        LogCacheOperation($"Low cache hit rate detected: {stats.overallHitRate:P1} - Consider investigating cache key generation", isError: true);
-                    }
-                    
-                    if (stats.averageReadTime > 5.0f)
-                    {
-                        LogCacheOperation($"Slow cache read performance: {stats.averageReadTime:F2}ms average - Consider cache cleanup", isError: true);
-                    }
-                    
-                    // Automatic cleanup for large caches
-                    if (stats.totalSizeBytes > 100 * 1024 * 1024) // 100MB
-                    {
-                        LogCacheOperation("Cache size exceeding 100MB, scheduling cleanup...");
-                        EditorApplication.delayCall += () => RobustUVCache.CleanupCache();
-                    }
-                }
-                catch (System.Exception e)
-                {
-                    LogCacheOperation($"Cache health check failed: {e.Message}", isError: true);
-                }
-            }
-        }
-        
-        
-        
-        #endregion
         
     }
 }
