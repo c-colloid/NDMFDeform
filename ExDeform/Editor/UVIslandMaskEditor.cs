@@ -106,7 +106,8 @@ namespace DeformEditor.Masking
 
             // Create empty selector (will be initialized asynchronously)
             selector = new UVIslandSelector();
-            
+
+            // Create UI root
             root = new VisualElement();
             root.style.paddingTop = 10;
             root.style.paddingBottom = 10;
@@ -132,7 +133,7 @@ namespace DeformEditor.Masking
             CreateIslandList();
             CreateControlButtons();
             CreateStatusArea();
-            
+
             // Register global mouse events
             root.RegisterCallback<MouseMoveEvent>(OnRootMouseMove, TrickleDown.TrickleDown);
             root.RegisterCallback<MouseUpEvent>(OnRootMouseUp, TrickleDown.TrickleDown);
@@ -604,103 +605,9 @@ namespace DeformEditor.Masking
             Undo.undoRedoPerformed -= OnUndoRedo;
         }
         
-		/*
-        // Clean up persistent cache when domain reloads
-        [UnityEditor.Callbacks.DidReloadScripts]
-        private static void OnScriptsReloaded()
-        {
-            // Clear persistent cache on domain reload to prevent stale data
-            if (persistentCache != null)
-            {
-                foreach (var kvp in persistentCache)
-                {
-                    kvp.Value?.Dispose();
-                }
-                persistentCache.Clear();
-            }
-            
-            // Clear low-res texture cache
-            if (lowResUVCache != null)
-            {
-                foreach (var kvp in lowResUVCache)
-                {
-                    if (kvp.Value != null)
-                    {
-                        UnityEngine.Object.DestroyImmediate(kvp.Value);
-                    }
-                }
-                lowResUVCache.Clear();
-            }
-		}
-		*/
 
         #endregion
 
-        #region Cache Initialization
-        // キャッシュ初期化
-        // Cache system initialization
-
-        /// <summary>
-        /// Lightweight cache system initialization - called only when needed
-        /// 軽量キャッシュシステム初期化 - 必要時のみ呼び出し
-        /// </summary>
-        private static void InitializeCacheSystem()
-        {
-            if (isCacheSystemInitialized) return;
-            
-            try
-            {
-                // Just set the flag - actual cache initialization happens lazily in RobustUVCache
-                isCacheSystemInitialized = true;
-            }
-            catch (System.Exception e)
-            {
-                Debug.LogError($"[UVIslandMaskEditor] Failed to initialize cache system: {e.Message}");
-            }
-        }
-        
-        // Clean up on editor shutdown
-        static UVIslandMaskEditor()
-        {
-            EditorApplication.quitting += () =>
-            {
-                // Clean up all active editors
-                if (activeEditors != null)
-                {
-                    foreach (var kvp in activeEditors)
-                    {
-                        kvp.Value?.CleanupEditor();
-                    }
-                    activeEditors.Clear();
-                }
-                
-                // Clean up persistent cache
-                if (persistentCache != null)
-                {
-                    foreach (var kvp in persistentCache)
-                    {
-                        kvp.Value?.Dispose();
-                    }
-                    persistentCache.Clear();
-                }
-            };
-        }
-        
-        /// <summary>
-        /// Lightweight cache system readiness check - no heavy operations
-        /// 軽量キャッシュシステム準備確認 - 重い操作なし
-        /// </summary>
-        private static void EnsureCacheSystemInitialized()
-        {
-            // The RobustUVCache has its own lazy initialization
-            // We don't need to do anything heavy here
-            if (!isCacheSystemInitialized)
-            {
-                isCacheSystemInitialized = true;
-            }
-        }
-
-        #endregion
 
         #region UI Updates and Refresh (continued)
         // UI更新とリフレッシュ（続き）
@@ -835,21 +742,6 @@ namespace DeformEditor.Masking
             if (asyncInitManager != null && asyncInitManager.IsRunning)
             {
                 asyncInitManager.ForceFullResolution();
-                return;
-            }
-
-            if (false) // shouldShowLowResUntilInteraction removed
-            {
-                // shouldShowLowResUntilInteraction = ... (removed)
-
-                // Generate full texture when user interacts
-                if (selector != null && selector.UvMapTexture == null)
-                {
-                    selector.GenerateUVMapTexture();
-                    // textureInitialized = ... (removed)
-                }
-
-                RefreshUVMapImage();
             }
         }
 
@@ -876,6 +768,8 @@ namespace DeformEditor.Masking
         }
 
         #endregion
+
+
         
     }
 }
