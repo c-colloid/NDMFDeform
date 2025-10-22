@@ -86,10 +86,7 @@ namespace DeformEditor.Masking
                     RefreshUVMapImage();
                 }
 
-                // Save low-res texture to cache after selection changes
-                
-                
-                RefreshUI(false);
+                RefreshUIFast();
             }
             // Removed automatic pan start on left click - pan is now middle button only
         }

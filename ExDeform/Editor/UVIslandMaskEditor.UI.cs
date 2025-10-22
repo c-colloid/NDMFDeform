@@ -141,23 +141,10 @@ namespace DeformEditor.Masking
                     targetMask.CurrentPreviewSubmesh = evt.NewSubmeshIndex;
                     EditorUtility.SetDirty(targetMask);
 
-                    // Load cache for new submesh
-                    LoadLowResTextureFromCache();
-
                     // Update UI
                     UpdateSubmeshLabel();
                     RebuildIslandList();
-
-                    // Show cached texture or generate full
-                    if (false) // currentLowResTexture removed
-                    {
-                        // shouldShowLowResUntilInteraction = ... (removed)
-                        RefreshUI(false);
-                    }
-                    else
-                    {
-                        RefreshUVMapImage();
-                    }
+                    RefreshUI(false);
                 }
             });
 
@@ -267,33 +254,13 @@ namespace DeformEditor.Masking
 
             prevSubmeshButton = new Button(() =>
             {
-                // Save current submesh's cache before switching
-                
-
                 // Switch to previous submesh
                 selector.PreviousPreviewSubmesh();
-
-                // Update cache key for new submesh
-                var originalMesh = GetOriginalMesh();
-                // currentCacheKey = ... (removed)
-
-                // Load new submesh's cache
-                LoadLowResTextureFromCache();
 
                 // Update UI
                 UpdateSubmeshLabel();
                 RebuildIslandList();
-
-                // Show cached low-res texture if available, otherwise generate full
-                if (false) // currentLowResTexture removed
-                {
-                    // shouldShowLowResUntilInteraction = ... (removed)
-                    RefreshUI(false);
-                }
-                else
-                {
-                    RefreshUVMapImage();
-                }
+                RefreshUI(false);
             })
             {
                 text = "◀",
@@ -312,33 +279,13 @@ namespace DeformEditor.Masking
 
             nextSubmeshButton = new Button(() =>
             {
-                // Save current submesh's cache before switching
-                
-
                 // Switch to next submesh
                 selector.NextPreviewSubmesh();
-
-                // Update cache key for new submesh
-                var originalMesh = GetOriginalMesh();
-                // currentCacheKey = ... (removed)
-
-                // Load new submesh's cache
-                LoadLowResTextureFromCache();
 
                 // Update UI
                 UpdateSubmeshLabel();
                 RebuildIslandList();
-
-                // Show cached low-res texture if available, otherwise generate full
-                if (false) // currentLowResTexture removed
-                {
-                    // shouldShowLowResUntilInteraction = ... (removed)
-                    RefreshUI(false);
-                }
-                else
-                {
-                    RefreshUVMapImage();
-                }
+                RefreshUI(false);
             })
             {
                 text = "▶",
