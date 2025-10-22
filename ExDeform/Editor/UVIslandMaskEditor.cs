@@ -60,51 +60,19 @@ namespace DeformEditor.Masking
         private Texture2D magnifyingGlassTexture;
         private bool isRangeSelecting = false;
         private bool isRangeDeselecting = false;
-        
-        // Instance-based caching to avoid serialization issues
-        private UVIslandSelector cachedSelector;
-        private UVIslandMask lastTargetMask;
-        private bool isInitialized = false;
-        private Mesh lastCachedMesh;
-        private int lastMeshInstanceID = -1;
-        
-        // Persistent cache system based on original mesh - survives Unity restart
-        private static Dictionary<string, UVIslandSelector> persistentCache = new Dictionary<string, UVIslandSelector>();
-        private string currentCacheKey;
-        
-        // Static initialization flag to ensure proper cache restoration across Unity restarts
-        private static bool isCacheSystemInitialized = false;
-        
-        // Static tracking to prevent multiple editor instances for same target
-        private static Dictionary<int, UVIslandMaskEditor> activeEditors = new Dictionary<int, UVIslandMaskEditor>();
-        
-        // Texture generation control
-        private bool textureInitialized = false;
+
+        // Texture throttling
         private float lastUpdateTime = 0f;
 		private const float TEXTURE_UPDATE_THROTTLE = 0.016f; // ~60fps limit
-        
-        // Robust caching system integration
-        private Texture2D currentLowResTexture;
-        private bool isLoadingFromCache = false;
-        private bool shouldShowLowResUntilInteraction = false; // Flag to show low-res until user interaction
-        private const int LOW_RES_TEXTURE_SIZE = 128; // Small size for quick display
-        
-        // Cache health monitoring
-        private static DateTime lastCacheHealthCheck = DateTime.MinValue;
-        private const double CACHE_HEALTH_CHECK_INTERVAL_HOURS = 1.0;
 
         // Async initialization
         private AsyncInitializationManager asyncInitManager;
         private InitializationProgressView progressView;
-        private bool asyncInitializationInProgress = false;
 
         // Custom Views
         private HighlightSettingsView highlightSettingsView;
         private SubmeshSelectorView submeshSelectorView;
         #endregion
-
-        // EditorApplication callback management
-        private EditorApplication.CallbackFunction pendingTextureUpdate;
 
         #region Editor Lifecycle
         // エディタのライフサイクル管理
