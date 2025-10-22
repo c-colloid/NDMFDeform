@@ -868,70 +868,31 @@ namespace DeformEditor.Masking
         
         private void OnDisable()
         {
-            CleanupEditor();
-        }
-        
-        private void CleanupEditor()
-        {
-            Debug.Log("[UVIslandMaskEditor] CleanupEditor called");
-
             // Stop monitoring async initialization
             EditorApplication.update -= MonitorAsyncInitialization;
 
             // Cancel any ongoing async initialization
             if (asyncInitManager != null && asyncInitManager.IsRunning)
             {
-                Debug.Log("[UVIslandMaskEditor] Cancelling ongoing async initialization");
-                // Just cancel - callbacks will be cleared in the manager itself
                 asyncInitManager.Cancel();
                 asyncInitManager = null;
             }
 
-            // Clear async initialization flag
-            asyncInitializationInProgress = false;
-
-            // DO NOT touch UI elements here - they may still be in use
-            // UI cleanup is only done in OnDestroy()
-
-            // Remove from active editors tracking
-            int targetID = targetMask != null ? targetMask.GetInstanceID() : 0;
-            if (targetID != 0 && activeEditors.ContainsKey(targetID) && activeEditors[targetID] == this)
+            // Dispose selector
+            if (selector != null)
             {
-                activeEditors.Remove(targetID);
+                selector.Dispose();
+                selector = null;
             }
 
-            // Clean up resources
+            // Clean up textures
             if (magnifyingGlassTexture != null)
             {
                 DestroyImmediate(magnifyingGlassTexture);
                 magnifyingGlassTexture = null;
             }
 
-            // Keep cached selector for reuse - only dispose when editor is destroyed
-            // cachedSelector will be reused for better performance
-
             Undo.undoRedoPerformed -= OnUndoRedo;
-        }
-        
-        private void OnDestroy()
-        {
-            Debug.Log("[UVIslandMaskEditor] OnDestroy called - cleaning up all resources");
-
-            // Clean up cached selector only when editor is destroyed
-            if (cachedSelector != null)
-            {
-                cachedSelector.Dispose();
-                cachedSelector = null;
-            }
-
-            // Clean up current low-res texture
-            if (currentLowResTexture != null)
-            {
-                UnityEngine.Object.DestroyImmediate(currentLowResTexture);
-                currentLowResTexture = null;
-            }
-
-            // Note: progressView is part of root VisualElement hierarchy and will be cleaned up automatically
         }
         
 		/*
