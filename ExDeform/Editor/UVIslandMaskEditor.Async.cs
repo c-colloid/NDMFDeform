@@ -142,18 +142,25 @@ namespace DeformEditor.Masking
                 uvMapImage.MarkDirtyRepaint();
             }
 
-            // Step 4: Full UI refresh to update all elements
+            // Step 4: Update UI elements that depend on initialized selector
+            UpdateSubmeshSelectorUI();
+            UpdateHighlightSettingsUI();
+            UpdateDisplaySettingsUI();
+            UpdateSubmeshLabel();
+            RebuildIslandList();
+
+            // Step 5: Full UI refresh to update all elements
             Debug.Log("[UVIslandMaskEditor] Refreshing UI after initialization");
             RefreshUI(false);
 
-            // Step 5: Update status message
+            // Step 6: Update status message
             if (statusLabel != null)
             {
                 int islandCount = selector.UVIslands?.Count ?? 0;
                 statusLabel.text = UVIslandLocalization.Get("status_islands_found", islandCount);
             }
 
-            // Step 6: Hide progress view LAST to ensure all UI is updated first
+            // Step 7: Hide progress view LAST to ensure all UI is updated first
             if (progressView != null)
             {
                 progressView.style.display = DisplayStyle.None;
@@ -251,40 +258,7 @@ namespace DeformEditor.Masking
                 SceneView.RepaintAll();
             }
         }
-        
-        // Fast UI refresh for frequent operations like selection changes
-        private void RefreshUI()
-        {
-            // Update essential UI elements immediately
-            UpdateStatus();
 
-            // Update list view selection state without full refresh
-            if (islandListView != null && selector?.UVIslands != null)
-            {
-                // Only refresh if needed
-                if (islandListView.itemsSource != selector.UVIslands)
-                {
-                    islandListView.itemsSource = selector.UVIslands;
-                }
-                islandListView.RefreshItems();
-            }
-
-            // Generate texture if needed
-            if (selector != null && selector.UvMapTexture == null)
-            {
-                selector.GenerateUVMapTexture();
-            }
-
-            // Refresh UV map image
-            RefreshUVMapImage();
-
-            // Only repaint scene if there are selected islands to display
-            if (selector?.HasSelectedIslands ?? false)
-            {
-                SceneView.RepaintAll();
-            }
-        }
-        
         private void RefreshUVMapImage()
         {
             if (selector?.UvMapTexture != null)

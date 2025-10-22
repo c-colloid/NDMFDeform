@@ -86,7 +86,7 @@ namespace DeformEditor.Masking
                     RefreshUVMapImage();
                 }
 
-                RefreshUI();
+                RefreshUI(false);
             }
             // Removed automatic pan start on left click - pan is now middle button only
         }
