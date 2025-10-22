@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using UnityEngine;
 using UnityEngine.UIElements;
 using UnityEditor;
@@ -272,7 +272,7 @@ namespace DeformEditor.Masking
         }
         
         // Fast UI refresh for frequent operations like selection changes
-        private void RefreshUI(false)
+        private void RefreshUI()
         {
             // Update essential UI elements immediately
             UpdateStatus();

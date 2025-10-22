@@ -174,7 +174,7 @@ namespace DeformEditor.Masking
 
         #endregion
 
-        #endregion
+
 
         #region Localization and Utilities
         // ローカリゼーションとユーティリティ
