@@ -99,9 +99,6 @@ namespace DeformEditor.Masking
             // Stop monitoring async initialization
             EditorApplication.update -= MonitorAsyncInitialization;
 
-            // Clear async initialization flag
-            asyncInitializationInProgress = false;
-
             if (completedSelector == null)
             {
                 Debug.LogError("[UVIslandMaskEditor] Completion callback received null selector");
@@ -135,37 +132,28 @@ namespace DeformEditor.Masking
                 }
             }
 
-            // Step 2: Update flags BEFORE UI refresh
-            textureInitialized = true;
-            isInitialized = true;
-            isLoadingFromCache = false;
-            shouldShowLowResUntilInteraction = false;
-
-            // Step 3: Re-enable auto preview
+            // Step 2: Re-enable auto preview
             selector.AutoUpdatePreview = true;
 
-            // Step 4: Clear placeholder background color
+            // Step 3: Clear placeholder background color
             if (uvMapImage != null)
             {
                 uvMapImage.style.backgroundColor = StyleKeyword.Null;
                 uvMapImage.MarkDirtyRepaint();
             }
 
-            // Step 5: Save low-res texture to cache for next reload
-            SaveLowResTextureToCache();
-
-            // Step 6: Full UI refresh to update all elements
+            // Step 4: Full UI refresh to update all elements
             Debug.Log("[UVIslandMaskEditor] Refreshing UI after initialization");
             RefreshUI(false);
 
-            // Step 7: Update status message
+            // Step 5: Update status message
             if (statusLabel != null)
             {
                 int islandCount = selector.UVIslands?.Count ?? 0;
                 statusLabel.text = UVIslandLocalization.Get("status_islands_found", islandCount);
             }
 
-            // Step 8: Hide progress view LAST to ensure all UI is updated first
+            // Step 6: Hide progress view LAST to ensure all UI is updated first
             if (progressView != null)
             {
                 progressView.style.display = DisplayStyle.None;
@@ -197,16 +185,9 @@ namespace DeformEditor.Masking
             {
                 // Force mesh data update
                 selector.UpdateMeshData();
-                
+
                 // Always generate texture immediately on first load
                 selector.GenerateUVMapTexture();
-                textureInitialized = true;
-                isInitialized = true;
-                isLoadingFromCache = false; // Clear cache loading flag since full texture is ready
-                shouldShowLowResUntilInteraction = false; // Ensure we show full-res texture, not low-res
-
-                // Save low-res texture to cache for next reload
-                SaveLowResTextureToCache();
 
                 // Clear placeholder background color
                 if (uvMapImage != null)
@@ -276,7 +257,7 @@ namespace DeformEditor.Masking
         {
             // Update essential UI elements immediately
             UpdateStatus();
-            
+
             // Update list view selection state without full refresh
             if (islandListView != null && selector?.UVIslands != null)
             {
@@ -287,18 +268,14 @@ namespace DeformEditor.Masking
                 }
                 islandListView.RefreshItems();
             }
-            
-            // Only generate texture if needed and not showing low-res until interaction
-            if (selector != null && !shouldShowLowResUntilInteraction)
+
+            // Generate texture if needed
+            if (selector != null && selector.UvMapTexture == null)
             {
-                if (selector.UvMapTexture == null)
-                {
-                    selector.GenerateUVMapTexture();
-                    textureInitialized = true;
-                }
+                selector.GenerateUVMapTexture();
             }
-            
-            // Always refresh image (may show low-res or full-res based on state)
+
+            // Refresh UV map image
             RefreshUVMapImage();
 
             // Only repaint scene if there are selected islands to display
@@ -310,22 +287,10 @@ namespace DeformEditor.Masking
         
         private void RefreshUVMapImage()
         {
-            if (selector?.UvMapTexture != null && !shouldShowLowResUntilInteraction)
+            if (selector?.UvMapTexture != null)
             {
-                // Show full resolution texture
+                // Show UV map texture
                 uvMapImage.style.backgroundImage = new StyleBackground(selector.UvMapTexture);
-                ClearLowResDisplayState();
-            }
-            else if (currentLowResTexture != null && (isLoadingFromCache || shouldShowLowResUntilInteraction))
-            {
-                // Show low-resolution cached texture until user interaction
-                uvMapImage.style.backgroundImage = new StyleBackground(currentLowResTexture);
-            }
-            else if (selector?.UvMapTexture != null)
-            {
-                // Fallback to full texture if low-res is not available
-                uvMapImage.style.backgroundImage = new StyleBackground(selector.UvMapTexture);
-                ClearLowResDisplayState();
             }
             else
             {
@@ -333,21 +298,12 @@ namespace DeformEditor.Masking
                 uvMapImage.style.backgroundImage = StyleKeyword.None;
             }
         }
-        
-        /// <summary>
-        /// Centralized method to clear low-res display state
-        /// </summary>
-        private void ClearLowResDisplayState()
-        {
-            isLoadingFromCache = false;
-            shouldShowLowResUntilInteraction = false;
-        }
-        
+
         // Throttled immediate texture update for interactive operations
         private void UpdateTextureWithThrottle()
         {
             if (selector == null) return;
-            
+
             float currentTime = Time.realtimeSinceStartup;
             if (currentTime - lastUpdateTime >= TEXTURE_UPDATE_THROTTLE)
             {
@@ -356,22 +312,6 @@ namespace DeformEditor.Masking
                 RefreshUVMapImage();
                 lastUpdateTime = currentTime;
             }
-            else if (pendingTextureUpdate == null)
-            {
-                // Schedule single deferred update if throttled and none pending
-                pendingTextureUpdate = () =>
-                {
-                    if (selector != null)
-                    {
-                        selector.GenerateUVMapTexture();
-                        RefreshUVMapImage();
-                        lastUpdateTime = Time.realtimeSinceStartup;
-                    }
-                    pendingTextureUpdate = null;
-                };
-                EditorApplication.delayCall += pendingTextureUpdate;
-            }
-            // If there's already a pending update, do nothing to avoid duplicates
         }
         
         private void UpdateStatus()
