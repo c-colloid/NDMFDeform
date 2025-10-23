@@ -18,123 +18,150 @@ namespace Deform.Masking.Editor
         #endregion
 
         #region Font Rendering
-        private static Font cachedFont;
-        private static int cachedFontSize = 11;
-
-        /// <summary>
-        /// Get default font for text rendering
-        /// テキストレンダリング用のデフォルトフォントを取得
-        /// </summary>
-        private static Font GetDefaultFont()
+        // Simple 5x7 bitmap font data for basic ASCII characters
+        // シンプルな5x7ビットマップフォントデータ
+        private static readonly Dictionary<char, byte[]> bitmapFont = new Dictionary<char, byte[]>()
         {
-            if (cachedFont == null)
-            {
-                cachedFont = EditorGUIUtility.Load("Fonts/Inter-Regular.ttf") as Font;
-                if (cachedFont == null)
-                {
-                    cachedFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-                }
-            }
-            return cachedFont;
-        }
+            // Numbers 0-9
+            {'0', new byte[] { 0x70, 0x88, 0x98, 0xA8, 0xC8, 0x88, 0x70 }},
+            {'1', new byte[] { 0x20, 0x60, 0x20, 0x20, 0x20, 0x20, 0x70 }},
+            {'2', new byte[] { 0x70, 0x88, 0x08, 0x10, 0x20, 0x40, 0xF8 }},
+            {'3', new byte[] { 0x70, 0x88, 0x08, 0x30, 0x08, 0x88, 0x70 }},
+            {'4', new byte[] { 0x10, 0x30, 0x50, 0x90, 0xF8, 0x10, 0x10 }},
+            {'5', new byte[] { 0xF8, 0x80, 0xF0, 0x08, 0x08, 0x88, 0x70 }},
+            {'6', new byte[] { 0x30, 0x40, 0x80, 0xF0, 0x88, 0x88, 0x70 }},
+            {'7', new byte[] { 0xF8, 0x08, 0x10, 0x20, 0x40, 0x40, 0x40 }},
+            {'8', new byte[] { 0x70, 0x88, 0x88, 0x70, 0x88, 0x88, 0x70 }},
+            {'9', new byte[] { 0x70, 0x88, 0x88, 0x78, 0x08, 0x10, 0x60 }},
+
+            // Uppercase A-Z
+            {'A', new byte[] { 0x20, 0x50, 0x88, 0x88, 0xF8, 0x88, 0x88 }},
+            {'B', new byte[] { 0xF0, 0x88, 0x88, 0xF0, 0x88, 0x88, 0xF0 }},
+            {'C', new byte[] { 0x70, 0x88, 0x80, 0x80, 0x80, 0x88, 0x70 }},
+            {'D', new byte[] { 0xF0, 0x88, 0x88, 0x88, 0x88, 0x88, 0xF0 }},
+            {'E', new byte[] { 0xF8, 0x80, 0x80, 0xF0, 0x80, 0x80, 0xF8 }},
+            {'F', new byte[] { 0xF8, 0x80, 0x80, 0xF0, 0x80, 0x80, 0x80 }},
+            {'G', new byte[] { 0x70, 0x88, 0x80, 0x98, 0x88, 0x88, 0x70 }},
+            {'H', new byte[] { 0x88, 0x88, 0x88, 0xF8, 0x88, 0x88, 0x88 }},
+            {'I', new byte[] { 0x70, 0x20, 0x20, 0x20, 0x20, 0x20, 0x70 }},
+            {'J', new byte[] { 0x38, 0x10, 0x10, 0x10, 0x10, 0x90, 0x60 }},
+            {'K', new byte[] { 0x88, 0x90, 0xA0, 0xC0, 0xA0, 0x90, 0x88 }},
+            {'L', new byte[] { 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0xF8 }},
+            {'M', new byte[] { 0x88, 0xD8, 0xA8, 0xA8, 0x88, 0x88, 0x88 }},
+            {'N', new byte[] { 0x88, 0xC8, 0xA8, 0x98, 0x88, 0x88, 0x88 }},
+            {'O', new byte[] { 0x70, 0x88, 0x88, 0x88, 0x88, 0x88, 0x70 }},
+            {'P', new byte[] { 0xF0, 0x88, 0x88, 0xF0, 0x80, 0x80, 0x80 }},
+            {'Q', new byte[] { 0x70, 0x88, 0x88, 0x88, 0xA8, 0x90, 0x68 }},
+            {'R', new byte[] { 0xF0, 0x88, 0x88, 0xF0, 0xA0, 0x90, 0x88 }},
+            {'S', new byte[] { 0x70, 0x88, 0x80, 0x70, 0x08, 0x88, 0x70 }},
+            {'T', new byte[] { 0xF8, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20 }},
+            {'U', new byte[] { 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x70 }},
+            {'V', new byte[] { 0x88, 0x88, 0x88, 0x50, 0x50, 0x20, 0x20 }},
+            {'W', new byte[] { 0x88, 0x88, 0x88, 0xA8, 0xA8, 0xD8, 0x88 }},
+            {'X', new byte[] { 0x88, 0x88, 0x50, 0x20, 0x50, 0x88, 0x88 }},
+            {'Y', new byte[] { 0x88, 0x88, 0x50, 0x20, 0x20, 0x20, 0x20 }},
+            {'Z', new byte[] { 0xF8, 0x08, 0x10, 0x20, 0x40, 0x80, 0xF8 }},
+
+            // Lowercase a-z (simplified)
+            {'a', new byte[] { 0x00, 0x00, 0x70, 0x08, 0x78, 0x88, 0x78 }},
+            {'b', new byte[] { 0x80, 0x80, 0xB0, 0xC8, 0x88, 0x88, 0xF0 }},
+            {'c', new byte[] { 0x00, 0x00, 0x70, 0x80, 0x80, 0x88, 0x70 }},
+            {'d', new byte[] { 0x08, 0x08, 0x68, 0x98, 0x88, 0x88, 0x78 }},
+            {'e', new byte[] { 0x00, 0x00, 0x70, 0x88, 0xF8, 0x80, 0x70 }},
+            {'f', new byte[] { 0x30, 0x48, 0x40, 0xE0, 0x40, 0x40, 0x40 }},
+            {'g', new byte[] { 0x00, 0x00, 0x78, 0x88, 0x88, 0x78, 0x08, 0x70 }},
+            {'h', new byte[] { 0x80, 0x80, 0xB0, 0xC8, 0x88, 0x88, 0x88 }},
+            {'i', new byte[] { 0x20, 0x00, 0x60, 0x20, 0x20, 0x20, 0x70 }},
+            {'j', new byte[] { 0x10, 0x00, 0x30, 0x10, 0x10, 0x90, 0x60 }},
+            {'k', new byte[] { 0x80, 0x80, 0x90, 0xA0, 0xC0, 0xA0, 0x90 }},
+            {'l', new byte[] { 0x60, 0x20, 0x20, 0x20, 0x20, 0x20, 0x70 }},
+            {'m', new byte[] { 0x00, 0x00, 0xD0, 0xA8, 0xA8, 0x88, 0x88 }},
+            {'n', new byte[] { 0x00, 0x00, 0xB0, 0xC8, 0x88, 0x88, 0x88 }},
+            {'o', new byte[] { 0x00, 0x00, 0x70, 0x88, 0x88, 0x88, 0x70 }},
+            {'p', new byte[] { 0x00, 0x00, 0xF0, 0x88, 0x88, 0xF0, 0x80, 0x80 }},
+            {'q', new byte[] { 0x00, 0x00, 0x78, 0x88, 0x88, 0x78, 0x08, 0x08 }},
+            {'r', new byte[] { 0x00, 0x00, 0xB0, 0xC8, 0x80, 0x80, 0x80 }},
+            {'s', new byte[] { 0x00, 0x00, 0x78, 0x80, 0x70, 0x08, 0xF0 }},
+            {'t', new byte[] { 0x40, 0x40, 0xE0, 0x40, 0x40, 0x48, 0x30 }},
+            {'u', new byte[] { 0x00, 0x00, 0x88, 0x88, 0x88, 0x98, 0x68 }},
+            {'v', new byte[] { 0x00, 0x00, 0x88, 0x88, 0x50, 0x50, 0x20 }},
+            {'w', new byte[] { 0x00, 0x00, 0x88, 0x88, 0xA8, 0xA8, 0x50 }},
+            {'x', new byte[] { 0x00, 0x00, 0x88, 0x50, 0x20, 0x50, 0x88 }},
+            {'y', new byte[] { 0x00, 0x00, 0x88, 0x88, 0x78, 0x08, 0x70 }},
+            {'z', new byte[] { 0x00, 0x00, 0xF8, 0x10, 0x20, 0x40, 0xF8 }},
+
+            // Special characters
+            {' ', new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }},
+            {'-', new byte[] { 0x00, 0x00, 0x00, 0xF8, 0x00, 0x00, 0x00 }},
+            {'_', new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF8 }},
+            {'.', new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x60, 0x60 }},
+            {',', new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x60, 0x20, 0x40 }},
+        };
 
         /// <summary>
-        /// Draw text on the pixel array at specified position
-        /// 指定位置にピクセル配列上でテキストを描画
+        /// Draw text using simple bitmap font
+        /// シンプルなビットマップフォントでテキストを描画
         /// </summary>
         public static void DrawText(string text, Vector2 position, Color[] pixels, int width, int height,
-            Color textColor, Color shadowColor, int fontSize = 11)
+            Color textColor, Color shadowColor, int scale = 1)
         {
             if (string.IsNullOrEmpty(text)) return;
-
-            Font font = GetDefaultFont();
-            if (font == null) return;
-
-            // Request characters in texture
-            font.RequestCharactersInTexture(text, fontSize, FontStyle.Bold);
 
             int x = Mathf.RoundToInt(position.x);
             int y = Mathf.RoundToInt(position.y);
 
             // Calculate text width for centering
-            int totalWidth = 0;
-            foreach (char c in text)
-            {
-                CharacterInfo charInfo;
-                if (font.GetCharacterInfo(c, out charInfo, fontSize, FontStyle.Bold))
-                {
-                    totalWidth += charInfo.advance;
-                }
-            }
-
+            int charWidth = 6 * scale; // 5 pixels + 1 spacing
+            int totalWidth = text.Length * charWidth;
             int startX = x - totalWidth / 2;
             int currentX = startX;
 
-            // Draw each character
             foreach (char c in text)
             {
-                CharacterInfo charInfo;
-                if (font.GetCharacterInfo(c, out charInfo, fontSize, FontStyle.Bold))
+                char upperChar = char.ToUpper(c);
+                if (bitmapFont.ContainsKey(upperChar))
                 {
                     // Draw shadow first (offset by 1 pixel)
-                    DrawCharacter(charInfo, currentX + 1, y + 1, pixels, width, height, shadowColor, font, fontSize);
+                    DrawBitmapChar(bitmapFont[upperChar], currentX + 1, y + 1, pixels, width, height, shadowColor, scale);
 
                     // Draw main character
-                    DrawCharacter(charInfo, currentX, y, pixels, width, height, textColor, font, fontSize);
-
-                    currentX += charInfo.advance;
+                    DrawBitmapChar(bitmapFont[upperChar], currentX, y, pixels, width, height, textColor, scale);
                 }
+                currentX += charWidth;
             }
         }
 
         /// <summary>
-        /// Draw a single character on the pixel array
-        /// ピクセル配列上に単一文字を描画
+        /// Draw a single bitmap character
+        /// ビットマップ文字を1文字描画
         /// </summary>
-        private static void DrawCharacter(CharacterInfo charInfo, int x, int y, Color[] pixels, int width, int height,
-            Color color, Font font, int fontSize)
+        private static void DrawBitmapChar(byte[] charData, int x, int y, Color[] pixels, int width, int height,
+            Color color, int scale)
         {
-            Texture2D fontTexture = font.material.mainTexture as Texture2D;
-            if (fontTexture == null) return;
-
-            // Get UV coordinates from character info
-            float uvWidth = charInfo.uvTopRight.x - charInfo.uvTopLeft.x;
-            float uvHeight = charInfo.uvBottomLeft.y - charInfo.uvTopLeft.y;
-	        Rect uvRect = new Rect(charInfo.uvTopLeft.x,charInfo.uvTopLeft.y,uvWidth,uvHeight);
-
-            int charWidth = charInfo.glyphWidth;
-            int charHeight = charInfo.glyphHeight;
-
-            // Adjust position based on bearing
-            int drawX = x + charInfo.minX;
-            int drawY = y - charInfo.maxY; // Flip Y coordinate
-
-            // Draw character pixels
-            for (int py = 0; py < charHeight; py++)
+            for (int row = 0; row < charData.Length && row < 8; row++)
             {
-                for (int px = 0; px < charWidth; px++)
+                byte rowData = charData[row];
+                for (int col = 0; col < 8; col++)
                 {
-                    int pixelX = drawX + px;
-                    int pixelY = drawY + py;
-
-                    if (pixelX < 0 || pixelX >= width || pixelY < 0 || pixelY >= height)
-                        continue;
-
-                    // Calculate UV coordinates
-                    float u = uvRect.x + (px / (float)charWidth) * uvWidth;
-                    float v = uvRect.y + (py / (float)charHeight) * uvHeight;
-
-                    // Sample font texture
-                    Color fontPixel = fontTexture.GetPixelBilinear(u, v);
-
-                    // Use alpha for blending
-                    if (fontPixel.a > 0.1f)
+                    if ((rowData & (1 << (7 - col))) != 0)
                     {
-                        int index = pixelY * width + pixelX;
-                        if (index >= 0 && index < pixels.Length)
+                        // Draw scaled pixel
+                        for (int sy = 0; sy < scale; sy++)
                         {
-                            Color blendColor = new Color(color.r, color.g, color.b, fontPixel.a);
-                            pixels[index] = Color.Lerp(pixels[index], blendColor, fontPixel.a);
+                            for (int sx = 0; sx < scale; sx++)
+                            {
+                                int pixelX = x + col * scale + sx;
+                                int pixelY = y + row * scale + sy;
+
+                                if (pixelX >= 0 && pixelX < width && pixelY >= 0 && pixelY < height)
+                                {
+                                    int index = pixelY * width + pixelX;
+                                    if (index >= 0 && index < pixels.Length)
+                                    {
+                                        pixels[index] = Color.Lerp(pixels[index], color, 0.9f);
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -172,9 +199,9 @@ namespace Deform.Masking.Editor
                 if (x < 0 || x >= width || y < 0 || y >= height)
                     continue;
 
-                // Draw text with shadow
+                // Draw text with shadow (scale=1 for compact text)
                 DrawText(displayName, new Vector2(x, y), pixels, width, height,
-                    Color.white, Color.black, cachedFontSize);
+                    Color.white, Color.black, 1);
             }
         }
         #endregion
