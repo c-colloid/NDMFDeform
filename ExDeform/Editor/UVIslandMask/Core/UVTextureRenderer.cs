@@ -32,7 +32,7 @@ namespace Deform.Masking.Editor
                 cachedFont = EditorGUIUtility.Load("Fonts/Inter-Regular.ttf") as Font;
                 if (cachedFont == null)
                 {
-                    cachedFont = Resources.GetBuiltinResource<Font>("Arial.ttf");
+                    cachedFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
                 }
             }
             return cachedFont;
