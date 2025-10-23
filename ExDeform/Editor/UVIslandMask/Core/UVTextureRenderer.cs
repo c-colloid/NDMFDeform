@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 using UnityEditor;
 
@@ -98,9 +98,9 @@ namespace Deform.Masking.Editor
             if (fontTexture == null) return;
 
             // Get UV coordinates from character info
-            Rect uvRect = charInfo.uvTopLeft;
             float uvWidth = charInfo.uvTopRight.x - charInfo.uvTopLeft.x;
             float uvHeight = charInfo.uvBottomLeft.y - charInfo.uvTopLeft.y;
+	        Rect uvRect = new Rect(charInfo.uvTopLeft.x,charInfo.uvTopLeft.y,uvWidth,uvHeight);
 
             int charWidth = charInfo.glyphWidth;
             int charHeight = charInfo.glyphHeight;
