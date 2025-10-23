@@ -274,15 +274,20 @@ namespace DeformEditor.Masking
             zoomSlider = new Slider("ズーム", 1f, 8f)
             {
                 value = selector?.UvMapZoom ?? 1f,
-                style = { flexGrow = 1, marginRight = 10, width = 100 }
+                style = { flexGrow = 1, marginRight = 10, width = 120 }
             };
             zoomSlider.tooltip = "UVマッププレビューのズームレベル（1倍 = 通常、8倍 = 最大）";
-            zoomSlider.style.width = 100;
+
+            // Update slider label to show current zoom value
+            UpdateZoomSliderLabel();
+
             zoomSlider.RegisterValueChangedCallback(evt =>
             {
                 if (selector != null)
                 {
-                    selector.SetZoomLevel(evt.newValue);
+                    // Use center point for zoom when using slider
+                    selector.SetZoomLevelAroundCenter(evt.newValue);
+                    UpdateZoomSliderLabel();
                     UpdateTextureWithThrottle(); // Always update with throttling
                 }
             });
@@ -293,6 +298,7 @@ namespace DeformEditor.Masking
                 {
                     selector.ResetViewTransform();
                     zoomSlider.value = 1f;
+                    UpdateZoomSliderLabel();
                     selector.GenerateUVMapTexture(); // Always update immediately for reset button
                     RefreshUVMapImage();
                 }

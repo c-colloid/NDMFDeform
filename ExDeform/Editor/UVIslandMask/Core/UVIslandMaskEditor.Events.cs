@@ -180,6 +180,7 @@ namespace DeformEditor.Masking
             
             selector.ZoomAtPoint(zoomPoint, zoomDelta);
             zoomSlider.value = selector.UvMapZoom;
+            UpdateZoomSliderLabel();
 
             // Always update with throttling for immediate feedback
             UpdateTextureWithThrottle();
