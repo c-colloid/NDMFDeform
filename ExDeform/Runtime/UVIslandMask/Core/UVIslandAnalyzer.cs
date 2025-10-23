@@ -58,6 +58,7 @@ namespace Deform.Masking
             public List<Vector2> uvCoordinates = new List<Vector2>();
             public Bounds uvBounds;
             public Color maskColor = Color.red;
+            public string customName = ""; // Custom user-defined name for this island
             public int faceCount => triangleIndices.Count;
         }
 

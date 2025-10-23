@@ -29,6 +29,25 @@ namespace Deform.Masking
         }
     }
 
+    /// <summary>
+    /// Serializable island custom name entry
+    /// アイランドのカスタム名エントリ
+    /// </summary>
+    [System.Serializable]
+    public class IslandNameEntry
+    {
+        public int islandID;
+        public int submeshIndex;
+        public string customName;
+
+        public IslandNameEntry(int islandID, int submeshIndex, string customName)
+        {
+            this.islandID = islandID;
+            this.submeshIndex = submeshIndex;
+            this.customName = customName ?? "";
+        }
+    }
+
     #endregion
 
     /// <summary>
@@ -51,6 +70,7 @@ namespace Deform.Masking
         [SerializeField] private List<int> selectedVertexIndices = new List<int>(); // Direct vertex list
         [SerializeField] private bool invertMask = false;
         [SerializeField, Range(0f, 1f)] private float maskStrength = 1f;
+        [SerializeField] private List<IslandNameEntry> islandCustomNames = new List<IslandNameEntry>(); // Custom names for UV islands
 
         #endregion
 
@@ -327,6 +347,42 @@ namespace Deform.Masking
                 cachedRenderer = deformable.GetRenderer();
                 cachedRendererTransform = cachedRenderer?.transform;
             }
+        }
+
+        /// <summary>
+        /// Get custom name for a specific island
+        /// 特定のアイランドのカスタム名を取得
+        /// </summary>
+        public string GetIslandCustomName(int islandID, int submeshIndex)
+        {
+            var entry = islandCustomNames.Find(e => e.islandID == islandID && e.submeshIndex == submeshIndex);
+            return entry?.customName ?? "";
+        }
+
+        /// <summary>
+        /// Set custom name for a specific island
+        /// 特定のアイランドのカスタム名を設定
+        /// </summary>
+        public void SetIslandCustomName(int islandID, int submeshIndex, string customName)
+        {
+            var entry = islandCustomNames.Find(e => e.islandID == islandID && e.submeshIndex == submeshIndex);
+            if (entry != null)
+            {
+                entry.customName = customName ?? "";
+            }
+            else
+            {
+                islandCustomNames.Add(new IslandNameEntry(islandID, submeshIndex, customName));
+            }
+        }
+
+        /// <summary>
+        /// Clear all custom island names
+        /// すべてのアイランドのカスタム名をクリア
+        /// </summary>
+        public void ClearIslandCustomNames()
+        {
+            islandCustomNames.Clear();
         }
 
         #endregion

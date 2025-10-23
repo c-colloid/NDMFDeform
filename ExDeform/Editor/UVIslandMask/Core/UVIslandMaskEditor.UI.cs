@@ -291,7 +291,24 @@ namespace DeformEditor.Masking
                     UpdateTextureWithThrottle(); // Always update with throttling
                 }
             });
-            
+
+            // Show island names toggle
+            var showNamesToggle = new Toggle("名前表示")
+            {
+                value = selector?.ShowIslandNames ?? false,
+                style = { marginLeft = 15, marginRight = 10 }
+            };
+            showNamesToggle.tooltip = "UVマップ上にアイランド名を表示";
+            showNamesToggle.RegisterValueChangedCallback(evt =>
+            {
+                if (selector != null)
+                {
+                    selector.ShowIslandNames = evt.newValue;
+                    selector.GenerateUVMapTexture();
+                    RefreshUVMapImage();
+                }
+            });
+
             resetZoomButton = new Button(() =>
             {
                 if (selector != null)
@@ -309,6 +326,7 @@ namespace DeformEditor.Masking
             };
 
             previewSettings.Add(zoomSlider);
+            previewSettings.Add(showNamesToggle);
             previewSettings.Add(resetZoomButton);
             root.Add(previewSettings);
             
@@ -507,15 +525,23 @@ namespace DeformEditor.Masking
             var container = new VisualElement
             {
                 style = {
-                    flexDirection = FlexDirection.Row,
-                    alignItems = Align.Center,
+                    flexDirection = FlexDirection.Column,
                     paddingLeft = 5,
                     paddingRight = 5,
                     paddingTop = 3,
                     paddingBottom = 3
                 }
             };
-            
+
+            // Top row: color box, ID label, and details
+            var topRow = new VisualElement
+            {
+                style = {
+                    flexDirection = FlexDirection.Row,
+                    alignItems = Align.Center
+                }
+            };
+
             var colorBox = new VisualElement
             {
                 style = {
@@ -525,7 +551,7 @@ namespace DeformEditor.Masking
                     backgroundColor = Color.gray
                 }
             };
-            
+
             var label = new Label
             {
                 style = {
@@ -533,14 +559,14 @@ namespace DeformEditor.Masking
                     fontSize = 12
                 }
             };
-            
+
             var detailsContainer = new VisualElement
             {
                 style = {
                     alignItems = Align.FlexEnd
                 }
             };
-            
+
             var vertexCountLabel = new Label
             {
                 style = {
@@ -548,7 +574,7 @@ namespace DeformEditor.Masking
                     fontSize = 10
                 }
             };
-            
+
             var faceCountLabel = new Label
             {
                 style = {
@@ -556,14 +582,57 @@ namespace DeformEditor.Masking
                     fontSize = 10
                 }
             };
-            
+
             detailsContainer.Add(vertexCountLabel);
             detailsContainer.Add(faceCountLabel);
-            
-            container.Add(colorBox);
-            container.Add(label);
-            container.Add(detailsContainer);
-            
+
+            topRow.Add(colorBox);
+            topRow.Add(label);
+            topRow.Add(detailsContainer);
+
+            // Bottom row: name text field
+            var nameField = new TextField
+            {
+                style = {
+                    fontSize = 11,
+                    marginTop = 2,
+                    marginLeft = 24
+                }
+            };
+            nameField.RegisterValueChangedCallback(evt =>
+            {
+                // Store island ID and submesh index in user data for later retrieval
+                var islandData = nameField.userData as (int islandID, int submeshIndex)?;
+                if (islandData.HasValue && targetMask != null)
+                {
+                    Undo.RecordObject(targetMask, "Change Island Name");
+                    targetMask.SetIslandCustomName(islandData.Value.islandID, islandData.Value.submeshIndex, evt.newValue);
+                    EditorUtility.SetDirty(targetMask);
+
+                    // Update island's custom name in selector's live list
+                    if (selector?.UVIslands != null)
+                    {
+                        var island = selector.UVIslands.Find(i =>
+                            i.islandID == islandData.Value.islandID &&
+                            i.submeshIndex == islandData.Value.submeshIndex);
+                        if (island != null)
+                        {
+                            island.customName = evt.newValue;
+                        }
+                    }
+
+                    // Request UV map texture update if names are being displayed
+                    if (selector != null && selector.ShowIslandNames)
+                    {
+                        selector.GenerateUVMapTexture();
+                        RefreshUVMapImage();
+                    }
+                }
+            });
+
+            container.Add(topRow);
+            container.Add(nameField);
+
             return container;
         }
         
@@ -573,9 +642,12 @@ namespace DeformEditor.Masking
             {
                 var island = selector.UVIslands[index];
                 var container = element;
-                var colorBox = container[0];
-                var label = container[1] as Label;
-                var detailsContainer = container[2];
+                var topRow = container[0];
+                var nameField = container[1] as TextField;
+
+                var colorBox = topRow[0];
+                var label = topRow[1] as Label;
+                var detailsContainer = topRow[2];
                 var vertexCountLabel = detailsContainer[0] as Label;
                 var faceCountLabel = detailsContainer[1] as Label;
 
@@ -583,6 +655,34 @@ namespace DeformEditor.Masking
                 label.text = $"Island {island.islandID} (SM{island.submeshIndex})";
                 vertexCountLabel.text = $"{island.vertexIndices.Count}頂点";
                 faceCountLabel.text = $"{island.faceCount}面";
+
+                // Load and display custom name
+                string customName = targetMask?.GetIslandCustomName(island.islandID, island.submeshIndex) ?? "";
+                if (string.IsNullOrEmpty(customName))
+                {
+                    customName = island.customName; // Fallback to island's own custom name if mask doesn't have one
+                }
+
+                // Update the island's customName field to keep in sync
+                island.customName = customName;
+
+                // Set the text field value and placeholder
+                if (nameField != null)
+                {
+                    nameField.SetValueWithoutNotify(customName);
+                    nameField.userData = (island.islandID, island.submeshIndex);
+
+                    // Set placeholder text
+                    if (string.IsNullOrEmpty(customName))
+                    {
+                        var textInput = nameField.Q(className: "unity-text-field__input");
+                        if (textInput != null)
+                        {
+                            textInput.style.unityFontStyleAndWeight = FontStyle.Italic;
+                            textInput.style.color = new Color(0.7f, 0.7f, 0.7f, 0.5f);
+                        }
+                    }
+                }
 
                 // Selection state
                 var isSelected = selector.SelectedIslandIDs.Contains(island.islandID);
