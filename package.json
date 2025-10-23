@@ -2,7 +2,7 @@
   "name": "jp.colloid.nemfdeform",
   "author": "ｺﾛｲﾄﾞ",
   "displayName": "NDMFDeform",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "unity": "2022.3",
   "description": "Plug-in to run Deform nondestructively.",
   "category": "Unity",

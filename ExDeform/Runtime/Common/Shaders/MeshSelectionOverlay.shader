@@ -1,4 +1,4 @@
-Shader "Hidden/UVIslandHighlight"
+Shader "Hidden/ExDeform/MeshSelectionOverlay"
 {
     Properties
     {

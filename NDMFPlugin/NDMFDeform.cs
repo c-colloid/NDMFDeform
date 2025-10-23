@@ -6,6 +6,7 @@ using UnityEditor;
 using UnityEngine.UIElements;
 using UnityEditor.UIElements;
 using nadena.dev.ndmf;
+using nadena.dev.ndmf.vrchat;
 using nadena.dev.ndmf.preview;
 using Deform;
 using MeshModifier.NDMFDeform.Preview;
@@ -27,7 +28,8 @@ namespace MeshModifier.NDMFDeform.NDMFPlugin
 		protected override void Configure()
 		{
 			InPhase(BuildPhase.Transforming).Run("Generate DefromMesh",ctx =>{
-				var target = ctx?.AvatarDescriptor.GetComponentsInChildren<Deformable>(true);
+				
+				var target = VRChatContextExtensions.VRChatAvatarDescriptor(ctx).GetComponentsInChildren<Deformable>(true);
 				if (target is null) return;
 				var GOActiveDic = new Dictionary<GameObject,bool>();
 				var MeshDic = new Dictionary<Deformable,Mesh>();
@@ -74,8 +76,9 @@ namespace MeshModifier.NDMFDeform.NDMFPlugin
 			})
 				.PreviewingWith(ConfigurePreview());
 			
-			InPhase(BuildPhase.Optimizing).Run("Destroy Deformable",ctx =>{
-				var target = ctx?.AvatarDescriptor.GetComponentsInChildren<Deformable>(true);
+			//Deformableとそこに登録されているDeformerを削除
+			InPhase(BuildPhase.Optimizing).BeforePlugin("com.anatawa12.avatar-optimizer").Run("Destroy Deformable",ctx =>{
+				var target = VRChatContextExtensions.VRChatAvatarDescriptor(ctx).GetComponentsInChildren<Deformable>(true);
 				if (target is null) return;
 				var defomers = new HashSet<Deformer>();
 				target.ToList().ForEach(d => {
@@ -95,8 +98,9 @@ namespace MeshModifier.NDMFDeform.NDMFPlugin
 				defomers.ToList().ForEach(d =>Object.DestroyImmediate(d?.gameObject));
 			});
 			
-			InPhase(BuildPhase.Optimizing).Run("Destroy Deformer",ctx =>{
-				var target = ctx?.AvatarDescriptor.GetComponentsInChildren<Deformer>(true);
+			//残ったDeformerを削除
+			InPhase(BuildPhase.Optimizing).BeforePlugin("com.anatawa12.avatar-optimizer").Run("Destroy Deformer",ctx =>{
+				var target = VRChatContextExtensions.VRChatAvatarDescriptor(ctx).GetComponentsInChildren<Deformer>(true);
 				if (target is null) return;
 				target.ToList().ForEach(d => Object.DestroyImmediate(d?.gameObject));
 			});
