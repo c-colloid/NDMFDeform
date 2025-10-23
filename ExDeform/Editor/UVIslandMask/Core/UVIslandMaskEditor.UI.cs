@@ -509,7 +509,8 @@ namespace DeformEditor.Masking
                     height = 120,
                     marginBottom = 10
                 },
-                selectionType = SelectionType.Multiple,
+	            selectionType = SelectionType.Multiple,
+	            virtualizationMethod = CollectionVirtualizationMethod.DynamicHeight,
                 reorderable = false
             };
             
@@ -595,7 +596,7 @@ namespace DeformEditor.Masking
             {
                 style = {
                     fontSize = 11,
-                    marginTop = 2,
+	                marginTop = 0,
                     marginLeft = 24
                 }
             };
@@ -660,8 +661,12 @@ namespace DeformEditor.Masking
                 string customName = targetMask?.GetIslandCustomName(island.islandID, island.submeshIndex) ?? "";
                 if (string.IsNullOrEmpty(customName))
                 {
-                    customName = island.customName; // Fallback to island's own custom name if mask doesn't have one
+	                customName = island.customName; // Fallback to island's own custom name if mask doesn't have one
                 }
+	            else
+	            {
+		            label.text = customName;	
+	            }
 
                 // Update the island's customName field to keep in sync
                 island.customName = customName;
@@ -678,8 +683,8 @@ namespace DeformEditor.Masking
                         var textInput = nameField.Q(className: "unity-text-field__input");
                         if (textInput != null)
                         {
-                            textInput.style.unityFontStyleAndWeight = FontStyle.Italic;
-                            textInput.style.color = new Color(0.7f, 0.7f, 0.7f, 0.5f);
+	                        textInput.style.unityFontStyleAndWeight = FontStyle.Bold;
+	                        textInput.style.color = Color.black;
                         }
                     }
                 }
