@@ -132,8 +132,7 @@ namespace DeformEditor.Masking
                 }
             }
 
-            // Step 2: Re-enable auto preview
-            selector.AutoUpdatePreview = true;
+            // Step 2: Auto preview is now always enabled (removed toggle)
 
             // Step 3: Generate UV map texture with selected islands highlighted
             // CRITICAL: Must generate texture AFTER restoring selections
@@ -153,7 +152,6 @@ namespace DeformEditor.Masking
             // Step 5: Update UI elements that depend on initialized selector
             UpdateSubmeshSelectorUI();
             UpdateHighlightSettingsUI();
-            UpdateDisplaySettingsUI();
             UpdateSubmeshLabel();
             RebuildIslandList();
 
@@ -165,7 +163,7 @@ namespace DeformEditor.Masking
             if (statusLabel != null)
             {
                 int islandCount = selector.UVIslands?.Count ?? 0;
-                statusLabel.text = UVIslandLocalization.Get("status_islands_found", islandCount);
+                statusLabel.text = $"{islandCount}個のUVアイランドが見つかりました";
             }
 
             // Step 8: Hide progress view LAST to ensure all UI is updated first
@@ -193,7 +191,7 @@ namespace DeformEditor.Masking
             
             if (statusLabel != null)
             {
-                statusLabel.text = UVIslandLocalization.Get("status_refreshing");
+                statusLabel.text = "更新中...";
             }
             
             try 
@@ -222,7 +220,6 @@ namespace DeformEditor.Masking
                 // Update UI elements that were created with null selector
                 UpdateSubmeshSelectorUI();
                 UpdateHighlightSettingsUI();
-                UpdateDisplaySettingsUI();
                 UpdateSubmeshLabel();
 
                 UpdateStatus();
@@ -230,7 +227,7 @@ namespace DeformEditor.Masking
                 int islandCount = selector.UVIslands?.Count ?? 0;
                 if (statusLabel != null)
                 {
-                    statusLabel.text = UVIslandLocalization.Get("status_islands_found", islandCount);
+                    statusLabel.text = $"{islandCount}個のUVアイランドが見つかりました";
                 }
             }
             catch (System.Exception ex)
@@ -246,11 +243,8 @@ namespace DeformEditor.Masking
         private void RefreshUI(bool forceSceneRepaint = false)
         {
             // Always refresh the texture when UI updates
-            if (selector?.AutoUpdatePreview ?? false)
-            {
-                selector.UpdateTextureIfNeeded(); // Use deferred update instead of direct generation
-            }
-            
+            selector?.UpdateTextureIfNeeded(); // Use deferred update instead of direct generation
+
             RefreshUVMapImage();
             
             if (selector?.UVIslands != null)
@@ -314,14 +308,13 @@ namespace DeformEditor.Masking
                 }
                 else
                 {
-                    statusLabel.text = UVIslandLocalization.Get("status_islands_selected",
-                        currentSubmeshSelectedCount, maskedVertexCount, maskedFaceCount);
+                    statusLabel.text = $"{currentSubmeshSelectedCount}個のアイランドを選択中、{maskedVertexCount}頂点、{maskedFaceCount}面をマスク";
                 }
             }
             else
             {
                 int islandCount = selector.UVIslands?.Count ?? 0;
-                statusLabel.text = UVIslandLocalization.Get("status_islands_found", islandCount);
+                statusLabel.text = $"{islandCount}個のUVアイランドが見つかりました";
             }
         }
 

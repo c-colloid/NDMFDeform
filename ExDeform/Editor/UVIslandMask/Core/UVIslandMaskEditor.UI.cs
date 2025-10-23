@@ -21,40 +21,9 @@ namespace DeformEditor.Masking
         // UIの作成 - インスペクターのセットアップ
         // UI creation methods for building the inspector interface
 
-        private void CreateLanguageSelector()
-        {
-            var languageContainer = new VisualElement
-            {
-                style = { 
-                    flexDirection = FlexDirection.Row,
-                    alignItems = Align.Center,
-                    marginBottom = 10,
-                    paddingTop = 5,
-                    paddingBottom = 5,
-                    backgroundColor = new Color(0.3f, 0.3f, 0.4f, 0.2f)
-                }
-            };
-            
-            var languageLabel = new Label("Language / 言語:");
-            languageLabel.style.marginRight = 10;
-            languageLabel.style.fontSize = 11;
-            
-            languageField = new EnumField(UVIslandLocalization.CurrentLanguage);
-            languageField.style.width = 100;
-            languageField.RegisterValueChangedCallback(evt =>
-            {
-                UVIslandLocalization.CurrentLanguage = (UVIslandLocalization.Language)evt.newValue;
-                RefreshUIText();
-            });
-            
-            languageContainer.Add(languageLabel);
-            languageContainer.Add(languageField);
-            root.Add(languageContainer);
-        }
-        
         private void CreateHeader()
         {
-            var headerLabel = new Label(UVIslandLocalization.Get("header_selection"))
+            var headerLabel = new Label("UVアイランド選択")
             {
                 style = {
                     fontSize = 16,
@@ -63,8 +32,8 @@ namespace DeformEditor.Masking
                 }
             };
             root.Add(headerLabel);
-            
-            var description = new Label("UV Island based mask for mesh deformation")
+
+            var description = new Label("メッシュ変形のためのUVアイランドベースマスク")
             {
                 style = {
                     fontSize = 11,
@@ -211,16 +180,6 @@ namespace DeformEditor.Masking
             highlightSettingsView = highlightSettings;
         }
 
-        private void CreateDisplaySettings()
-        {
-            var settingsContainer = CreateSection(UVIslandLocalization.Get("header_display"));
-
-            // Display settings section is now empty (adaptive vertex size removed)
-            // Will be populated with HighlightSettingsView in Phase 3
-
-            root.Add(settingsContainer);
-        }
-        
         private void CreateUVMapArea()
         {
             // Header with submesh navigation
@@ -234,8 +193,7 @@ namespace DeformEditor.Masking
                 }
             };
 
-            var uvMapLabel = new Label();
-            SetLocalizedContent(uvMapLabel, "header_preview");
+            var uvMapLabel = new Label("UVマッププレビュー");
             uvMapLabel.style.fontSize = 14;
             uvMapLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
             uvMapLabel.style.flexGrow = 1;
@@ -306,159 +264,47 @@ namespace DeformEditor.Masking
             var previewSettings = new VisualElement
             {
 	            name = "previewSettings",
-                style = { 
+                style = {
                     flexDirection = FlexDirection.Row,
                     alignItems = Align.Center,
                     marginBottom = 5
                 }
             };
-            
-            autoUpdateToggle = new Toggle()
-            {
-	            value = selector?.AutoUpdatePreview ?? true,
-	            text = "Auto Update"
-            };
-            SetLocalizedContent(autoUpdateToggle, "auto_update", "tooltip_auto_update");
-            autoUpdateToggle.RegisterValueChangedCallback(evt =>
-            {
-                if (selector != null)
-                {
-                    selector.AutoUpdatePreview = evt.newValue;
-                    if (evt.newValue)
-                    {
-                        RefreshUVMapImage();
-                    }
-                }
-            });
-            
-            var zoomContainer = new VisualElement 
-            { 
-                style = { 
-                    flexDirection = FlexDirection.Row,
-                    alignItems = Align.Center,
-                    marginLeft = 15
-                } 
-            };
-            
-            zoomSlider = new Slider("", 1f, 8f)
+
+            zoomSlider = new Slider("ズーム", 1f, 8f)
             {
                 value = selector?.UvMapZoom ?? 1f,
                 style = { flexGrow = 1, marginRight = 10, width = 100 }
             };
-            SetLocalizedContent(zoomSlider, "zoom_level", "tooltip_zoom");
+            zoomSlider.tooltip = "UVマッププレビューのズームレベル（1倍 = 通常、8倍 = 最大）";
+            zoomSlider.style.width = 100;
             zoomSlider.RegisterValueChangedCallback(evt =>
             {
                 if (selector != null)
                 {
                     selector.SetZoomLevel(evt.newValue);
-                    if (selector.AutoUpdatePreview)
-                    {
-                        UpdateTextureWithThrottle(); // Immediate feedback with throttling
-                    }
+                    UpdateTextureWithThrottle(); // Always update with throttling
                 }
             });
             
-            resetZoomButton = new Button(() => 
+            resetZoomButton = new Button(() =>
             {
                 if (selector != null)
                 {
                     selector.ResetViewTransform();
                     zoomSlider.value = 1f;
-                    if (selector.AutoUpdatePreview)
-                    {
-                        selector.GenerateUVMapTexture(); // Immediate update for reset button
-                        RefreshUVMapImage();
-                    }
+                    selector.GenerateUVMapTexture(); // Always update immediately for reset button
+                    RefreshUVMapImage();
                 }
             })
             {
-                style = { width = 50 }
+                text = "リセット",
+                style = { width = 60, marginLeft = 10 }
             };
-            SetLocalizedContent(resetZoomButton, "reset");
-            
-            zoomContainer.Add(zoomSlider);
-            zoomContainer.Add(resetZoomButton);
-            
-            previewSettings.Add(autoUpdateToggle);
-            previewSettings.Add(zoomContainer);
+
+            previewSettings.Add(zoomSlider);
+            previewSettings.Add(resetZoomButton);
             root.Add(previewSettings);
-            
-            // Magnifying glass settings
-            var magnifyingSettings = new VisualElement
-            {
-                style = { 
-                    flexDirection = FlexDirection.Row,
-                    alignItems = Align.Center,
-                    marginBottom = 5
-                }
-            };
-            
-            magnifyingToggle = new Toggle()
-            {
-                value = selector?.EnableMagnifyingGlass ?? true
-            };
-            SetLocalizedContent(magnifyingToggle, "magnifying_glass", "tooltip_magnifying");
-            magnifyingToggle.RegisterValueChangedCallback(evt =>
-            {
-                if (selector != null)
-                {
-                    selector.EnableMagnifyingGlass = evt.newValue;
-                    magnifyingSizeSlider.SetEnabled(evt.newValue);
-                }
-            });
-            
-            var magnifyingContainer = new VisualElement 
-            { 
-                style = { 
-                    flexDirection = FlexDirection.Row,
-                    alignItems = Align.Center,
-                    marginLeft = 15
-                } 
-            };
-            
-            // Replace slider with buttons for x2, x4, x8, x16 zoom
-            var zoomButtonContainer = new VisualElement 
-            { 
-                style = { 
-                    flexDirection = FlexDirection.Row,
-                    alignItems = Align.Center
-                } 
-            };
-            
-            var zoom2xButton = new Button(() => SetMagnifyingZoom(2f)) { text = "x2" };
-            var zoom4xButton = new Button(() => SetMagnifyingZoom(4f)) { text = "x4" };
-            var zoom8xButton = new Button(() => SetMagnifyingZoom(8f)) { text = "x8" };
-            var zoom16xButton = new Button(() => SetMagnifyingZoom(16f)) { text = "x16" };
-            
-            zoom2xButton.style.marginRight = 2;
-            zoom4xButton.style.marginRight = 2;
-            zoom8xButton.style.marginRight = 2;
-            zoom16xButton.style.marginRight = 2;
-            
-            zoomButtonContainer.Add(zoom2xButton);
-            zoomButtonContainer.Add(zoom4xButton);
-            zoomButtonContainer.Add(zoom8xButton);
-            zoomButtonContainer.Add(zoom16xButton);
-            
-            magnifyingSizeSlider = new Slider("", 80f, 150f)
-            {
-                value = selector?.MagnifyingGlassSize ?? 100f,
-                style = { flexGrow = 1, marginRight = 10, width = 80 }
-            };
-            SetLocalizedContent(magnifyingSizeSlider, "magnifying_size", "tooltip_magnifying_size");
-            magnifyingSizeSlider.RegisterValueChangedCallback(evt =>
-            {
-                if (selector != null)
-                {
-                    selector.MagnifyingGlassSize = evt.newValue;
-                }
-            });
-            
-            magnifyingContainer.Add(zoomButtonContainer);
-            magnifyingContainer.Add(magnifyingSizeSlider);
-            magnifyingSettings.Add(magnifyingToggle);
-            magnifyingSettings.Add(magnifyingContainer);
-            root.Add(magnifyingSettings);
             
             // UV map container
             uvMapContainer = new VisualElement
@@ -498,7 +344,7 @@ namespace DeformEditor.Masking
             uvMapContainer.RegisterCallback<MouseMoveEvent>(OnUVMapContainerMouseMove, TrickleDown.TrickleDown);
             uvMapContainer.RegisterCallback<MouseUpEvent>(OnUVMapContainerMouseUp, TrickleDown.TrickleDown);
             
-            SetLocalizedTooltip(uvMapImage, "controls_uv_map");
+            uvMapImage.tooltip = "左クリック: アイランド選択、\n中ドラッグ: 視点移動、\nホイール: ズーム、\n右クリック: ルーペ";
             
             uvMapContainer.Add(uvMapImage);
             
@@ -729,8 +575,8 @@ namespace DeformEditor.Masking
 
                 colorBox.style.backgroundColor = island.maskColor;
                 label.text = $"Island {island.islandID} (SM{island.submeshIndex})";
-                vertexCountLabel.text = UVIslandLocalization.Get("vertex_count", island.vertexIndices.Count);
-                faceCountLabel.text = UVIslandLocalization.Get("face_count", island.faceCount);
+                vertexCountLabel.text = $"{island.vertexIndices.Count}頂点";
+                faceCountLabel.text = $"{island.faceCount}面";
 
                 // Selection state
                 var isSelected = selector.SelectedIslandIDs.Contains(island.islandID);
@@ -751,21 +597,21 @@ namespace DeformEditor.Masking
             
             refreshButton = new Button(() => RefreshData())
             {
+                text = "更新",
                 style = {
-                    flexGrow = 1,
+                    width = 60,
                     marginRight = 5
                 }
             };
-            SetLocalizedContent(refreshButton, "refresh");
-            
+
             clearSelectionButton = new Button(() => ClearSelection())
             {
+                text = "選択解除",
                 style = {
                     flexGrow = 1,
                     marginLeft = 5
                 }
             };
-            SetLocalizedContent(clearSelectionButton, "clear_selection");
             
             buttonContainer.Add(refreshButton);
             buttonContainer.Add(clearSelectionButton);
@@ -775,7 +621,7 @@ namespace DeformEditor.Masking
         
         private void CreateStatusArea()
         {
-            statusLabel = new Label(UVIslandLocalization.Get("status_ready"))
+            statusLabel = new Label("待機中")
             {
                 name = "status-label",
                 style = {

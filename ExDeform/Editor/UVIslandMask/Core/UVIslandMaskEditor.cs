@@ -30,18 +30,13 @@ namespace DeformEditor.Masking
         private Button clearSelectionButton;
         
         // UI controls
-        private EnumField languageField;
         private VisualElement submeshSelector;
         private Label currentSubmeshLabel;
         private Button prevSubmeshButton;
         private Button nextSubmeshButton;
-        private Toggle autoUpdateToggle;
         private Slider zoomSlider;
         private Button resetZoomButton;
         private Toggle rangeSelectionToggle;
-        private Toggle magnifyingToggle;
-        private Slider magnifyingZoomSlider;
-        private Slider magnifyingSizeSlider;
         
         // Range selection overlay
         private VisualElement rangeSelectionOverlay;
@@ -123,12 +118,10 @@ namespace DeformEditor.Masking
             progressView.style.display = DisplayStyle.None; // Hidden by default
             root.Add(progressView);
 
-            CreateLanguageSelector();
             CreateHeader();
             CreateMaskSettings();
             CreateSubmeshSelector();
             CreateHighlightSettings();
-            CreateDisplaySettings();
             CreateUVMapArea();
             CreateIslandList();
             CreateControlButtons();
@@ -150,7 +143,6 @@ namespace DeformEditor.Masking
                 }
 
                 // Configure selector before initialization
-                selector.AutoUpdatePreview = false;
                 selector.SetMeshWithoutAnalysis(originalMesh);
                 selector.SetSelectedSubmeshes(targetMask.SelectedSubmeshes);
                 selector.SetPreviewSubmesh(targetMask.CurrentPreviewSubmesh);
@@ -171,51 +163,6 @@ namespace DeformEditor.Masking
             }
 
             return root;
-        }
-
-        #endregion
-
-
-
-        #region Localization and Utilities
-        // ローカリゼーションとユーティリティ
-        // Localization and utility helper methods
-
-        private void SetLocalizedContent(VisualElement element, string textKey, string tooltipKey = null)
-        {
-            if (element is TextElement textElement)
-            {
-                textElement.text = UVIslandLocalization.Get(textKey);
-            }
-            
-            if (!string.IsNullOrEmpty(tooltipKey))
-            {
-                element.tooltip = UVIslandLocalization.Get(tooltipKey);
-            }
-        }
-        
-        private void SetLocalizedTooltip(VisualElement element, string tooltipKey)
-        {
-            element.tooltip = UVIslandLocalization.Get(tooltipKey);
-        }
-
-        #endregion
-
-        #region UI Updates and Refresh
-        // UI更新とリフレッシュ
-        // UI update and refresh methods
-
-        private void RefreshUIText()
-        {
-            // This would refresh all UI text when language changes
-            // For now, we'll recreate the entire UI
-            var parent = root.parent;
-            if (parent != null)
-            {
-                parent.Remove(root);
-                var newRoot = CreateInspectorGUI();
-                parent.Add(newRoot);
-            }
         }
 
         #endregion
@@ -310,7 +257,7 @@ namespace DeformEditor.Masking
                 return;
             }
             
-            statusLabel.text = UVIslandLocalization.Get("status_refreshing");
+            statusLabel.text = "更新中...";
             
             try 
             {
@@ -325,7 +272,7 @@ namespace DeformEditor.Masking
                 RefreshUI(false);
                 
                 int islandCount = selector.UVIslands?.Count ?? 0;
-                statusLabel.text = UVIslandLocalization.Get("status_islands_found", islandCount);
+                statusLabel.text = $"{islandCount}個のUVアイランドが見つかりました";
             }
             catch (System.Exception ex)
             {
@@ -392,12 +339,8 @@ namespace DeformEditor.Masking
             UpdateMaskComponent();
             EditorUtility.SetDirty(targetMask);
 
-            // Generate full texture and save to cache
-            if (selector.AutoUpdatePreview)
-            {
-                selector.GenerateUVMapTexture();
-            }
-            
+            // Always generate full texture
+            selector.GenerateUVMapTexture();
 
             RefreshUI(false);
         }
@@ -527,13 +470,9 @@ namespace DeformEditor.Masking
                 UpdateMaskComponent();
                 EditorUtility.SetDirty(targetMask);
 
-                // Generate full texture and save to cache
-                if (selector.AutoUpdatePreview)
-                {
-                    selector.GenerateUVMapTexture();
-                    RefreshUVMapImage();
-                }
-                
+                // Always generate full texture
+                selector.GenerateUVMapTexture();
+                RefreshUVMapImage();
 
                 RefreshUI(false);
             }
@@ -676,18 +615,6 @@ namespace DeformEditor.Masking
             {
                 highlightSettingsView.HighlightOpacity = selector.HighlightOpacity;
             }
-        }
-
-        /// <summary>
-        /// Update Display Settings UI after background initialization
-        /// バックグラウンド初期化後に表示設定UIを更新
-        /// </summary>
-        private void UpdateDisplaySettingsUI()
-        {
-            if (selector == null) return;
-
-            // Display settings UI update (adaptive vertex size removed)
-            // Will be populated with HighlightSettingsView in Phase 3
         }
 
         #endregion

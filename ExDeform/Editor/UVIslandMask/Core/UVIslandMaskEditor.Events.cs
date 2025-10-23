@@ -80,11 +80,8 @@ namespace DeformEditor.Masking
                 EditorUtility.SetDirty(targetMask);
 
                 // Generate full texture and update display
-                if (selector.AutoUpdatePreview)
-                {
-                    selector.GenerateUVMapTexture();
-                    RefreshUVMapImage();
-                }
+                selector.GenerateUVMapTexture();
+                RefreshUVMapImage();
 
                 RefreshUI(false);
             }
@@ -124,12 +121,10 @@ namespace DeformEditor.Masking
                 selector.SetPanOffset(currentOffset + uvDelta);
                 
                 lastMousePos = localPosition;
-                
-                if (selector.AutoUpdatePreview)
-                {
-                    UpdateTextureWithThrottle(); // Immediate feedback for pan with throttling
-                }
-                
+
+                // Always update with throttling for immediate feedback
+                UpdateTextureWithThrottle();
+
                 evt.StopPropagation();
             }
         }
@@ -158,14 +153,11 @@ namespace DeformEditor.Masking
             else if (evt.button == 2) // Middle button - stop panning
             {
                 isDraggingUVMap = false;
-                
-                // Update texture after mouse interaction ends
-                if (selector?.AutoUpdatePreview ?? false)
-                {
-                    selector?.UpdateTextureIfNeeded();
-                    RefreshUVMapImage();
-                }
-                
+
+                // Always update texture after mouse interaction ends
+                selector?.UpdateTextureIfNeeded();
+                RefreshUVMapImage();
+
                 evt.StopPropagation();
             }
             else if (evt.button == 1) // Right button
@@ -188,12 +180,10 @@ namespace DeformEditor.Masking
             
             selector.ZoomAtPoint(zoomPoint, zoomDelta);
             zoomSlider.value = selector.UvMapZoom;
-            
-            if (selector.AutoUpdatePreview)
-            {
-                UpdateTextureWithThrottle(); // Immediate feedback for wheel zoom
-            }
-            
+
+            // Always update with throttling for immediate feedback
+            UpdateTextureWithThrottle();
+
             evt.StopPropagation();
         }
         
@@ -253,12 +243,10 @@ namespace DeformEditor.Masking
                 selector.SetPanOffset(currentOffset + uvDelta);
                 
                 lastMousePos = clampedPos;
-                
-                if (selector.AutoUpdatePreview)
-                {
-                    UpdateTextureWithThrottle(); // Immediate feedback for pan with throttling
-                }
-                
+
+                // Always update with throttling for immediate feedback
+                UpdateTextureWithThrottle();
+
                 evt.StopPropagation();
             }
         }
@@ -280,14 +268,11 @@ namespace DeformEditor.Masking
                 else if (isDraggingUVMap)
                 {
                     isDraggingUVMap = false;
-                    
-                    // Update texture after mouse interaction ends
-                    if (selector?.AutoUpdatePreview ?? false)
-                    {
-                        selector?.UpdateTextureIfNeeded();
-                        RefreshUVMapImage();
-                    }
-                    
+
+                    // Always update texture after mouse interaction ends
+                    selector?.UpdateTextureIfNeeded();
+                    RefreshUVMapImage();
+
                     evt.StopPropagation();
                 }
             }
@@ -296,13 +281,10 @@ namespace DeformEditor.Masking
                 if (isDraggingUVMap)
                 {
                     isDraggingUVMap = false;
-                    
-                    // Update texture after mouse interaction ends
-                    if (selector?.AutoUpdatePreview ?? false)
-                    {
-                        selector?.UpdateTextureIfNeeded();
-                        RefreshUVMapImage();
-                    }
+
+                    // Always update texture after mouse interaction ends
+                    selector?.UpdateTextureIfNeeded();
+                    RefreshUVMapImage();
                     
                     evt.StopPropagation();
                 }
