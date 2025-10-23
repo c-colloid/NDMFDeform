@@ -603,7 +603,29 @@ namespace Deform.Masking.Editor
         {
             uvMapZoom = Mathf.Clamp(zoom, MIN_ZOOM, MAX_ZOOM);
         }
-        
+
+        /// <summary>
+        /// Set zoom level while keeping the center of the view stable
+        /// ビューの中心を安定させながらズームレベルを設定
+        /// </summary>
+        public void SetZoomLevelAroundCenter(float newZoom)
+        {
+            float oldZoom = uvMapZoom;
+            newZoom = Mathf.Clamp(newZoom, MIN_ZOOM, MAX_ZOOM);
+
+            if (Mathf.Approximately(oldZoom, newZoom)) return;
+
+            // Zoom around the center point (0.5, 0.5) in UV space
+            Vector2 centerPoint = new Vector2(RECENTER_OFFSET, RECENTER_OFFSET);
+            float zoomRatio = newZoom / oldZoom;
+
+            Vector2 oldOffset = uvMapPanOffset;
+            Vector2 newOffset = (oldOffset - centerPoint) * zoomRatio + centerPoint;
+
+            uvMapZoom = newZoom;
+            SetPanOffset(newOffset);
+        }
+
         public void SetPanOffset(Vector2 offset)
         {
             // Constrain pan offset based on zoom level for better UX
@@ -974,19 +996,21 @@ namespace Deform.Masking.Editor
         public Texture2D GenerateMagnifyingGlassTexture(Vector2 centerUV, int size = DEFAULT_MAGNIFYING_GLASS_SIZE_INT)
         {
             if (!enableMagnifyingGlass) return null;
-            
+
             var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
             var pixels = new Color[size * size];
-            
+
             // Fill background
             var backgroundColor = MAGNIFYING_BACKGROUND_COLOR;
             for (int i = 0; i < pixels.Length; i++)
             {
                 pixels[i] = backgroundColor;
             }
-            
-            // Calculate magnifying area
-            float radius = RECENTER_OFFSET / magnifyingGlassZoom;
+
+            // Calculate magnifying area with consideration for current UV map zoom
+            // ルーペはメインビューのズームに応じてさらに拡大表示する（x16固定倍率）
+            float effectiveMagnification = magnifyingGlassZoom * uvMapZoom;
+            float radius = RECENTER_OFFSET / effectiveMagnification;
             UVTextureRenderer.DrawMagnifyingContent(pixels, size, size, centerUV, radius, uvIslands, SelectedIslandIDs, targetMesh);
 
             texture.SetPixels(pixels);

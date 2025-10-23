@@ -474,6 +474,13 @@ namespace DeformEditor.Masking
                 selector.GenerateUVMapTexture();
                 RefreshUVMapImage();
 
+                // Update magnifying glass to show the selection change immediately
+                // ルーペ表示を即座に更新して選択変更を反映
+                if (isMagnifyingGlassActive)
+                {
+                    UpdateMagnifyingGlass(currentMagnifyingMousePos);
+                }
+
                 RefreshUI(false);
             }
         }
@@ -614,6 +621,18 @@ namespace DeformEditor.Masking
             if (highlightSettingsView != null)
             {
                 highlightSettingsView.HighlightOpacity = selector.HighlightOpacity;
+            }
+        }
+
+        /// <summary>
+        /// Update zoom slider label to show current zoom value
+        /// ズームスライダーのラベルを更新して現在のズーム値を表示
+        /// </summary>
+        private void UpdateZoomSliderLabel()
+        {
+            if (zoomSlider != null && selector != null)
+            {
+                zoomSlider.label = $"ズーム (x{selector.UvMapZoom:F1})";
             }
         }
 
