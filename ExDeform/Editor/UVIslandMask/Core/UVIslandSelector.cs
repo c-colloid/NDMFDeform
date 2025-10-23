@@ -941,14 +941,14 @@ namespace Deform.Masking.Editor
             // Draw UV islands with current preview submesh selections
             UVTextureRenderer.DrawUVIslands(pixels, width, height, transformMatrix, uvIslands, SelectedIslandIDs, targetMesh);
 
-            texture.SetPixels(pixels);
-            texture.Apply();
-
             // Draw island names if enabled
             if (ShowIslandNames)
             {
-                DrawIslandNamesOnTexture(texture, transformMatrix);
+                UVTextureRenderer.DrawIslandNames(pixels, width, height, transformMatrix, uvIslands);
             }
+
+            texture.SetPixels(pixels);
+            texture.Apply();
 
             uvMapTexture = texture;
             return texture;
@@ -1024,78 +1024,6 @@ namespace Deform.Masking.Editor
             texture.Apply();
 
             return texture;
-        }
-
-        /// <summary>
-        /// Draw island names on the UV map texture
-        /// UVマップテクスチャにアイランド名を描画
-        /// </summary>
-        private void DrawIslandNamesOnTexture(Texture2D texture, Matrix4x4 transformMatrix)
-        {
-            if (uvIslands == null || uvIslands.Count == 0) return;
-
-            // Create a temporary RenderTexture to draw text using GUI
-            RenderTexture rt = RenderTexture.GetTemporary(texture.width, texture.height, 0, RenderTextureFormat.ARGB32);
-            RenderTexture.active = rt;
-
-            // Copy texture to render texture
-            Graphics.Blit(texture, rt);
-
-            // Set up GUI matrix for drawing
-            GUI.matrix = Matrix4x4.identity;
-
-            // Define text style
-            GUIStyle textStyle = new GUIStyle();
-            textStyle.normal.textColor = Color.white;
-            textStyle.fontSize = 12;
-            textStyle.fontStyle = FontStyle.Bold;
-            textStyle.alignment = TextAnchor.MiddleCenter;
-
-            // Draw shadow style for better readability
-            GUIStyle shadowStyle = new GUIStyle(textStyle);
-            shadowStyle.normal.textColor = Color.black;
-
-            foreach (var island in uvIslands)
-            {
-                // Get custom name or use default
-                string displayName = !string.IsNullOrEmpty(island.customName)
-                    ? island.customName
-                    : $"Island {island.islandID}";
-
-                // Calculate island center in UV space
-                Vector2 islandCenter = island.uvBounds.center;
-
-                // Transform UV coordinates to texture space
-                Vector3 uvPos = new Vector3(islandCenter.x, islandCenter.y, 0f);
-                Vector3 transformedPos = transformMatrix.MultiplyPoint3x4(uvPos);
-
-                // Convert to pixel coordinates
-                int x = Mathf.RoundToInt(transformedPos.x * texture.width);
-                int y = Mathf.RoundToInt((1f - transformedPos.y) * texture.height); // Flip Y for screen space
-
-                // Skip if outside visible area
-                if (x < 0 || x >= texture.width || y < 0 || y >= texture.height)
-                    continue;
-
-                // Measure text size
-                Vector2 textSize = shadowStyle.CalcSize(new GUIContent(displayName));
-                Rect textRect = new Rect(x - textSize.x / 2f, y - textSize.y / 2f, textSize.x, textSize.y);
-
-                // Draw text shadow for better visibility
-                Rect shadowRect = new Rect(textRect.x + 1, textRect.y + 1, textRect.width, textRect.height);
-                GUI.Label(shadowRect, displayName, shadowStyle);
-
-                // Draw actual text
-                GUI.Label(textRect, displayName, textStyle);
-            }
-
-            // Read pixels back from RenderTexture
-            texture.ReadPixels(new Rect(0, 0, texture.width, texture.height), 0, 0);
-            texture.Apply();
-
-            // Cleanup
-            RenderTexture.active = null;
-            RenderTexture.ReleaseTemporary(rt);
         }
 
         #endregion

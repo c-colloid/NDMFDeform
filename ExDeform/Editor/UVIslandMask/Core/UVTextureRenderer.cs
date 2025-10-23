@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEditor;
 
 namespace Deform.Masking.Editor
 {
@@ -14,6 +15,168 @@ namespace Deform.Masking.Editor
         private const float GRID_SPACING = 0.1f;
         private static readonly Color GRID_COLOR = new Color(0.3f, 0.3f, 0.3f, 1.0f);
         private static readonly Color UNSELECTED_ISLAND_COLOR = new Color(0.5f, 0.5f, 0.5f, 0.3f);
+        #endregion
+
+        #region Font Rendering
+        private static Font cachedFont;
+        private static int cachedFontSize = 11;
+
+        /// <summary>
+        /// Get default font for text rendering
+        /// テキストレンダリング用のデフォルトフォントを取得
+        /// </summary>
+        private static Font GetDefaultFont()
+        {
+            if (cachedFont == null)
+            {
+                cachedFont = EditorGUIUtility.Load("Fonts/Inter-Regular.ttf") as Font;
+                if (cachedFont == null)
+                {
+                    cachedFont = Resources.GetBuiltinResource<Font>("Arial.ttf");
+                }
+            }
+            return cachedFont;
+        }
+
+        /// <summary>
+        /// Draw text on the pixel array at specified position
+        /// 指定位置にピクセル配列上でテキストを描画
+        /// </summary>
+        public static void DrawText(string text, Vector2 position, Color[] pixels, int width, int height,
+            Color textColor, Color shadowColor, int fontSize = 11)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+
+            Font font = GetDefaultFont();
+            if (font == null) return;
+
+            // Request characters in texture
+            font.RequestCharactersInTexture(text, fontSize, FontStyle.Bold);
+
+            int x = Mathf.RoundToInt(position.x);
+            int y = Mathf.RoundToInt(position.y);
+
+            // Calculate text width for centering
+            int totalWidth = 0;
+            foreach (char c in text)
+            {
+                CharacterInfo charInfo;
+                if (font.GetCharacterInfo(c, out charInfo, fontSize, FontStyle.Bold))
+                {
+                    totalWidth += charInfo.advance;
+                }
+            }
+
+            int startX = x - totalWidth / 2;
+            int currentX = startX;
+
+            // Draw each character
+            foreach (char c in text)
+            {
+                CharacterInfo charInfo;
+                if (font.GetCharacterInfo(c, out charInfo, fontSize, FontStyle.Bold))
+                {
+                    // Draw shadow first (offset by 1 pixel)
+                    DrawCharacter(charInfo, currentX + 1, y + 1, pixels, width, height, shadowColor, font, fontSize);
+
+                    // Draw main character
+                    DrawCharacter(charInfo, currentX, y, pixels, width, height, textColor, font, fontSize);
+
+                    currentX += charInfo.advance;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Draw a single character on the pixel array
+        /// ピクセル配列上に単一文字を描画
+        /// </summary>
+        private static void DrawCharacter(CharacterInfo charInfo, int x, int y, Color[] pixels, int width, int height,
+            Color color, Font font, int fontSize)
+        {
+            Texture2D fontTexture = font.material.mainTexture as Texture2D;
+            if (fontTexture == null) return;
+
+            // Get UV coordinates from character info
+            Rect uvRect = charInfo.uvTopLeft;
+            float uvWidth = charInfo.uvTopRight.x - charInfo.uvTopLeft.x;
+            float uvHeight = charInfo.uvBottomLeft.y - charInfo.uvTopLeft.y;
+
+            int charWidth = charInfo.glyphWidth;
+            int charHeight = charInfo.glyphHeight;
+
+            // Adjust position based on bearing
+            int drawX = x + charInfo.minX;
+            int drawY = y - charInfo.maxY; // Flip Y coordinate
+
+            // Draw character pixels
+            for (int py = 0; py < charHeight; py++)
+            {
+                for (int px = 0; px < charWidth; px++)
+                {
+                    int pixelX = drawX + px;
+                    int pixelY = drawY + py;
+
+                    if (pixelX < 0 || pixelX >= width || pixelY < 0 || pixelY >= height)
+                        continue;
+
+                    // Calculate UV coordinates
+                    float u = uvRect.x + (px / (float)charWidth) * uvWidth;
+                    float v = uvRect.y + (py / (float)charHeight) * uvHeight;
+
+                    // Sample font texture
+                    Color fontPixel = fontTexture.GetPixelBilinear(u, v);
+
+                    // Use alpha for blending
+                    if (fontPixel.a > 0.1f)
+                    {
+                        int index = pixelY * width + pixelX;
+                        if (index >= 0 && index < pixels.Length)
+                        {
+                            Color blendColor = new Color(color.r, color.g, color.b, fontPixel.a);
+                            pixels[index] = Color.Lerp(pixels[index], blendColor, fontPixel.a);
+                        }
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Draw island names on UV islands
+        /// UVアイランド上にアイランド名を描画
+        /// </summary>
+        public static void DrawIslandNames(Color[] pixels, int width, int height, Matrix4x4 transform,
+            List<UVIslandAnalyzer.UVIsland> uvIslands)
+        {
+            if (uvIslands == null || uvIslands.Count == 0) return;
+
+            foreach (var island in uvIslands)
+            {
+                // Get display name (custom name or default)
+                string displayName = !string.IsNullOrEmpty(island.customName)
+                    ? island.customName
+                    : $"Island {island.islandID}";
+
+                // Calculate island center in UV space
+                Vector2 islandCenter = island.uvBounds.center;
+
+                // Transform to texture space
+                Vector3 uvPos = new Vector3(islandCenter.x, islandCenter.y, 0f);
+                Vector3 transformedPos = transform.MultiplyPoint3x4(uvPos);
+
+                // Convert to pixel coordinates
+                int x = Mathf.RoundToInt(transformedPos.x * width);
+                int y = Mathf.RoundToInt((1f - transformedPos.y) * height); // Flip Y
+
+                // Skip if outside visible area
+                if (x < 0 || x >= width || y < 0 || y >= height)
+                    continue;
+
+                // Draw text with shadow
+                DrawText(displayName, new Vector2(x, y), pixels, width, height,
+                    Color.white, Color.black, cachedFontSize);
+            }
+        }
         #endregion
 
         /// <summary>
