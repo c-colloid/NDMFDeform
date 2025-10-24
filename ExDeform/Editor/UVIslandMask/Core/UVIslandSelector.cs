@@ -143,6 +143,7 @@ namespace Deform.Masking.Editor
         public bool EnablePerformanceOptimization => enablePerformanceOptimization;
         public float HighlightOpacity { get => highlightOpacity; set => highlightOpacity = Mathf.Clamp01(value); }
         public bool ShowIslandNames { get; set; } = false; // Toggle for displaying island names on UV map
+        public float IslandNameFontSize { get; set; } = 14f; // Base font size for island names (scaled by zoom)
         
         // Preview properties
         public bool AutoUpdatePreview { get => autoUpdatePreview; set => autoUpdatePreview = value; }
@@ -250,6 +251,24 @@ namespace Deform.Masking.Editor
 
             // Note: Texture generation is now controlled by the caller to avoid duplicate calls
             // Caller should explicitly call GenerateUVMapTexture() if needed
+        }
+
+        /// <summary>
+        /// Load custom names from UVIslandMask into all UV islands
+        /// UVIslandMaskからカスタム名を全UVアイランドに読み込む
+        /// </summary>
+        public void LoadCustomNamesFromMask(Deform.Masking.UVIslandMask mask)
+        {
+            if (mask == null) return;
+
+            foreach (var island in allUVIslands)
+            {
+                string customName = mask.GetIslandCustomName(island.islandID, island.submeshIndex);
+                if (!string.IsNullOrEmpty(customName))
+                {
+                    island.customName = customName;
+                }
+            }
         }
 
         /// <summary>
@@ -458,6 +477,9 @@ namespace Deform.Masking.Editor
             {
                 GenerateUVMapTexture();
             }
+
+            // Submesh changed - island names need to be refreshed
+            textureNeedsUpdate = true;
         }
 
         public void NextPreviewSubmesh()

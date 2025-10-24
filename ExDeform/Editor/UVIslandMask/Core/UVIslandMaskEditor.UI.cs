@@ -114,6 +114,7 @@ namespace DeformEditor.Masking
                     UpdateSubmeshLabel();
                     RebuildIslandList();
                     RefreshUI(false);
+                    UpdateIslandNamesOverlay();
                 }
             });
 
@@ -296,7 +297,7 @@ namespace DeformEditor.Masking
             var showNamesToggle = new Toggle("名前表示")
             {
                 value = selector?.ShowIslandNames ?? false,
-                style = { marginLeft = 15, marginRight = 10 }
+                style = { marginLeft = 15, marginRight = 5 }
             };
             showNamesToggle.tooltip = "UVマップ上にアイランド名を表示";
             showNamesToggle.RegisterValueChangedCallback(evt =>
@@ -305,6 +306,25 @@ namespace DeformEditor.Masking
                 {
                     selector.ShowIslandNames = evt.newValue;
                     UpdateIslandNamesOverlay();
+                }
+            });
+
+            // Font size slider for island names
+            var fontSizeSlider = new Slider("", 8f, 24f)
+            {
+                value = selector?.IslandNameFontSize ?? 14f,
+                style = { width = 60, marginLeft = 5, marginRight = 5 }
+            };
+            fontSizeSlider.tooltip = "アイランド名のフォントサイズ (8-24pt, ズームで拡大)";
+            fontSizeSlider.RegisterValueChangedCallback(evt =>
+            {
+                if (selector != null)
+                {
+                    selector.IslandNameFontSize = evt.newValue;
+                    if (selector.ShowIslandNames)
+                    {
+                        UpdateIslandNamesOverlay();
+                    }
                 }
             });
 
@@ -326,6 +346,7 @@ namespace DeformEditor.Masking
 
             previewSettings.Add(zoomSlider);
             previewSettings.Add(showNamesToggle);
+            previewSettings.Add(fontSizeSlider);
             previewSettings.Add(resetZoomButton);
             root.Add(previewSettings);
             
@@ -525,6 +546,11 @@ namespace DeformEditor.Masking
             int width = UV_MAP_SIZE;
             int height = UV_MAP_SIZE;
 
+            // Calculate font size based on zoom level
+            float zoom = selector.UvMapZoom;
+            float baseFontSize = selector.IslandNameFontSize;
+            float fontSize = baseFontSize * zoom;
+
             // Draw text for each island
             foreach (var island in uvIslands)
             {
@@ -544,17 +570,26 @@ namespace DeformEditor.Masking
                 if (x < 0 || x >= width || y < 0 || y >= height)
                     continue;
 
-                Vector2 textPos = new Vector2(x, y);
+                // Estimate text width and height for centering
+                // Approximate: 0.6 * fontSize per character for width, fontSize for height
+                float estimatedWidth = displayName.Length * fontSize * 0.6f;
+                float estimatedHeight = fontSize;
+
+                // Center the text at the island position
+                Vector2 centeredPos = new Vector2(
+                    x - estimatedWidth * 0.5f,
+                    y - estimatedHeight * 0.5f
+                );
 
                 // Draw text with outline for better visibility
-                // Black outline
-                mgc.DrawText(displayName, textPos + new Vector2(-1, 0), 14, Color.black, null);
-                mgc.DrawText(displayName, textPos + new Vector2(1, 0), 14, Color.black, null);
-                mgc.DrawText(displayName, textPos + new Vector2(0, -1), 14, Color.black, null);
-                mgc.DrawText(displayName, textPos + new Vector2(0, 1), 14, Color.black, null);
+                // Black outline (4-direction)
+                mgc.DrawText(displayName, centeredPos + new Vector2(-1, 0), fontSize, Color.black, null);
+                mgc.DrawText(displayName, centeredPos + new Vector2(1, 0), fontSize, Color.black, null);
+                mgc.DrawText(displayName, centeredPos + new Vector2(0, -1), fontSize, Color.black, null);
+                mgc.DrawText(displayName, centeredPos + new Vector2(0, 1), fontSize, Color.black, null);
 
                 // White text
-                mgc.DrawText(displayName, textPos, 14, Color.white, null);
+                mgc.DrawText(displayName, centeredPos, fontSize, Color.white, null);
             }
         }
 

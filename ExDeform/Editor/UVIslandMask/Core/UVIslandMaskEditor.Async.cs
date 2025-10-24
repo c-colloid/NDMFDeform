@@ -118,6 +118,9 @@ namespace DeformEditor.Masking
             // Step 1: Restore island selections now that UV analysis is complete
             if (targetMask != null)
             {
+                // Load custom names from mask into all islands
+                selector.LoadCustomNamesFromMask(targetMask);
+
                 // Load per-submesh selections (new format)
                 if (targetMask.PerSubmeshSelections.Count > 0)
                 {
