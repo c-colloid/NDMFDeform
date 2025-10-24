@@ -17,97 +17,130 @@ namespace Deform.Masking.Editor
         private static readonly Color UNSELECTED_ISLAND_COLOR = new Color(0.5f, 0.5f, 0.5f, 0.3f);
         #endregion
 
-        #region Font Rendering with RenderTexture
+        #region Text Rendering with Camera and Canvas
         /// <summary>
-        /// Draw island names on UV islands using RenderTexture for Unicode support
-        /// RenderTextureを使用してUVアイランド上にアイランド名を描画（Unicode対応）
+        /// Draw island names on UV islands using Camera + Canvas for proper Unicode support
+        /// カメラ+キャンバスを使用してUVアイランド上にアイランド名を描画（Unicode完全対応）
         /// </summary>
         public static void DrawIslandNames(Color[] pixels, int width, int height, Matrix4x4 transform,
             List<UVIslandAnalyzer.UVIsland> uvIslands)
         {
             if (uvIslands == null || uvIslands.Count == 0) return;
 
-            // Create a temporary RenderTexture for text rendering
-            RenderTexture rt = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32);
-            RenderTexture prevActive = RenderTexture.active;
-            RenderTexture.active = rt;
-
-            // Clear to transparent
-            GL.Clear(true, true, Color.clear);
-
             // Create temporary texture from pixel data
-            Texture2D tempTex = new Texture2D(width, height, TextureFormat.RGBA32, false);
-            tempTex.SetPixels(pixels);
-            tempTex.Apply();
+            Texture2D baseTexture = new Texture2D(width, height, TextureFormat.RGBA32, false);
+            baseTexture.SetPixels(pixels);
+            baseTexture.Apply();
 
-            // Copy existing texture to RenderTexture
-            Graphics.Blit(tempTex, rt);
+            // Create temporary objects for rendering
+            GameObject tempCameraObj = new GameObject("TempTextCamera");
+            GameObject tempCanvasObj = new GameObject("TempCanvas");
 
-            // Begin GUI rendering
-            GL.PushMatrix();
-            GL.LoadPixelMatrix(0, width, height, 0);
-
-            // Define text styles
-            GUIStyle textStyle = new GUIStyle();
-            textStyle.normal.textColor = Color.white;
-            textStyle.fontSize = 14; // Larger font size
-            textStyle.fontStyle = FontStyle.Bold;
-            textStyle.alignment = TextAnchor.MiddleCenter;
-
-            GUIStyle shadowStyle = new GUIStyle(textStyle);
-            shadowStyle.normal.textColor = Color.black;
-
-            foreach (var island in uvIslands)
+            try
             {
-                // Get display name (custom name or default)
-                string displayName = !string.IsNullOrEmpty(island.customName)
-                    ? island.customName
-                    : $"Island {island.islandID}";
+                // Setup camera
+                Camera tempCamera = tempCameraObj.AddComponent<Camera>();
+                tempCamera.clearFlags = CameraClearFlags.Nothing;
+                tempCamera.cullingMask = 1 << 31; // Use layer 31 for temp rendering
+                tempCamera.orthographic = true;
+                tempCamera.orthographicSize = height / 2f;
+                tempCamera.nearClipPlane = 0.1f;
+                tempCamera.farClipPlane = 100f;
+                tempCamera.transform.position = new Vector3(width / 2f, height / 2f, -10f);
 
-                // Calculate island center in UV space
-                Vector2 islandCenter = island.uvBounds.center;
+                // Create and setup RenderTexture
+                RenderTexture rt = RenderTexture.GetTemporary(width, height, 24, RenderTextureFormat.ARGB32);
+                tempCamera.targetTexture = rt;
 
-                // Transform to texture space
-                Vector3 uvPos = new Vector3(islandCenter.x, islandCenter.y, 0f);
-                Vector3 transformedPos = transform.MultiplyPoint3x4(uvPos);
+                // Blit base texture to RenderTexture
+                RenderTexture prevActive = RenderTexture.active;
+                RenderTexture.active = rt;
+                Graphics.Blit(baseTexture, rt);
 
-                // Convert to pixel coordinates (NO Y-flip here, GUI coordinates are already flipped)
-                int x = Mathf.RoundToInt(transformedPos.x * width);
-                int y = Mathf.RoundToInt(transformedPos.y * height);
+                // Setup Canvas
+                Canvas canvas = tempCanvasObj.AddComponent<Canvas>();
+                canvas.renderMode = RenderMode.WorldSpace;
+                tempCanvasObj.layer = 31;
 
-                // Skip if outside visible area
-                if (x < 0 || x >= width || y < 0 || y >= height)
-                    continue;
+                UnityEngine.UI.CanvasScaler scaler = tempCanvasObj.AddComponent<UnityEngine.UI.CanvasScaler>();
+                scaler.dynamicPixelsPerUnit = 1;
 
-                // Calculate text size for proper positioning
-                Vector2 textSize = shadowStyle.CalcSize(new GUIContent(displayName));
-                Rect textRect = new Rect(x - textSize.x / 2f, y - textSize.y / 2f, textSize.x, textSize.y);
+                RectTransform canvasRect = tempCanvasObj.GetComponent<RectTransform>();
+                canvasRect.sizeDelta = new Vector2(width, height);
+                canvasRect.position = new Vector3(width / 2f, height / 2f, 0f);
 
-                // Draw shadow
-                Rect shadowRect = new Rect(textRect.x + 1, textRect.y + 1, textRect.width, textRect.height);
-                GUI.Label(shadowRect, displayName, shadowStyle);
+                // Draw text for each island
+                foreach (var island in uvIslands)
+                {
+                    // Get display name
+                    string displayName = !string.IsNullOrEmpty(island.customName)
+                        ? island.customName
+                        : $"Island {island.islandID}";
 
-                // Draw text
-                GUI.Label(textRect, displayName, textStyle);
+                    // Calculate position
+                    Vector2 islandCenter = island.uvBounds.center;
+                    Vector3 uvPos = new Vector3(islandCenter.x, islandCenter.y, 0f);
+                    Vector3 transformedPos = transform.MultiplyPoint3x4(uvPos);
+
+                    float x = transformedPos.x * width;
+                    float y = transformedPos.y * height;
+
+                    // Skip if outside visible area
+                    if (x < 0 || x >= width || y < 0 || y >= height)
+                        continue;
+
+                    // Create text GameObject
+                    GameObject textObj = new GameObject("IslandText");
+                    textObj.transform.SetParent(tempCanvasObj.transform, false);
+                    textObj.layer = 31;
+
+                    // Add Text component (fallback if TextMeshPro not available)
+                    UnityEngine.UI.Text textComponent = textObj.AddComponent<UnityEngine.UI.Text>();
+                    textComponent.text = displayName;
+                    textComponent.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                    textComponent.fontSize = 14;
+                    textComponent.fontStyle = FontStyle.Bold;
+                    textComponent.color = Color.white;
+                    textComponent.alignment = TextAnchor.MiddleCenter;
+
+                    // Add outline for shadow effect
+                    UnityEngine.UI.Outline outline = textObj.AddComponent<UnityEngine.UI.Outline>();
+                    outline.effectColor = Color.black;
+                    outline.effectDistance = new Vector2(1, -1);
+
+                    // Position text
+                    RectTransform textRect = textObj.GetComponent<RectTransform>();
+                    textRect.anchoredPosition = new Vector2(x - width / 2f, y - height / 2f);
+                    textRect.sizeDelta = new Vector2(200, 30);
+                }
+
+                // Render
+                tempCamera.Render();
+
+                // Read pixels back
+                Texture2D resultTexture = new Texture2D(width, height, TextureFormat.RGBA32, false);
+                resultTexture.ReadPixels(new Rect(0, 0, width, height), 0, 0);
+                resultTexture.Apply();
+
+                // Copy to output pixel array
+                Color[] resultPixels = resultTexture.GetPixels();
+                for (int i = 0; i < pixels.Length && i < resultPixels.Length; i++)
+                {
+                    pixels[i] = resultPixels[i];
+                }
+
+                // Cleanup
+                RenderTexture.active = prevActive;
+                RenderTexture.ReleaseTemporary(rt);
+                Object.DestroyImmediate(resultTexture);
             }
-
-            GL.PopMatrix();
-
-            // Read pixels from RenderTexture
-            tempTex.ReadPixels(new Rect(0, 0, width, height), 0, 0);
-            tempTex.Apply();
-
-            // Copy back to pixel array
-            Color[] renderedPixels = tempTex.GetPixels();
-            for (int i = 0; i < pixels.Length && i < renderedPixels.Length; i++)
+            finally
             {
-                pixels[i] = renderedPixels[i];
+                // Always cleanup temporary objects
+                Object.DestroyImmediate(tempCanvasObj);
+                Object.DestroyImmediate(tempCameraObj);
+                Object.DestroyImmediate(baseTexture);
             }
-
-            // Cleanup
-            RenderTexture.active = prevActive;
-            RenderTexture.ReleaseTemporary(rt);
-            Object.DestroyImmediate(tempTex);
         }
         #endregion
 
