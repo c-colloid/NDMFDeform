@@ -304,8 +304,7 @@ namespace DeformEditor.Masking
                 if (selector != null)
                 {
                     selector.ShowIslandNames = evt.newValue;
-                    selector.GenerateUVMapTexture();
-                    RefreshUVMapImage();
+                    UpdateIslandNamesOverlay();
                 }
             });
 
@@ -369,15 +368,17 @@ namespace DeformEditor.Masking
             uvMapContainer.RegisterCallback<MouseUpEvent>(OnUVMapContainerMouseUp, TrickleDown.TrickleDown);
             
             uvMapImage.tooltip = "左クリック: アイランド選択、\n中ドラッグ: 視点移動、\nホイール: ズーム、\n右クリック: ルーペ";
-            
+
             uvMapContainer.Add(uvMapImage);
-            
+
             // Create overlays
             CreateRangeSelectionOverlay();
             CreateMagnifyingGlassOverlay();
-            
+            CreateIslandNamesOverlay();
+
             uvMapContainer.Add(rangeSelectionOverlay);
             uvMapContainer.Add(magnifyingGlassOverlay);
+            uvMapContainer.Add(islandNamesOverlay);
             
             root.Add(uvMapContainer);
         }
@@ -494,7 +495,77 @@ namespace DeformEditor.Masking
             magnifyingGlassImage.Add(verticalLine);
             magnifyingGlassImage.Add(horizontalLine);
         }
-        
+
+        private void CreateIslandNamesOverlay()
+        {
+            islandNamesOverlay = new VisualElement
+            {
+                name = "islandNamesOverlay",
+                pickingMode = PickingMode.Ignore, // Don't interfere with mouse events
+                style = {
+                    position = Position.Absolute,
+                    left = 0,
+                    top = 0,
+                    right = 0,
+                    bottom = 0
+                }
+            };
+
+            // Use generateVisualContent for efficient text rendering
+            islandNamesOverlay.generateVisualContent += OnGenerateIslandNamesContent;
+        }
+
+        private void OnGenerateIslandNamesContent(MeshGenerationContext mgc)
+        {
+            if (selector == null || !selector.ShowIslandNames) return;
+            if (selector.UVIslands == null || selector.UVIslands.Count == 0) return;
+
+            var uvIslands = selector.UVIslands;
+            var transformMatrix = selector.CalculateUVTransformMatrix();
+            int width = UV_MAP_SIZE;
+            int height = UV_MAP_SIZE;
+
+            // Draw text for each island
+            foreach (var island in uvIslands)
+            {
+                string displayName = !string.IsNullOrEmpty(island.customName)
+                    ? island.customName
+                    : $"Island {island.islandID}";
+
+                // Calculate position
+                Vector2 islandCenter = island.uvBounds.center;
+                Vector3 uvPos = new Vector3(islandCenter.x, islandCenter.y, 0f);
+                Vector3 transformedPos = transformMatrix.MultiplyPoint3x4(uvPos);
+
+                float x = transformedPos.x * width;
+                float y = (1f - transformedPos.y) * height; // Flip Y for UI Toolkit coordinates
+
+                // Skip if outside bounds
+                if (x < 0 || x >= width || y < 0 || y >= height)
+                    continue;
+
+                Vector2 textPos = new Vector2(x, y);
+
+                // Draw text with outline for better visibility
+                // Black outline
+                mgc.DrawText(displayName, textPos + new Vector2(-1, 0), 14, Color.black, null);
+                mgc.DrawText(displayName, textPos + new Vector2(1, 0), 14, Color.black, null);
+                mgc.DrawText(displayName, textPos + new Vector2(0, -1), 14, Color.black, null);
+                mgc.DrawText(displayName, textPos + new Vector2(0, 1), 14, Color.black, null);
+
+                // White text
+                mgc.DrawText(displayName, textPos, 14, Color.white, null);
+            }
+        }
+
+        private void UpdateIslandNamesOverlay()
+        {
+            if (islandNamesOverlay != null)
+            {
+                islandNamesOverlay.MarkDirtyRepaint();
+            }
+        }
+
         private void CreateIslandList()
         {
             var listLabel = new Label("UV Islands");
@@ -622,11 +693,10 @@ namespace DeformEditor.Masking
                         }
                     }
 
-                    // Request UV map texture update if names are being displayed
+                    // Update island names overlay if names are being displayed
                     if (selector != null && selector.ShowIslandNames)
                     {
-                        selector.GenerateUVMapTexture();
-                        RefreshUVMapImage();
+                        UpdateIslandNamesOverlay();
                     }
                 }
             });

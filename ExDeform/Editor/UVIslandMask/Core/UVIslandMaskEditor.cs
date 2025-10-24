@@ -40,11 +40,14 @@ namespace DeformEditor.Masking
         
         // Range selection overlay
         private VisualElement rangeSelectionOverlay;
-        
+
         // Magnifying glass overlay
         private VisualElement magnifyingGlassOverlay;
         private VisualElement magnifyingGlassImage;
         private Label magnifyingGlassLabel;
+
+        // Island names overlay
+        private VisualElement islandNamesOverlay;
         
         private const int UV_MAP_SIZE = 300;
         private bool isDraggingUVMap = false;

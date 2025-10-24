@@ -941,11 +941,8 @@ namespace Deform.Masking.Editor
             // Draw UV islands with current preview submesh selections
             UVTextureRenderer.DrawUVIslands(pixels, width, height, transformMatrix, uvIslands, SelectedIslandIDs, targetMesh);
 
-            // Draw island names if enabled
-            if (ShowIslandNames)
-            {
-                UVTextureRenderer.DrawIslandNames(pixels, width, height, transformMatrix, uvIslands);
-            }
+            // Note: Island names are now rendered using UI Toolkit overlay (generateVisualContent)
+            // instead of texture rendering for better performance and Unicode support
 
             texture.SetPixels(pixels);
             texture.Apply();

@@ -285,6 +285,7 @@ namespace DeformEditor.Masking
                 // Immediate update if enough time has passed
                 selector.GenerateUVMapTexture();
                 RefreshUVMapImage();
+                UpdateIslandNamesOverlay();
                 lastUpdateTime = currentTime;
             }
         }
