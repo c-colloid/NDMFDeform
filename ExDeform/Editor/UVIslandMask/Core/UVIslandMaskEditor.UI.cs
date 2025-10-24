@@ -310,12 +310,12 @@ namespace DeformEditor.Masking
             });
 
             // Font size slider for island names
-            var fontSizeSlider = new Slider("", 8f, 24f)
+	        var fontSizeSlider = new Slider("", 1f, 24f)
             {
                 value = selector?.IslandNameFontSize ?? 14f,
                 style = { width = 60, marginLeft = 5, marginRight = 5 }
             };
-            fontSizeSlider.tooltip = "アイランド名のフォントサイズ (8-24pt, ズームで拡大)";
+	        fontSizeSlider.tooltip = "アイランド名のフォントサイズ (1-24pt, ズームで拡大)";
             fontSizeSlider.RegisterValueChangedCallback(evt =>
             {
                 if (selector != null)
