@@ -17,165 +17,45 @@ namespace Deform.Masking.Editor
         private static readonly Color UNSELECTED_ISLAND_COLOR = new Color(0.5f, 0.5f, 0.5f, 0.3f);
         #endregion
 
-        #region Font Rendering
-        // Simple 5x7 bitmap font data for basic ASCII characters
-        // シンプルな5x7ビットマップフォントデータ
-        private static readonly Dictionary<char, byte[]> bitmapFont = new Dictionary<char, byte[]>()
-        {
-            // Numbers 0-9
-            {'0', new byte[] { 0x70, 0x88, 0x98, 0xA8, 0xC8, 0x88, 0x70 }},
-            {'1', new byte[] { 0x20, 0x60, 0x20, 0x20, 0x20, 0x20, 0x70 }},
-            {'2', new byte[] { 0x70, 0x88, 0x08, 0x10, 0x20, 0x40, 0xF8 }},
-            {'3', new byte[] { 0x70, 0x88, 0x08, 0x30, 0x08, 0x88, 0x70 }},
-            {'4', new byte[] { 0x10, 0x30, 0x50, 0x90, 0xF8, 0x10, 0x10 }},
-            {'5', new byte[] { 0xF8, 0x80, 0xF0, 0x08, 0x08, 0x88, 0x70 }},
-            {'6', new byte[] { 0x30, 0x40, 0x80, 0xF0, 0x88, 0x88, 0x70 }},
-            {'7', new byte[] { 0xF8, 0x08, 0x10, 0x20, 0x40, 0x40, 0x40 }},
-            {'8', new byte[] { 0x70, 0x88, 0x88, 0x70, 0x88, 0x88, 0x70 }},
-            {'9', new byte[] { 0x70, 0x88, 0x88, 0x78, 0x08, 0x10, 0x60 }},
-
-            // Uppercase A-Z
-            {'A', new byte[] { 0x20, 0x50, 0x88, 0x88, 0xF8, 0x88, 0x88 }},
-            {'B', new byte[] { 0xF0, 0x88, 0x88, 0xF0, 0x88, 0x88, 0xF0 }},
-            {'C', new byte[] { 0x70, 0x88, 0x80, 0x80, 0x80, 0x88, 0x70 }},
-            {'D', new byte[] { 0xF0, 0x88, 0x88, 0x88, 0x88, 0x88, 0xF0 }},
-            {'E', new byte[] { 0xF8, 0x80, 0x80, 0xF0, 0x80, 0x80, 0xF8 }},
-            {'F', new byte[] { 0xF8, 0x80, 0x80, 0xF0, 0x80, 0x80, 0x80 }},
-            {'G', new byte[] { 0x70, 0x88, 0x80, 0x98, 0x88, 0x88, 0x70 }},
-            {'H', new byte[] { 0x88, 0x88, 0x88, 0xF8, 0x88, 0x88, 0x88 }},
-            {'I', new byte[] { 0x70, 0x20, 0x20, 0x20, 0x20, 0x20, 0x70 }},
-            {'J', new byte[] { 0x38, 0x10, 0x10, 0x10, 0x10, 0x90, 0x60 }},
-            {'K', new byte[] { 0x88, 0x90, 0xA0, 0xC0, 0xA0, 0x90, 0x88 }},
-            {'L', new byte[] { 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0xF8 }},
-            {'M', new byte[] { 0x88, 0xD8, 0xA8, 0xA8, 0x88, 0x88, 0x88 }},
-            {'N', new byte[] { 0x88, 0xC8, 0xA8, 0x98, 0x88, 0x88, 0x88 }},
-            {'O', new byte[] { 0x70, 0x88, 0x88, 0x88, 0x88, 0x88, 0x70 }},
-            {'P', new byte[] { 0xF0, 0x88, 0x88, 0xF0, 0x80, 0x80, 0x80 }},
-            {'Q', new byte[] { 0x70, 0x88, 0x88, 0x88, 0xA8, 0x90, 0x68 }},
-            {'R', new byte[] { 0xF0, 0x88, 0x88, 0xF0, 0xA0, 0x90, 0x88 }},
-            {'S', new byte[] { 0x70, 0x88, 0x80, 0x70, 0x08, 0x88, 0x70 }},
-            {'T', new byte[] { 0xF8, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20 }},
-            {'U', new byte[] { 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x70 }},
-            {'V', new byte[] { 0x88, 0x88, 0x88, 0x50, 0x50, 0x20, 0x20 }},
-            {'W', new byte[] { 0x88, 0x88, 0x88, 0xA8, 0xA8, 0xD8, 0x88 }},
-            {'X', new byte[] { 0x88, 0x88, 0x50, 0x20, 0x50, 0x88, 0x88 }},
-            {'Y', new byte[] { 0x88, 0x88, 0x50, 0x20, 0x20, 0x20, 0x20 }},
-            {'Z', new byte[] { 0xF8, 0x08, 0x10, 0x20, 0x40, 0x80, 0xF8 }},
-
-            // Lowercase a-z (simplified)
-            {'a', new byte[] { 0x00, 0x00, 0x70, 0x08, 0x78, 0x88, 0x78 }},
-            {'b', new byte[] { 0x80, 0x80, 0xB0, 0xC8, 0x88, 0x88, 0xF0 }},
-            {'c', new byte[] { 0x00, 0x00, 0x70, 0x80, 0x80, 0x88, 0x70 }},
-            {'d', new byte[] { 0x08, 0x08, 0x68, 0x98, 0x88, 0x88, 0x78 }},
-            {'e', new byte[] { 0x00, 0x00, 0x70, 0x88, 0xF8, 0x80, 0x70 }},
-            {'f', new byte[] { 0x30, 0x48, 0x40, 0xE0, 0x40, 0x40, 0x40 }},
-            {'g', new byte[] { 0x00, 0x00, 0x78, 0x88, 0x88, 0x78, 0x08, 0x70 }},
-            {'h', new byte[] { 0x80, 0x80, 0xB0, 0xC8, 0x88, 0x88, 0x88 }},
-            {'i', new byte[] { 0x20, 0x00, 0x60, 0x20, 0x20, 0x20, 0x70 }},
-            {'j', new byte[] { 0x10, 0x00, 0x30, 0x10, 0x10, 0x90, 0x60 }},
-            {'k', new byte[] { 0x80, 0x80, 0x90, 0xA0, 0xC0, 0xA0, 0x90 }},
-            {'l', new byte[] { 0x60, 0x20, 0x20, 0x20, 0x20, 0x20, 0x70 }},
-            {'m', new byte[] { 0x00, 0x00, 0xD0, 0xA8, 0xA8, 0x88, 0x88 }},
-            {'n', new byte[] { 0x00, 0x00, 0xB0, 0xC8, 0x88, 0x88, 0x88 }},
-            {'o', new byte[] { 0x00, 0x00, 0x70, 0x88, 0x88, 0x88, 0x70 }},
-            {'p', new byte[] { 0x00, 0x00, 0xF0, 0x88, 0x88, 0xF0, 0x80, 0x80 }},
-            {'q', new byte[] { 0x00, 0x00, 0x78, 0x88, 0x88, 0x78, 0x08, 0x08 }},
-            {'r', new byte[] { 0x00, 0x00, 0xB0, 0xC8, 0x80, 0x80, 0x80 }},
-            {'s', new byte[] { 0x00, 0x00, 0x78, 0x80, 0x70, 0x08, 0xF0 }},
-            {'t', new byte[] { 0x40, 0x40, 0xE0, 0x40, 0x40, 0x48, 0x30 }},
-            {'u', new byte[] { 0x00, 0x00, 0x88, 0x88, 0x88, 0x98, 0x68 }},
-            {'v', new byte[] { 0x00, 0x00, 0x88, 0x88, 0x50, 0x50, 0x20 }},
-            {'w', new byte[] { 0x00, 0x00, 0x88, 0x88, 0xA8, 0xA8, 0x50 }},
-            {'x', new byte[] { 0x00, 0x00, 0x88, 0x50, 0x20, 0x50, 0x88 }},
-            {'y', new byte[] { 0x00, 0x00, 0x88, 0x88, 0x78, 0x08, 0x70 }},
-            {'z', new byte[] { 0x00, 0x00, 0xF8, 0x10, 0x20, 0x40, 0xF8 }},
-
-            // Special characters
-            {' ', new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }},
-            {'-', new byte[] { 0x00, 0x00, 0x00, 0xF8, 0x00, 0x00, 0x00 }},
-            {'_', new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF8 }},
-            {'.', new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x60, 0x60 }},
-            {',', new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x60, 0x20, 0x40 }},
-        };
-
+        #region Font Rendering with RenderTexture
         /// <summary>
-        /// Draw text using simple bitmap font
-        /// シンプルなビットマップフォントでテキストを描画
-        /// </summary>
-        public static void DrawText(string text, Vector2 position, Color[] pixels, int width, int height,
-            Color textColor, Color shadowColor, int scale = 1)
-        {
-            if (string.IsNullOrEmpty(text)) return;
-
-            int x = Mathf.RoundToInt(position.x);
-            int y = Mathf.RoundToInt(position.y);
-
-            // Calculate text width for centering
-            int charWidth = 6 * scale; // 5 pixels + 1 spacing
-            int totalWidth = text.Length * charWidth;
-            int startX = x - totalWidth / 2;
-            int currentX = startX;
-
-            foreach (char c in text)
-            {
-                char upperChar = char.ToUpper(c);
-                if (bitmapFont.ContainsKey(upperChar))
-                {
-                    // Draw shadow first (offset by 1 pixel)
-                    DrawBitmapChar(bitmapFont[upperChar], currentX + 1, y + 1, pixels, width, height, shadowColor, scale);
-
-                    // Draw main character
-                    DrawBitmapChar(bitmapFont[upperChar], currentX, y, pixels, width, height, textColor, scale);
-                }
-                currentX += charWidth;
-            }
-        }
-
-        /// <summary>
-        /// Draw a single bitmap character
-        /// ビットマップ文字を1文字描画
-        /// </summary>
-        private static void DrawBitmapChar(byte[] charData, int x, int y, Color[] pixels, int width, int height,
-            Color color, int scale)
-        {
-            for (int row = 0; row < charData.Length && row < 8; row++)
-            {
-                byte rowData = charData[row];
-                for (int col = 0; col < 8; col++)
-                {
-                    if ((rowData & (1 << (7 - col))) != 0)
-                    {
-                        // Draw scaled pixel
-                        for (int sy = 0; sy < scale; sy++)
-                        {
-                            for (int sx = 0; sx < scale; sx++)
-                            {
-                                int pixelX = x + col * scale + sx;
-                                int pixelY = y + row * scale + sy;
-
-                                if (pixelX >= 0 && pixelX < width && pixelY >= 0 && pixelY < height)
-                                {
-                                    int index = pixelY * width + pixelX;
-                                    if (index >= 0 && index < pixels.Length)
-                                    {
-                                        pixels[index] = Color.Lerp(pixels[index], color, 0.9f);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        /// <summary>
-        /// Draw island names on UV islands
-        /// UVアイランド上にアイランド名を描画
+        /// Draw island names on UV islands using RenderTexture for Unicode support
+        /// RenderTextureを使用してUVアイランド上にアイランド名を描画（Unicode対応）
         /// </summary>
         public static void DrawIslandNames(Color[] pixels, int width, int height, Matrix4x4 transform,
             List<UVIslandAnalyzer.UVIsland> uvIslands)
         {
             if (uvIslands == null || uvIslands.Count == 0) return;
+
+            // Create a temporary RenderTexture for text rendering
+            RenderTexture rt = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32);
+            RenderTexture prevActive = RenderTexture.active;
+            RenderTexture.active = rt;
+
+            // Clear to transparent
+            GL.Clear(true, true, Color.clear);
+
+            // Create temporary texture from pixel data
+            Texture2D tempTex = new Texture2D(width, height, TextureFormat.RGBA32, false);
+            tempTex.SetPixels(pixels);
+            tempTex.Apply();
+
+            // Copy existing texture to RenderTexture
+            Graphics.Blit(tempTex, rt);
+
+            // Begin GUI rendering
+            GL.PushMatrix();
+            GL.LoadPixelMatrix(0, width, height, 0);
+
+            // Define text styles
+            GUIStyle textStyle = new GUIStyle();
+            textStyle.normal.textColor = Color.white;
+            textStyle.fontSize = 14; // Larger font size
+            textStyle.fontStyle = FontStyle.Bold;
+            textStyle.alignment = TextAnchor.MiddleCenter;
+
+            GUIStyle shadowStyle = new GUIStyle(textStyle);
+            shadowStyle.normal.textColor = Color.black;
 
             foreach (var island in uvIslands)
             {
@@ -191,18 +71,43 @@ namespace Deform.Masking.Editor
                 Vector3 uvPos = new Vector3(islandCenter.x, islandCenter.y, 0f);
                 Vector3 transformedPos = transform.MultiplyPoint3x4(uvPos);
 
-                // Convert to pixel coordinates
+                // Convert to pixel coordinates (NO Y-flip here, GUI coordinates are already flipped)
                 int x = Mathf.RoundToInt(transformedPos.x * width);
-                int y = Mathf.RoundToInt((1f - transformedPos.y) * height); // Flip Y
+                int y = Mathf.RoundToInt(transformedPos.y * height);
 
                 // Skip if outside visible area
                 if (x < 0 || x >= width || y < 0 || y >= height)
                     continue;
 
-                // Draw text with shadow (scale=1 for compact text)
-                DrawText(displayName, new Vector2(x, y), pixels, width, height,
-                    Color.white, Color.black, 1);
+                // Calculate text size for proper positioning
+                Vector2 textSize = shadowStyle.CalcSize(new GUIContent(displayName));
+                Rect textRect = new Rect(x - textSize.x / 2f, y - textSize.y / 2f, textSize.x, textSize.y);
+
+                // Draw shadow
+                Rect shadowRect = new Rect(textRect.x + 1, textRect.y + 1, textRect.width, textRect.height);
+                GUI.Label(shadowRect, displayName, shadowStyle);
+
+                // Draw text
+                GUI.Label(textRect, displayName, textStyle);
             }
+
+            GL.PopMatrix();
+
+            // Read pixels from RenderTexture
+            tempTex.ReadPixels(new Rect(0, 0, width, height), 0, 0);
+            tempTex.Apply();
+
+            // Copy back to pixel array
+            Color[] renderedPixels = tempTex.GetPixels();
+            for (int i = 0; i < pixels.Length && i < renderedPixels.Length; i++)
+            {
+                pixels[i] = renderedPixels[i];
+            }
+
+            // Cleanup
+            RenderTexture.active = prevActive;
+            RenderTexture.ReleaseTemporary(rt);
+            Object.DestroyImmediate(tempTex);
         }
         #endregion
 
