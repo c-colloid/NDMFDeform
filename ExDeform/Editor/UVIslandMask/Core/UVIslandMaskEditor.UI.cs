@@ -603,11 +603,36 @@ namespace DeformEditor.Masking
 
         private void CreateIslandList()
         {
+            // Header with label and edit button
+            var headerContainer = new VisualElement
+            {
+                style = {
+                    flexDirection = FlexDirection.Row,
+                    alignItems = Align.Center,
+                    marginBottom = 5
+                }
+            };
+
             var listLabel = new Label("UV Islands");
             listLabel.style.fontSize = 14;
             listLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
-            listLabel.style.marginBottom = 5;
-            root.Add(listLabel);
+            listLabel.style.flexGrow = 1;
+            headerContainer.Add(listLabel);
+
+            var editModeToggle = new Button(() =>
+            {
+                islandNamesEditMode = !islandNamesEditMode;
+                editingIslands.Clear(); // Clear individual edit states when toggling mode
+                RebuildIslandList();
+            })
+            {
+                text = "名前編集",
+                style = { width = 70 }
+            };
+            editModeToggle.tooltip = "アイランド名の編集モードを切り替え";
+            headerContainer.Add(editModeToggle);
+
+            root.Add(headerContainer);
             
             islandListView = new ListView
             {
@@ -632,20 +657,12 @@ namespace DeformEditor.Masking
             var container = new VisualElement
             {
                 style = {
-                    flexDirection = FlexDirection.Column,
+                    flexDirection = FlexDirection.Row,
+                    alignItems = Align.Center,
                     paddingLeft = 5,
                     paddingRight = 5,
                     paddingTop = 3,
                     paddingBottom = 3
-                }
-            };
-
-            // Top row: color box, ID label, and details
-            var topRow = new VisualElement
-            {
-                style = {
-                    flexDirection = FlexDirection.Row,
-                    alignItems = Align.Center
                 }
             };
 
@@ -659,53 +676,57 @@ namespace DeformEditor.Masking
                 }
             };
 
-            var label = new Label
+            // Name label (display mode)
+            var nameLabel = new Label
             {
+                name = "nameLabel",
                 style = {
                     flexGrow = 1,
-                    fontSize = 12
+                    fontSize = 12,
+                    unityTextAlign = TextAnchor.MiddleLeft
                 }
             };
 
-            var detailsContainer = new VisualElement
+            // Register double-click to enter edit mode for this item
+            nameLabel.RegisterCallback<MouseDownEvent>(evt =>
             {
-                style = {
-                    alignItems = Align.FlexEnd
+                if (evt.clickCount == 2)
+                {
+                    var islandData = nameLabel.userData as (int islandID, int submeshIndex)?;
+                    if (islandData.HasValue)
+                    {
+                        editingIslands.Add(islandData.Value);
+                        RebuildIslandList();
+                    }
                 }
-            };
+            });
 
-            var vertexCountLabel = new Label
-            {
-                style = {
-                    color = Color.gray,
-                    fontSize = 10
-                }
-            };
-
-            var faceCountLabel = new Label
-            {
-                style = {
-                    color = Color.gray,
-                    fontSize = 10
-                }
-            };
-
-            detailsContainer.Add(vertexCountLabel);
-            detailsContainer.Add(faceCountLabel);
-
-            topRow.Add(colorBox);
-            topRow.Add(label);
-            topRow.Add(detailsContainer);
-
-            // Bottom row: name text field
+            // Name field (edit mode)
             var nameField = new TextField
             {
+                name = "nameField",
                 style = {
+                    flexGrow = 1,
                     fontSize = 11,
-	                marginTop = 0,
-                    marginLeft = 24
+                    marginLeft = 0,
+                    marginRight = 0
                 }
             };
+
+            // Register Ctrl+Enter to exit edit mode
+            nameField.RegisterCallback<KeyDownEvent>(evt =>
+            {
+                if (evt.keyCode == KeyCode.Return && evt.ctrlKey)
+                {
+                    var islandData = nameField.userData as (int islandID, int submeshIndex)?;
+                    if (islandData.HasValue)
+                    {
+                        editingIslands.Remove(islandData.Value);
+                        RebuildIslandList();
+                    }
+                    evt.StopPropagation();
+                }
+            });
             nameField.RegisterValueChangedCallback(evt =>
             {
                 // Store island ID and submesh index in user data for later retrieval
@@ -736,8 +757,38 @@ namespace DeformEditor.Masking
                 }
             });
 
-            container.Add(topRow);
+            var detailsContainer = new VisualElement
+            {
+                style = {
+                    alignItems = Align.FlexEnd
+                }
+            };
+
+            var vertexCountLabel = new Label
+            {
+                name = "vertexCountLabel",
+                style = {
+                    color = Color.gray,
+                    fontSize = 10
+                }
+            };
+
+            var faceCountLabel = new Label
+            {
+                name = "faceCountLabel",
+                style = {
+                    color = Color.gray,
+                    fontSize = 10
+                }
+            };
+
+            detailsContainer.Add(vertexCountLabel);
+            detailsContainer.Add(faceCountLabel);
+
+            container.Add(colorBox);
+            container.Add(nameLabel);
             container.Add(nameField);
+            container.Add(detailsContainer);
 
             return container;
         }
@@ -748,51 +799,61 @@ namespace DeformEditor.Masking
             {
                 var island = selector.UVIslands[index];
                 var container = element;
-                var topRow = container[0];
-                var nameField = container[1] as TextField;
 
-                var colorBox = topRow[0];
-                var label = topRow[1] as Label;
-                var detailsContainer = topRow[2];
-                var vertexCountLabel = detailsContainer[0] as Label;
-                var faceCountLabel = detailsContainer[1] as Label;
+                // Get elements by name for clarity
+                var colorBox = container[0];
+                var nameLabel = container.Q<Label>("nameLabel");
+                var nameField = container.Q<TextField>("nameField");
+                var vertexCountLabel = container.Q<Label>("vertexCountLabel");
+                var faceCountLabel = container.Q<Label>("faceCountLabel");
 
-                colorBox.style.backgroundColor = island.maskColor;
-                label.text = $"Island {island.islandID} (SM{island.submeshIndex})";
-                vertexCountLabel.text = $"{island.vertexIndices.Count}頂点";
-                faceCountLabel.text = $"{island.faceCount}面";
-
-                // Load and display custom name
+                // Load custom name
                 string customName = targetMask?.GetIslandCustomName(island.islandID, island.submeshIndex) ?? "";
                 if (string.IsNullOrEmpty(customName))
                 {
-	                customName = island.customName; // Fallback to island's own custom name if mask doesn't have one
+                    customName = island.customName; // Fallback to island's own custom name if mask doesn't have one
                 }
-	            else
-	            {
-		            label.text = customName;	
-	            }
 
                 // Update the island's customName field to keep in sync
                 island.customName = customName;
 
-                // Set the text field value and placeholder
+                // Determine if this item should be in edit mode
+                var islandKey = (island.islandID, island.submeshIndex);
+                bool isEditing = islandNamesEditMode || editingIslands.Contains(islandKey);
+
+                // Update nameLabel (display mode)
+                if (nameLabel != null)
+                {
+                    string displayText = !string.IsNullOrEmpty(customName)
+                        ? customName
+                        : $"Island {island.islandID} (SM{island.submeshIndex})";
+                    nameLabel.text = displayText;
+                    nameLabel.userData = islandKey;
+                    nameLabel.style.display = isEditing ? DisplayStyle.None : DisplayStyle.Flex;
+                }
+
+                // Update nameField (edit mode)
                 if (nameField != null)
                 {
                     nameField.SetValueWithoutNotify(customName);
-                    nameField.userData = (island.islandID, island.submeshIndex);
+                    nameField.userData = islandKey;
+                    nameField.style.display = isEditing ? DisplayStyle.Flex : DisplayStyle.None;
 
-                    // Set placeholder text
-                    if (string.IsNullOrEmpty(customName))
+                    // Focus the field when entering edit mode for this specific item
+                    if (editingIslands.Contains(islandKey) && nameField.style.display == DisplayStyle.Flex)
                     {
-                        var textInput = nameField.Q(className: "unity-text-field__input");
-                        if (textInput != null)
-                        {
-	                        textInput.style.unityFontStyleAndWeight = FontStyle.Bold;
-	                        textInput.style.color = Color.black;
-                        }
+                        nameField.Focus();
                     }
                 }
+
+                // Update other elements
+                colorBox.style.backgroundColor = island.maskColor;
+
+                if (vertexCountLabel != null)
+                    vertexCountLabel.text = $"{island.vertexIndices.Count}頂点";
+
+                if (faceCountLabel != null)
+                    faceCountLabel.text = $"{island.faceCount}面";
 
                 // Selection state
                 var isSelected = selector.SelectedIslandIDs.Contains(island.islandID);

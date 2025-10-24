@@ -48,6 +48,10 @@ namespace DeformEditor.Masking
 
         // Island names overlay
         private VisualElement islandNamesOverlay;
+
+        // Island name editing
+        private bool islandNamesEditMode = false;
+        private HashSet<(int islandID, int submeshIndex)> editingIslands = new HashSet<(int, int)>();
         
         private const int UV_MAP_SIZE = 300;
         private bool isDraggingUVMap = false;
