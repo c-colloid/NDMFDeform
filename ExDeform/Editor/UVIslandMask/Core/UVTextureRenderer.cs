@@ -18,6 +18,10 @@ namespace Deform.Masking.Editor
         #endregion
 
         #region Text Rendering with Camera and Canvas
+        // Cache for performance optimization
+        private static int lastNameRenderHash = 0;
+        private static Texture2D cachedNameOverlay = null;
+
         /// <summary>
         /// Draw island names on UV islands using Camera + Canvas for proper Unicode support
         /// カメラ+キャンバスを使用してUVアイランド上にアイランド名を描画（Unicode完全対応）
@@ -27,120 +31,171 @@ namespace Deform.Masking.Editor
         {
             if (uvIslands == null || uvIslands.Count == 0) return;
 
-            // Create temporary texture from pixel data
-            Texture2D baseTexture = new Texture2D(width, height, TextureFormat.RGBA32, false);
-            baseTexture.SetPixels(pixels);
-            baseTexture.Apply();
+            // Calculate hash for caching
+            int currentHash = CalculateNameHash(uvIslands, width, height, transform);
+            bool useCache = (currentHash == lastNameRenderHash && cachedNameOverlay != null);
 
-            // Create temporary objects for rendering
-            GameObject tempCameraObj = new GameObject("TempTextCamera");
-            GameObject tempCanvasObj = new GameObject("TempCanvas");
+            Texture2D nameOverlay = null;
 
-            try
+            if (!useCache)
             {
-                // Setup camera
-                Camera tempCamera = tempCameraObj.AddComponent<Camera>();
-                tempCamera.clearFlags = CameraClearFlags.Nothing;
-                tempCamera.cullingMask = 1 << 31; // Use layer 31 for temp rendering
-                tempCamera.orthographic = true;
-                tempCamera.orthographicSize = height / 2f;
-                tempCamera.nearClipPlane = 0.1f;
-                tempCamera.farClipPlane = 100f;
-                tempCamera.transform.position = new Vector3(width / 2f, height / 2f, -10f);
+                // Create temporary objects for rendering (only when cache invalid)
+                GameObject tempCameraObj = new GameObject("TempTextCamera");
+                GameObject tempCanvasObj = new GameObject("TempCanvas");
+                tempCameraObj.hideFlags = HideFlags.HideAndDontSave;
+                tempCanvasObj.hideFlags = HideFlags.HideAndDontSave;
 
-                // Create and setup RenderTexture
-                RenderTexture rt = RenderTexture.GetTemporary(width, height, 24, RenderTextureFormat.ARGB32);
-                tempCamera.targetTexture = rt;
+                try
+                {
+                    // Setup camera
+                    Camera tempCamera = tempCameraObj.AddComponent<Camera>();
+                    tempCamera.clearFlags = CameraClearFlags.SolidColor;
+                    tempCamera.backgroundColor = Color.clear;
+                    tempCamera.cullingMask = 1 << 31;
+                    tempCamera.orthographic = true;
+                    tempCamera.orthographicSize = height / 2f;
+                    tempCamera.nearClipPlane = 0.1f;
+                    tempCamera.farClipPlane = 100f;
+                    tempCamera.transform.position = new Vector3(width / 2f, height / 2f, -10f);
 
-                // Blit base texture to RenderTexture
-                RenderTexture prevActive = RenderTexture.active;
-                RenderTexture.active = rt;
-                Graphics.Blit(baseTexture, rt);
+                    // Create and setup RenderTexture
+                    RenderTexture rt = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32);
+                    tempCamera.targetTexture = rt;
 
-                // Setup Canvas
-                Canvas canvas = tempCanvasObj.AddComponent<Canvas>();
-                canvas.renderMode = RenderMode.WorldSpace;
-                tempCanvasObj.layer = 31;
+                    // Setup Canvas
+                    Canvas canvas = tempCanvasObj.AddComponent<Canvas>();
+                    canvas.renderMode = RenderMode.WorldSpace;
+                    tempCanvasObj.layer = 31;
 
-                UnityEngine.UI.CanvasScaler scaler = tempCanvasObj.AddComponent<UnityEngine.UI.CanvasScaler>();
-                scaler.dynamicPixelsPerUnit = 1;
+                    UnityEngine.UI.CanvasScaler scaler = tempCanvasObj.AddComponent<UnityEngine.UI.CanvasScaler>();
+                    scaler.dynamicPixelsPerUnit = 1;
 
-                RectTransform canvasRect = tempCanvasObj.GetComponent<RectTransform>();
-                canvasRect.sizeDelta = new Vector2(width, height);
-                canvasRect.position = new Vector3(width / 2f, height / 2f, 0f);
+                    RectTransform canvasRect = tempCanvasObj.GetComponent<RectTransform>();
+                    canvasRect.sizeDelta = new Vector2(width, height);
+                    canvasRect.position = new Vector3(width / 2f, height / 2f, 0f);
 
-                // Draw text for each island
+                    // Draw text for each island
+                    foreach (var island in uvIslands)
+                    {
+                        string displayName = !string.IsNullOrEmpty(island.customName)
+                            ? island.customName
+                            : $"Island {island.islandID}";
+
+                        Vector2 islandCenter = island.uvBounds.center;
+                        Vector3 uvPos = new Vector3(islandCenter.x, islandCenter.y, 0f);
+                        Vector3 transformedPos = transform.MultiplyPoint3x4(uvPos);
+
+                        float x = transformedPos.x * width;
+                        float y = transformedPos.y * height;
+
+                        if (x < 0 || x >= width || y < 0 || y >= height)
+                            continue;
+
+                        GameObject textObj = new GameObject("IslandText");
+                        textObj.transform.SetParent(tempCanvasObj.transform, false);
+                        textObj.layer = 31;
+                        textObj.hideFlags = HideFlags.HideAndDontSave;
+
+                        UnityEngine.UI.Text textComponent = textObj.AddComponent<UnityEngine.UI.Text>();
+                        textComponent.text = displayName;
+                        textComponent.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                        textComponent.fontSize = 14;
+                        textComponent.fontStyle = FontStyle.Bold;
+                        textComponent.color = Color.white;
+                        textComponent.alignment = TextAnchor.MiddleCenter;
+
+                        UnityEngine.UI.Outline outline = textObj.AddComponent<UnityEngine.UI.Outline>();
+                        outline.effectColor = Color.black;
+                        outline.effectDistance = new Vector2(1, -1);
+
+                        RectTransform textRect = textObj.GetComponent<RectTransform>();
+                        textRect.anchoredPosition = new Vector2(x - width / 2f, y - height / 2f);
+                        textRect.sizeDelta = new Vector2(200, 30);
+                    }
+
+                    // Force canvas update for immediate layout
+                    Canvas.ForceUpdateCanvases();
+
+                    // Render
+                    tempCamera.Render();
+
+                    // Read pixels back
+                    RenderTexture prevActive = RenderTexture.active;
+                    RenderTexture.active = rt;
+                    nameOverlay = new Texture2D(width, height, TextureFormat.RGBA32, false);
+                    nameOverlay.ReadPixels(new Rect(0, 0, width, height), 0, 0);
+                    nameOverlay.Apply();
+                    RenderTexture.active = prevActive;
+
+                    // Update cache
+                    if (cachedNameOverlay != null)
+                        Object.DestroyImmediate(cachedNameOverlay);
+                    cachedNameOverlay = nameOverlay;
+                    lastNameRenderHash = currentHash;
+
+                    RenderTexture.ReleaseTemporary(rt);
+                }
+                finally
+                {
+                    Object.DestroyImmediate(tempCanvasObj);
+                    Object.DestroyImmediate(tempCameraObj);
+                }
+            }
+            else
+            {
+                nameOverlay = cachedNameOverlay;
+            }
+
+            // Blend name overlay onto base texture
+            if (nameOverlay != null)
+            {
+                Color[] overlayPixels = nameOverlay.GetPixels();
+                for (int i = 0; i < pixels.Length && i < overlayPixels.Length; i++)
+                {
+                    Color overlay = overlayPixels[i];
+                    if (overlay.a > 0.01f)
+                    {
+                        pixels[i] = Color.Lerp(pixels[i], overlay, overlay.a);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Calculate hash for name rendering cache
+        /// </summary>
+        private static int CalculateNameHash(List<UVIslandAnalyzer.UVIsland> uvIslands, int width, int height, Matrix4x4 transform)
+        {
+            unchecked
+            {
+                int hash = 17;
+                hash = hash * 31 + width;
+                hash = hash * 31 + height;
+                hash = hash * 31 + transform.GetHashCode();
+
                 foreach (var island in uvIslands)
                 {
-                    // Get display name
-                    string displayName = !string.IsNullOrEmpty(island.customName)
-                        ? island.customName
-                        : $"Island {island.islandID}";
-
-                    // Calculate position
-                    Vector2 islandCenter = island.uvBounds.center;
-                    Vector3 uvPos = new Vector3(islandCenter.x, islandCenter.y, 0f);
-                    Vector3 transformedPos = transform.MultiplyPoint3x4(uvPos);
-
-                    float x = transformedPos.x * width;
-                    float y = transformedPos.y * height;
-
-                    // Skip if outside visible area
-                    if (x < 0 || x >= width || y < 0 || y >= height)
-                        continue;
-
-                    // Create text GameObject
-                    GameObject textObj = new GameObject("IslandText");
-                    textObj.transform.SetParent(tempCanvasObj.transform, false);
-                    textObj.layer = 31;
-
-                    // Add Text component (fallback if TextMeshPro not available)
-                    UnityEngine.UI.Text textComponent = textObj.AddComponent<UnityEngine.UI.Text>();
-                    textComponent.text = displayName;
-                    textComponent.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-                    textComponent.fontSize = 14;
-                    textComponent.fontStyle = FontStyle.Bold;
-                    textComponent.color = Color.white;
-                    textComponent.alignment = TextAnchor.MiddleCenter;
-
-                    // Add outline for shadow effect
-                    UnityEngine.UI.Outline outline = textObj.AddComponent<UnityEngine.UI.Outline>();
-                    outline.effectColor = Color.black;
-                    outline.effectDistance = new Vector2(1, -1);
-
-                    // Position text
-                    RectTransform textRect = textObj.GetComponent<RectTransform>();
-                    textRect.anchoredPosition = new Vector2(x - width / 2f, y - height / 2f);
-                    textRect.sizeDelta = new Vector2(200, 30);
+                    hash = hash * 31 + island.islandID;
+                    hash = hash * 31 + island.submeshIndex;
+                    if (!string.IsNullOrEmpty(island.customName))
+                        hash = hash * 31 + island.customName.GetHashCode();
                 }
 
-                // Render
-                tempCamera.Render();
-
-                // Read pixels back
-                Texture2D resultTexture = new Texture2D(width, height, TextureFormat.RGBA32, false);
-                resultTexture.ReadPixels(new Rect(0, 0, width, height), 0, 0);
-                resultTexture.Apply();
-
-                // Copy to output pixel array
-                Color[] resultPixels = resultTexture.GetPixels();
-                for (int i = 0; i < pixels.Length && i < resultPixels.Length; i++)
-                {
-                    pixels[i] = resultPixels[i];
-                }
-
-                // Cleanup
-                RenderTexture.active = prevActive;
-                RenderTexture.ReleaseTemporary(rt);
-                Object.DestroyImmediate(resultTexture);
+                return hash;
             }
-            finally
+        }
+
+        /// <summary>
+        /// Clear cached name overlay texture
+        /// </summary>
+        public static void ClearNameCache()
+        {
+            if (cachedNameOverlay != null)
             {
-                // Always cleanup temporary objects
-                Object.DestroyImmediate(tempCanvasObj);
-                Object.DestroyImmediate(tempCameraObj);
-                Object.DestroyImmediate(baseTexture);
+                Object.DestroyImmediate(cachedNameOverlay);
+                cachedNameOverlay = null;
             }
+            lastNameRenderHash = 0;
         }
         #endregion
 
