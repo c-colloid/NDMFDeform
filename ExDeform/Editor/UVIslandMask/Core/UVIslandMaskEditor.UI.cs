@@ -668,6 +668,7 @@ namespace DeformEditor.Masking
 
             var colorBox = new VisualElement
             {
+                name = "colorBox",
                 style = {
                     width = 16,
                     height = 16,
@@ -713,10 +714,11 @@ namespace DeformEditor.Masking
                 }
             };
 
-            // Register Ctrl+Enter to exit edit mode
+            // Register Enter (non-IME) and FocusOut to exit edit mode
             nameField.RegisterCallback<KeyDownEvent>(evt =>
             {
-                if (evt.keyCode == KeyCode.Return && evt.ctrlKey)
+                // Enter key pressed and not in IME composition
+                if (evt.keyCode == KeyCode.Return && (evt.character == '\n' || evt.character == '\r'))
                 {
                     var islandData = nameField.userData as (int islandID, int submeshIndex)?;
                     if (islandData.HasValue)
@@ -725,6 +727,17 @@ namespace DeformEditor.Masking
                         RebuildIslandList();
                     }
                     evt.StopPropagation();
+                }
+            });
+
+            // Exit edit mode when focus is lost (clicked outside)
+            nameField.RegisterCallback<FocusOutEvent>(evt =>
+            {
+                var islandData = nameField.userData as (int islandID, int submeshIndex)?;
+                if (islandData.HasValue)
+                {
+                    editingIslands.Remove(islandData.Value);
+                    RebuildIslandList();
                 }
             });
             nameField.RegisterValueChangedCallback(evt =>
@@ -759,6 +772,7 @@ namespace DeformEditor.Masking
 
             var detailsContainer = new VisualElement
             {
+                name = "detailsContainer",
                 style = {
                     alignItems = Align.FlexEnd
                 }
@@ -800,8 +814,8 @@ namespace DeformEditor.Masking
                 var island = selector.UVIslands[index];
                 var container = element;
 
-                // Get elements by name for clarity
-                var colorBox = container[0];
+                // Get elements by name
+                var colorBox = container.Q<VisualElement>("colorBox");
                 var nameLabel = container.Q<Label>("nameLabel");
                 var nameField = container.Q<TextField>("nameField");
                 var vertexCountLabel = container.Q<Label>("vertexCountLabel");
@@ -847,7 +861,8 @@ namespace DeformEditor.Masking
                 }
 
                 // Update other elements
-                colorBox.style.backgroundColor = island.maskColor;
+                if (colorBox != null)
+                    colorBox.style.backgroundColor = island.maskColor;
 
                 if (vertexCountLabel != null)
                     vertexCountLabel.text = $"{island.vertexIndices.Count}頂点";
