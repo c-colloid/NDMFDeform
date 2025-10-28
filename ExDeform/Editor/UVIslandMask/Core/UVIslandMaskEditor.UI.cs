@@ -677,12 +677,21 @@ namespace DeformEditor.Masking
                 }
             };
 
+            // Container for name label and field (both occupy same space)
+            var nameContainer = new VisualElement
+            {
+                name = "nameContainer",
+                style = {
+                    flexGrow = 1,
+                    flexShrink = 1
+                }
+            };
+
             // Name label (display mode)
             var nameLabel = new Label
             {
                 name = "nameLabel",
                 style = {
-                    flexGrow = 1,
                     fontSize = 12,
                     unityTextAlign = TextAnchor.MiddleLeft
                 }
@@ -707,7 +716,6 @@ namespace DeformEditor.Masking
             {
                 name = "nameField",
                 style = {
-                    flexGrow = 1,
                     fontSize = 11,
                     marginLeft = 0,
                     marginRight = 0
@@ -799,9 +807,13 @@ namespace DeformEditor.Masking
             detailsContainer.Add(vertexCountLabel);
             detailsContainer.Add(faceCountLabel);
 
+            // Add name label and field to name container
+            nameContainer.Add(nameLabel);
+            nameContainer.Add(nameField);
+
+            // Build final container
             container.Add(colorBox);
-            container.Add(nameLabel);
-            container.Add(nameField);
+            container.Add(nameContainer);
             container.Add(detailsContainer);
 
             return container;
