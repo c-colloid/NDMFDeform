@@ -570,15 +570,13 @@ namespace DeformEditor.Masking
                 if (x < 0 || x >= width || y < 0 || y >= height)
                     continue;
 
-                // Estimate text width and height for centering
-                // Approximate: 0.6 * fontSize per character for width, fontSize for height
-                float estimatedWidth = displayName.Length * fontSize * 0.6f;
-                float estimatedHeight = fontSize;
+                // Calculate accurate text dimensions with line and character-type detection
+                Vector2 textDimensions = CalculateTextDimensions(displayName, fontSize);
 
                 // Center the text at the island position
                 Vector2 centeredPos = new Vector2(
-                    x - estimatedWidth * 0.5f,
-                    y - estimatedHeight * 0.5f
+                    x - textDimensions.x * 0.5f,
+                    y - textDimensions.y * 0.5f
                 );
 
                 // Draw text with outline for better visibility
@@ -591,6 +589,80 @@ namespace DeformEditor.Masking
                 // White text
                 mgc.DrawText(displayName, centeredPos, fontSize, Color.white, null);
             }
+        }
+
+        /// <summary>
+        /// Calculate text dimensions with accurate width and height estimation
+        /// Supports multiline text and mixed character types (Japanese/Chinese/Korean vs ASCII)
+        /// </summary>
+        /// <param name="text">Text to measure</param>
+        /// <param name="fontSize">Font size in points</param>
+        /// <returns>Vector2 with (width, height) of the text</returns>
+        private Vector2 CalculateTextDimensions(string text, float fontSize)
+        {
+            if (string.IsNullOrEmpty(text))
+                return Vector2.zero;
+
+            // Split into lines for multiline support
+            string[] lines = text.Split('\n');
+
+            // Calculate width of each line
+            float maxWidth = 0f;
+            foreach (var line in lines)
+            {
+                float lineWidth = 0f;
+                foreach (char c in line)
+                {
+                    // Detect character type and apply appropriate width factor
+                    if (IsFullWidthCharacter(c))
+                    {
+                        // Full-width characters (Japanese, Chinese, Korean, etc.)
+                        lineWidth += fontSize;
+                    }
+                    else
+                    {
+                        // Half-width characters (ASCII, numbers, symbols)
+                        lineWidth += fontSize * 0.6f;
+                    }
+                }
+                maxWidth = Mathf.Max(maxWidth, lineWidth);
+            }
+
+            // Calculate total height with line spacing (120% = 1.2x line height)
+            const float LINE_HEIGHT_MULTIPLIER = 1.2f;
+            float totalHeight = lines.Length * fontSize * LINE_HEIGHT_MULTIPLIER;
+
+            return new Vector2(maxWidth, totalHeight);
+        }
+
+        /// <summary>
+        /// Check if a character is full-width (CJK characters, etc.)
+        /// </summary>
+        private bool IsFullWidthCharacter(char c)
+        {
+            // CJK Unified Ideographs (Chinese/Japanese Kanji): U+4E00 - U+9FFF
+            if (c >= 0x4E00 && c <= 0x9FFF) return true;
+
+            // Hiragana: U+3040 - U+309F
+            if (c >= 0x3040 && c <= 0x309F) return true;
+
+            // Katakana: U+30A0 - U+30FF
+            if (c >= 0x30A0 && c <= 0x30FF) return true;
+
+            // Hangul Syllables (Korean): U+AC00 - U+D7AF
+            if (c >= 0xAC00 && c <= 0xD7AF) return true;
+
+            // CJK Symbols and Punctuation: U+3000 - U+303F
+            if (c >= 0x3000 && c <= 0x303F) return true;
+
+            // Fullwidth Forms (full-width ASCII variants): U+FF00 - U+FFEF
+            if (c >= 0xFF00 && c <= 0xFFEF) return true;
+
+            // CJK Compatibility Ideographs: U+F900 - U+FAFF
+            if (c >= 0xF900 && c <= 0xFAFF) return true;
+
+            // Default: half-width
+            return false;
         }
 
         private void UpdateIslandNamesOverlay()
