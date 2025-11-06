@@ -593,7 +593,8 @@ namespace DeformEditor.Masking
 
         /// <summary>
         /// Calculate text dimensions with accurate width and height estimation
-        /// Supports multiline text and mixed character types (Japanese/Chinese/Korean vs ASCII)
+        /// Uses Font.GetCharacterInfo to get exact character advance widths
+        /// Supports multiline text
         /// </summary>
         /// <param name="text">Text to measure</param>
         /// <param name="fontSize">Font size in points</param>
@@ -603,25 +604,37 @@ namespace DeformEditor.Masking
             if (string.IsNullOrEmpty(text))
                 return Vector2.zero;
 
+            // Get the font used by UI Toolkit DrawText (LegacyRuntime.ttf)
+            Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            if (font == null)
+            {
+                // Fallback to estimated calculation if font not available
+                Debug.LogWarning("LegacyRuntime.ttf not found, using estimated text dimensions");
+                return CalculateTextDimensionsEstimated(text, fontSize);
+            }
+
             // Split into lines for multiline support
             string[] lines = text.Split('\n');
 
-            // Calculate width of each line
+            // Request all characters in the text to be loaded into font texture
+            font.RequestCharactersInTexture(text, (int)fontSize, FontStyle.Normal);
+
+            // Calculate width of each line using accurate character metrics
             float maxWidth = 0f;
             foreach (var line in lines)
             {
                 float lineWidth = 0f;
                 foreach (char c in line)
                 {
-                    // Detect character type and apply appropriate width factor
-                    if (IsFullWidthCharacter(c))
+                    CharacterInfo charInfo;
+                    if (font.GetCharacterInfo(c, out charInfo, (int)fontSize, FontStyle.Normal))
                     {
-                        // Full-width characters (Japanese, Chinese, Korean, etc.)
-                        lineWidth += fontSize;
+                        // Use advance for accurate character width
+                        lineWidth += charInfo.advance;
                     }
                     else
                     {
-                        // Half-width characters (ASCII, numbers, symbols)
+                        // Fallback if character info not available
                         lineWidth += fontSize * 0.6f;
                     }
                 }
@@ -629,6 +642,36 @@ namespace DeformEditor.Masking
             }
 
             // Calculate total height with line spacing (120% = 1.2x line height)
+            const float LINE_HEIGHT_MULTIPLIER = 1.2f;
+            float totalHeight = lines.Length * fontSize * LINE_HEIGHT_MULTIPLIER;
+
+            return new Vector2(maxWidth, totalHeight);
+        }
+
+        /// <summary>
+        /// Fallback method for estimated text dimensions (used if font loading fails)
+        /// </summary>
+        private Vector2 CalculateTextDimensionsEstimated(string text, float fontSize)
+        {
+            if (string.IsNullOrEmpty(text))
+                return Vector2.zero;
+
+            string[] lines = text.Split('\n');
+            float maxWidth = 0f;
+
+            foreach (var line in lines)
+            {
+                float lineWidth = 0f;
+                foreach (char c in line)
+                {
+                    if (IsFullWidthCharacter(c))
+                        lineWidth += fontSize;
+                    else
+                        lineWidth += fontSize * 0.6f;
+                }
+                maxWidth = Mathf.Max(maxWidth, lineWidth);
+            }
+
             const float LINE_HEIGHT_MULTIPLIER = 1.2f;
             float totalHeight = lines.Length * fontSize * LINE_HEIGHT_MULTIPLIER;
 
