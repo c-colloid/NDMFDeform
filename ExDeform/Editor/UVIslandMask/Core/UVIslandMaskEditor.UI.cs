@@ -449,7 +449,49 @@ namespace DeformEditor.Masking
             previewSettings.Add(fontSizeSlider);
             previewSettings.Add(resetZoomButton);
             root.Add(previewSettings);
-            
+
+            // Hover tooltip settings row
+            var hoverSettings = new VisualElement
+            {
+                name = "hoverSettings",
+                style = {
+                    flexDirection = FlexDirection.Row,
+                    alignItems = Align.Center,
+                    marginBottom = 10
+                }
+            };
+
+            var hoverLabel = new Label("ホバー表示:")
+            {
+                style = {
+                    fontSize = 11,
+                    marginRight = 5,
+                    width = 80
+                }
+            };
+
+            var hoverFontSizeSlider = new Slider("サイズ", 8f, 32f)
+            {
+                value = selector?.HoverTooltipFontSize ?? 18f,
+                style = { flexGrow = 1, marginRight = 5 }
+            };
+            hoverFontSizeSlider.tooltip = "ホバー時の名前表示サイズ (8-32pt, ズーム非依存)";
+            hoverFontSizeSlider.RegisterValueChangedCallback(evt =>
+            {
+                if (selector != null)
+                {
+                    selector.HoverTooltipFontSize = evt.newValue;
+                    if (selector.ShowIslandNames && hoveredIslandID >= 0)
+                    {
+                        UpdateHoverTooltipOverlay();
+                    }
+                }
+            });
+
+            hoverSettings.Add(hoverLabel);
+            hoverSettings.Add(hoverFontSizeSlider);
+            root.Add(hoverSettings);
+
             // UV map container
             uvMapContainer = new VisualElement
             {
@@ -665,7 +707,6 @@ namespace DeformEditor.Masking
             // Step 3: Create sets for display modes
             var labelsToAbbreviate = new HashSet<int>();  // Show as circled numbers
             var labelsToShowFull = new HashSet<int>();     // Show full names
-            var denseAreaGroups = new List<List<IslandLabelInfo>>(); // Groups to show as count
 
             foreach (var group in collisionGroups)
             {
@@ -686,62 +727,12 @@ namespace DeformEditor.Masking
                 }
             }
 
-            // Step 4: Detect collisions between circled numbers (2nd level collision detection)
-            var abbreviatedLabels = labelInfoList.Where(l => labelsToAbbreviate.Contains(l.islandID)).ToList();
-            if (abbreviatedLabels.Count > 0)
-            {
-                var abbreviatedCollisionGroups = DetectAbbreviatedLabelCollisions(abbreviatedLabels);
-
-                // For groups with circled number collisions, show count instead
-                foreach (var group in abbreviatedCollisionGroups)
-                {
-                    if (group.Count >= 2)
-                    {
-                        denseAreaGroups.Add(group);
-                        // Remove from abbreviated set, will show as count instead
-                        foreach (var label in group)
-                        {
-                            labelsToAbbreviate.Remove(label.islandID);
-                        }
-                    }
-                }
-            }
-
-            // Step 5: Draw labels
-            // First, draw dense area counts (these have highest priority for display)
-            foreach (var group in denseAreaGroups)
-            {
-                // Calculate center position of the group
-                Vector2 groupCenter = Vector2.zero;
-                foreach (var label in group)
-                {
-                    groupCenter += label.centerPos;
-                }
-                groupCenter /= group.Count;
-
-                // Draw count label
-                DrawCountLabel(mgc, groupCenter, group.Count, fontSize);
-            }
-
-            // Then, draw individual labels
-            var drawnInDenseArea = new HashSet<int>();
-            foreach (var group in denseAreaGroups)
-            {
-                foreach (var label in group)
-                {
-                    drawnInDenseArea.Add(label.islandID);
-                }
-            }
-
+            // Step 4: Draw labels
             foreach (var labelInfo in labelInfoList)
             {
                 // Skip if outside visible bounds
                 if (labelInfo.centerPos.x < 0 || labelInfo.centerPos.x >= width ||
                     labelInfo.centerPos.y < 0 || labelInfo.centerPos.y >= height)
-                    continue;
-
-                // Skip if already drawn as part of dense area
-                if (drawnInDenseArea.Contains(labelInfo.islandID))
                     continue;
 
                 if (labelsToAbbreviate.Contains(labelInfo.islandID))
@@ -755,61 +746,6 @@ namespace DeformEditor.Masking
                     DrawTextMultilineCentered(mgc, labelInfo.displayName, labelInfo.centerPos, fontSize);
                 }
             }
-        }
-
-        /// <summary>
-        /// Detect collisions between abbreviated labels (circled numbers)
-        /// 省略ラベル（丸数字）間の衝突を検出
-        /// </summary>
-        private List<List<IslandLabelInfo>> DetectAbbreviatedLabelCollisions(List<IslandLabelInfo> labelInfoList)
-        {
-            var collisionGroups = new List<List<IslandLabelInfo>>();
-            var processed = new HashSet<int>();
-
-            for (int i = 0; i < labelInfoList.Count; i++)
-            {
-                if (processed.Contains(i)) continue;
-
-                var group = new List<IslandLabelInfo> { labelInfoList[i] };
-                processed.Add(i);
-
-                // Find all labels that collide with this one using abbreviated bounding boxes
-                bool foundNew = true;
-                while (foundNew)
-                {
-                    foundNew = false;
-                    for (int j = 0; j < labelInfoList.Count; j++)
-                    {
-                        if (processed.Contains(j)) continue;
-
-                        // Check if this label's abbreviated box collides with any in the group
-                        bool collides = false;
-                        foreach (var groupLabel in group)
-                        {
-                            if (groupLabel.abbreviatedBox.Overlaps(labelInfoList[j].abbreviatedBox))
-                            {
-                                collides = true;
-                                break;
-                            }
-                        }
-
-                        if (collides)
-                        {
-                            group.Add(labelInfoList[j]);
-                            processed.Add(j);
-                            foundNew = true;
-                        }
-                    }
-                }
-
-                // Only add groups with actual collisions (2 or more labels)
-                if (group.Count >= 2)
-                {
-                    collisionGroups.Add(group);
-                }
-            }
-
-            return collisionGroups;
         }
 
         /// <summary>
@@ -844,37 +780,9 @@ namespace DeformEditor.Masking
             mgc.DrawText(circledNumber, centeredPos + new Vector2(0, -1), fontSize, Color.black, null);
             mgc.DrawText(circledNumber, centeredPos + new Vector2(0, 1), fontSize, Color.black, null);
 
-            // Draw main circled number (full opacity for readability)
-            mgc.DrawText(circledNumber, centeredPos, fontSize, Color.white, null);
-        }
-
-        /// <summary>
-        /// Draw count label for dense areas where even circled numbers overlap
-        /// 丸数字同士も重なる密集エリア用の個数ラベルを描画
-        /// </summary>
-        private void DrawCountLabel(MeshGenerationContext mgc, Vector2 centerPos, int count, float fontSize)
-        {
-            string countText = $"[{count}]";
-
-            // Calculate dimensions for centering
-            Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            if (font == null) return;
-
-            font.RequestCharactersInTexture(countText, (int)fontSize, FontStyle.Normal);
-            Vector2 textDimensions = CalculateTextDimensions(countText, fontSize);
-            Vector2 centeredPos = new Vector2(
-                centerPos.x - textDimensions.x * 0.5f,
-                centerPos.y - textDimensions.y * 0.5f
-            );
-
-            // Draw outline (4-direction)
-            mgc.DrawText(countText, centeredPos + new Vector2(-1, 0), fontSize, Color.black, null);
-            mgc.DrawText(countText, centeredPos + new Vector2(1, 0), fontSize, Color.black, null);
-            mgc.DrawText(countText, centeredPos + new Vector2(0, -1), fontSize, Color.black, null);
-            mgc.DrawText(countText, centeredPos + new Vector2(0, 1), fontSize, Color.black, null);
-
-            // Draw main count text with slightly yellow tint to distinguish from circled numbers
-            mgc.DrawText(countText, centeredPos, fontSize, new Color(1f, 1f, 0.8f), null);
+            // Draw main circled number with cyan color for better visibility on UV maps
+            // Cyan stands out well against typical UV texture colors
+            mgc.DrawText(circledNumber, centeredPos, fontSize, new Color(0.3f, 1f, 1f), null);
         }
 
         /// <summary>
@@ -1139,10 +1047,8 @@ namespace DeformEditor.Masking
             if (x < 0 || x >= width || y < 0 || y >= height)
                 return;
 
-            // Calculate font size (slightly larger for hover tooltip)
-            float zoom = selector.UvMapZoom;
-            float baseFontSize = selector.IslandNameFontSize;
-            float fontSize = baseFontSize * zoom * 1.2f; // 20% larger for emphasis
+            // Use fixed font size for hover tooltip (zoom-independent)
+            float fontSize = selector.HoverTooltipFontSize;
 
             // Draw tooltip with prominent background
             Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");

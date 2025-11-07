@@ -144,7 +144,8 @@ namespace Deform.Masking.Editor
         public float HighlightOpacity { get => highlightOpacity; set => highlightOpacity = Mathf.Clamp01(value); }
         public bool ShowIslandNames { get; set; } = false; // Toggle for displaying island names on UV map
         public float IslandNameFontSize { get; set; } = 14f; // Base font size for island names (scaled by zoom)
-        
+        public float HoverTooltipFontSize { get; set; } = 18f; // Fixed font size for hover tooltips (zoom-independent)
+
         // Preview properties
         public bool AutoUpdatePreview { get => autoUpdatePreview; set => autoUpdatePreview = value; }
         public float UvMapZoom { get => uvMapZoom; set => uvMapZoom = Mathf.Clamp(value, MIN_ZOOM, MAX_ZOOM); }
