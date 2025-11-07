@@ -613,8 +613,10 @@ namespace DeformEditor.Masking
                 return CalculateTextDimensionsEstimated(text, fontSize);
             }
 
+	        string[] del = {"\r\n","\n"};
+
             // Split into lines for multiline support
-            string[] lines = text.Split('\n');
+	        string[] lines = System.Text.RegularExpressions.Regex.Unescape(text).Split(del,StringSplitOptions.None);
 
             // Request all characters in the text to be loaded into font texture
             font.RequestCharactersInTexture(text, (int)fontSize, FontStyle.Normal);
