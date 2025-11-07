@@ -570,25 +570,95 @@ namespace DeformEditor.Masking
                 if (x < 0 || x >= width || y < 0 || y >= height)
                     continue;
 
-                // Calculate accurate text dimensions with line and character-type detection
-                Vector2 textDimensions = CalculateTextDimensions(displayName, fontSize);
-
-                // Center the text at the island position
-                Vector2 centeredPos = new Vector2(
-                    x - textDimensions.x * 0.5f,
-                    y - textDimensions.y * 0.5f
-                );
-
-                // Draw text with outline for better visibility
-                // Black outline (4-direction)
-                mgc.DrawText(displayName, centeredPos + new Vector2(-1, 0), fontSize, Color.black, null);
-                mgc.DrawText(displayName, centeredPos + new Vector2(1, 0), fontSize, Color.black, null);
-                mgc.DrawText(displayName, centeredPos + new Vector2(0, -1), fontSize, Color.black, null);
-                mgc.DrawText(displayName, centeredPos + new Vector2(0, 1), fontSize, Color.black, null);
-
-                // White text
-                mgc.DrawText(displayName, centeredPos, fontSize, Color.white, null);
+                // Draw multiline text with center alignment for each line
+                DrawTextMultilineCentered(mgc, displayName, new Vector2(x, y), fontSize);
             }
+        }
+
+        /// <summary>
+        /// Draw multiline text with each line center-aligned
+        /// </summary>
+        /// <param name="mgc">MeshGenerationContext for drawing</param>
+        /// <param name="text">Text to draw (supports multiline)</param>
+        /// <param name="centerPos">Center position where text should be drawn</param>
+        /// <param name="fontSize">Font size</param>
+        private void DrawTextMultilineCentered(MeshGenerationContext mgc, string text, Vector2 centerPos, float fontSize)
+        {
+            if (string.IsNullOrEmpty(text))
+                return;
+
+            // Get the font
+            Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            if (font == null)
+            {
+                Debug.LogWarning("LegacyRuntime.ttf not found");
+                return;
+            }
+
+            // Split into lines
+            string[] del = {"\r\n","\n"};
+            string[] lines = System.Text.RegularExpressions.Regex.Unescape(text).Split(del, StringSplitOptions.None);
+
+            // Request all characters to be loaded
+            font.RequestCharactersInTexture(text, (int)fontSize, FontStyle.Normal);
+
+            // Calculate overall text dimensions
+            Vector2 textDimensions = CalculateTextDimensions(text, fontSize);
+
+            // Starting Y position (top of text block)
+            const float LINE_HEIGHT_MULTIPLIER = 1.2f;
+            float lineHeight = fontSize * LINE_HEIGHT_MULTIPLIER;
+            float startY = centerPos.y - textDimensions.y * 0.5f;
+
+            // Draw each line center-aligned
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string line = lines[i];
+                float lineWidth = CalculateLineWidth(line, fontSize, font);
+
+                // Calculate centered X position for this line
+                float lineX = centerPos.x - lineWidth * 0.5f;
+                float lineY = startY + i * lineHeight;
+                Vector2 linePos = new Vector2(lineX, lineY);
+
+                // Draw outline (4-direction)
+                mgc.DrawText(line, linePos + new Vector2(-1, 0), fontSize, Color.black, null);
+                mgc.DrawText(line, linePos + new Vector2(1, 0), fontSize, Color.black, null);
+                mgc.DrawText(line, linePos + new Vector2(0, -1), fontSize, Color.black, null);
+                mgc.DrawText(line, linePos + new Vector2(0, 1), fontSize, Color.black, null);
+
+                // Draw main text
+                mgc.DrawText(line, linePos, fontSize, Color.white, null);
+            }
+        }
+
+        /// <summary>
+        /// Calculate the width of a single line of text
+        /// </summary>
+        /// <param name="line">Single line of text</param>
+        /// <param name="fontSize">Font size</param>
+        /// <param name="font">Font to use</param>
+        /// <returns>Width of the line in pixels</returns>
+        private float CalculateLineWidth(string line, float fontSize, Font font)
+        {
+            if (string.IsNullOrEmpty(line))
+                return 0f;
+
+            float lineWidth = 0f;
+            foreach (char c in line)
+            {
+                CharacterInfo charInfo;
+                if (font.GetCharacterInfo(c, out charInfo, (int)fontSize, FontStyle.Normal))
+                {
+                    lineWidth += charInfo.advance;
+                }
+                else
+                {
+                    // Fallback if character info not available
+                    lineWidth += fontSize * 0.6f;
+                }
+            }
+            return lineWidth;
         }
 
         /// <summary>
