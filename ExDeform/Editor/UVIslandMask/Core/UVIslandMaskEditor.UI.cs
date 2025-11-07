@@ -17,6 +17,52 @@ namespace DeformEditor.Masking
     /// </summary>
     public partial class UVIslandMaskEditor
     {
+        #region Island Label Information
+        // アイランドラベル情報
+        // Data structures for label collision detection and display management
+
+        /// <summary>
+        /// Information about a label displayed on the UV map
+        /// UVマップ上に表示されるラベルの情報
+        /// </summary>
+        private class IslandLabelInfo
+        {
+            public int islandID;
+            public int submeshIndex;
+            public string displayName;
+            public Vector2 centerPos;       // Center position in screen coordinates
+            public Rect boundingBox;        // Bounding box in screen coordinates
+            public float area;              // Island area (for priority calculation)
+            public bool isSelected;         // Is this island selected?
+            public int lineCount;           // Number of lines in the label
+        }
+
+        /// <summary>
+        /// Current mouse position on UV map (in local coordinates)
+        /// UVマップ上の現在のマウス位置（ローカル座標）
+        /// </summary>
+        private Vector2 currentUVMapMousePos = Vector2.zero;
+
+        /// <summary>
+        /// Island ID currently under mouse hover (-1 if none)
+        /// マウスホバー中のアイランドID（なければ-1）
+        /// </summary>
+        private int hoveredIslandID = -1;
+
+        /// <summary>
+        /// Cached label information for collision detection
+        /// 衝突検出用のキャッシュされたラベル情報
+        /// </summary>
+        private List<IslandLabelInfo> cachedLabelInfo = new List<IslandLabelInfo>();
+
+        /// <summary>
+        /// Hover tooltip overlay for displaying island name on mouse over
+        /// マウスオーバー時にアイランド名を表示するホバーツールチップオーバーレイ
+        /// </summary>
+        private VisualElement hoverTooltipOverlay;
+
+        #endregion
+
         #region UI Creation - Inspector Setup
         // UIの作成 - インスペクターのセットアップ
         // UI creation methods for building the inspector interface
@@ -400,7 +446,11 @@ namespace DeformEditor.Masking
             uvMapContainer.Add(rangeSelectionOverlay);
             uvMapContainer.Add(magnifyingGlassOverlay);
             uvMapContainer.Add(islandNamesOverlay);
-            
+
+            // Create hover tooltip overlay (must be added last to be on top)
+            CreateHoverTooltipOverlay();
+            uvMapContainer.Add(hoverTooltipOverlay);
+
             root.Add(uvMapContainer);
         }
         
@@ -551,28 +601,88 @@ namespace DeformEditor.Masking
             float baseFontSize = selector.IslandNameFontSize;
             float fontSize = baseFontSize * zoom;
 
-            // Draw text for each island
-            foreach (var island in uvIslands)
+            // Step 1: Calculate label information for all islands
+            var labelInfoList = CalculateLabelInfo(uvIslands, transformMatrix, width, height, fontSize);
+            cachedLabelInfo = labelInfoList; // Cache for hover detection
+
+            // Step 2: Detect collisions between labels
+            var collisionGroups = DetectLabelCollisions(labelInfoList);
+
+            // Step 3: Create a set of labels that should be abbreviated
+            var labelsToAbbreviate = new HashSet<int>();
+            var labelsToShow = new HashSet<int>();
+
+            foreach (var group in collisionGroups)
             {
-                string displayName = !string.IsNullOrEmpty(island.customName)
-                    ? island.customName
-                    : $"Island {island.islandID}";
+                // Determine which label to show fully
+                var labelToShow = GetLabelToShow(group, hoveredIslandID);
+                if (labelToShow != null)
+                {
+                    labelsToShow.Add(labelToShow.islandID);
+                }
 
-                // Calculate position
-                Vector2 islandCenter = island.uvBounds.center;
-                Vector3 uvPos = new Vector3(islandCenter.x, islandCenter.y, 0f);
-                Vector3 transformedPos = transformMatrix.MultiplyPoint3x4(uvPos);
+                // Mark others for abbreviation
+                foreach (var label in group)
+                {
+                    if (labelToShow == null || label.islandID != labelToShow.islandID)
+                    {
+                        labelsToAbbreviate.Add(label.islandID);
+                    }
+                }
+            }
 
-                float x = transformedPos.x * width;
-                float y = (1f - transformedPos.y) * height; // Flip Y for UI Toolkit coordinates
-
-                // Skip if outside bounds
-                if (x < 0 || x >= width || y < 0 || y >= height)
+            // Step 4: Draw labels
+            foreach (var labelInfo in labelInfoList)
+            {
+                // Skip if outside visible bounds
+                if (labelInfo.centerPos.x < 0 || labelInfo.centerPos.x >= width ||
+                    labelInfo.centerPos.y < 0 || labelInfo.centerPos.y >= height)
                     continue;
 
-                // Draw multiline text with center alignment for each line
-                DrawTextMultilineCentered(mgc, displayName, new Vector2(x, y), fontSize);
+                if (labelsToAbbreviate.Contains(labelInfo.islandID))
+                {
+                    // Draw abbreviated indicator
+                    DrawAbbreviatedLabel(mgc, labelInfo, fontSize);
+                }
+                else
+                {
+                    // Draw full label
+                    DrawTextMultilineCentered(mgc, labelInfo.displayName, labelInfo.centerPos, fontSize);
+                }
             }
+        }
+
+        /// <summary>
+        /// Draw abbreviated label indicator (bullet point or count)
+        /// 省略されたラベルインジケーターを描画（点または個数）
+        /// </summary>
+        private void DrawAbbreviatedLabel(MeshGenerationContext mgc, IslandLabelInfo labelInfo, float fontSize)
+        {
+            // Use a bullet point symbol for abbreviated labels
+            string abbreviation = "●";
+
+            // Draw with outline for visibility
+            Vector2 pos = labelInfo.centerPos;
+
+            // Calculate dimensions for centering
+            Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            if (font == null) return;
+
+            font.RequestCharactersInTexture(abbreviation, (int)fontSize, FontStyle.Normal);
+            Vector2 textDimensions = CalculateTextDimensions(abbreviation, fontSize);
+            Vector2 centeredPos = new Vector2(
+                pos.x - textDimensions.x * 0.5f,
+                pos.y - textDimensions.y * 0.5f
+            );
+
+            // Draw outline (4-direction)
+            mgc.DrawText(abbreviation, centeredPos + new Vector2(-1, 0), fontSize, Color.black, null);
+            mgc.DrawText(abbreviation, centeredPos + new Vector2(1, 0), fontSize, Color.black, null);
+            mgc.DrawText(abbreviation, centeredPos + new Vector2(0, -1), fontSize, Color.black, null);
+            mgc.DrawText(abbreviation, centeredPos + new Vector2(0, 1), fontSize, Color.black, null);
+
+            // Draw main symbol with slight transparency to indicate it's abbreviated
+            mgc.DrawText(abbreviation, centeredPos, fontSize, new Color(1f, 1f, 1f, 0.7f), null);
         }
 
         /// <summary>
@@ -786,6 +896,274 @@ namespace DeformEditor.Masking
             {
                 islandNamesOverlay.MarkDirtyRepaint();
             }
+        }
+
+        private void CreateHoverTooltipOverlay()
+        {
+            hoverTooltipOverlay = new VisualElement
+            {
+                name = "hoverTooltipOverlay",
+                pickingMode = PickingMode.Ignore, // Don't interfere with mouse events
+                style = {
+                    position = Position.Absolute,
+                    left = 0,
+                    top = 0,
+                    right = 0,
+                    bottom = 0
+                }
+            };
+
+            // Use generateVisualContent for efficient hover tooltip rendering
+            hoverTooltipOverlay.generateVisualContent += OnGenerateHoverTooltipContent;
+        }
+
+        private void OnGenerateHoverTooltipContent(MeshGenerationContext mgc)
+        {
+            // Only show tooltip if hovering over an island and names are enabled
+            if (selector == null || !selector.ShowIslandNames) return;
+            if (hoveredIslandID < 0) return;
+            if (selector.UVIslands == null || selector.UVIslands.Count == 0) return;
+
+            // Find the hovered island
+            var hoveredIsland = selector.UVIslands.Find(i => i.islandID == hoveredIslandID);
+            if (hoveredIsland == null) return;
+
+            string displayName = !string.IsNullOrEmpty(hoveredIsland.customName)
+                ? hoveredIsland.customName
+                : $"Island {hoveredIsland.islandID}";
+
+            // Calculate position
+            var transformMatrix = selector.CalculateUVTransformMatrix();
+            Vector2 islandCenter = hoveredIsland.uvBounds.center;
+            Vector3 uvPos = new Vector3(islandCenter.x, islandCenter.y, 0f);
+            Vector3 transformedPos = transformMatrix.MultiplyPoint3x4(uvPos);
+
+            int width = UV_MAP_SIZE;
+            int height = UV_MAP_SIZE;
+            float x = transformedPos.x * width;
+            float y = (1f - transformedPos.y) * height;
+
+            // Skip if outside bounds
+            if (x < 0 || x >= width || y < 0 || y >= height)
+                return;
+
+            // Calculate font size (slightly larger for hover tooltip)
+            float zoom = selector.UvMapZoom;
+            float baseFontSize = selector.IslandNameFontSize;
+            float fontSize = baseFontSize * zoom * 1.2f; // 20% larger for emphasis
+
+            // Draw tooltip with prominent background
+            Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            if (font == null) return;
+
+            font.RequestCharactersInTexture(displayName, (int)fontSize, FontStyle.Normal);
+            Vector2 textDimensions = CalculateTextDimensions(displayName, fontSize);
+
+            // Add padding around text
+            float padding = 8f;
+            Rect bgRect = new Rect(
+                x - textDimensions.x * 0.5f - padding,
+                y - textDimensions.y * 0.5f - padding,
+                textDimensions.x + padding * 2,
+                textDimensions.y + padding * 2
+            );
+
+            // Draw semi-transparent background
+            var bgMesh = mgc.Allocate(4, 6);
+            bgMesh.SetAllVertices(new Vertex[] {
+                new Vertex { position = new Vector3(bgRect.xMin, bgRect.yMin, Vertex.nearZ), tint = new Color(0.2f, 0.2f, 0.2f, 0.9f) },
+                new Vertex { position = new Vector3(bgRect.xMax, bgRect.yMin, Vertex.nearZ), tint = new Color(0.2f, 0.2f, 0.2f, 0.9f) },
+                new Vertex { position = new Vector3(bgRect.xMax, bgRect.yMax, Vertex.nearZ), tint = new Color(0.2f, 0.2f, 0.2f, 0.9f) },
+                new Vertex { position = new Vector3(bgRect.xMin, bgRect.yMax, Vertex.nearZ), tint = new Color(0.2f, 0.2f, 0.2f, 0.9f) }
+            });
+            bgMesh.SetAllIndices(new ushort[] { 0, 1, 2, 0, 2, 3 });
+
+            // Draw highlighted text
+            DrawTextMultilineCentered(mgc, displayName, new Vector2(x, y), fontSize);
+        }
+
+        private void UpdateHoverTooltipOverlay()
+        {
+            if (hoverTooltipOverlay != null)
+            {
+                hoverTooltipOverlay.MarkDirtyRepaint();
+            }
+        }
+
+        /// <summary>
+        /// Calculate label information for all islands with bounding boxes
+        /// 全アイランドのバウンディングボックス付きラベル情報を計算
+        /// </summary>
+        private List<IslandLabelInfo> CalculateLabelInfo(List<UVIslandAnalyzer.UVIsland> islands,
+            Matrix4x4 transformMatrix, int width, int height, float fontSize)
+        {
+            var labelInfoList = new List<IslandLabelInfo>();
+            Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            if (font == null) return labelInfoList;
+
+            foreach (var island in islands)
+            {
+                string displayName = !string.IsNullOrEmpty(island.customName)
+                    ? island.customName
+                    : $"Island {island.islandID}";
+
+                // Calculate position
+                Vector2 islandCenter = island.uvBounds.center;
+                Vector3 uvPos = new Vector3(islandCenter.x, islandCenter.y, 0f);
+                Vector3 transformedPos = transformMatrix.MultiplyPoint3x4(uvPos);
+
+                float x = transformedPos.x * width;
+                float y = (1f - transformedPos.y) * height;
+
+                // Skip if outside bounds
+                if (x < -width || x >= width * 2 || y < -height || y >= height * 2)
+                    continue;
+
+                // Calculate text dimensions
+                font.RequestCharactersInTexture(displayName, (int)fontSize, FontStyle.Normal);
+                Vector2 textDimensions = CalculateTextDimensions(displayName, fontSize);
+
+                // Calculate bounding box
+                Rect boundingBox = new Rect(
+                    x - textDimensions.x * 0.5f,
+                    y - textDimensions.y * 0.5f,
+                    textDimensions.x,
+                    textDimensions.y
+                );
+
+                // Count lines
+                string[] del = {"\r\n", "\n"};
+                int lineCount = System.Text.RegularExpressions.Regex.Unescape(displayName).Split(del, StringSplitOptions.None).Length;
+
+                // Calculate area (for priority)
+                float area = island.uvBounds.size.x * island.uvBounds.size.y;
+
+                // Check if selected
+                bool isSelected = selector.SelectedIslandIDs.Contains(island.islandID);
+
+                labelInfoList.Add(new IslandLabelInfo
+                {
+                    islandID = island.islandID,
+                    submeshIndex = island.submeshIndex,
+                    displayName = displayName,
+                    centerPos = new Vector2(x, y),
+                    boundingBox = boundingBox,
+                    area = area,
+                    isSelected = isSelected,
+                    lineCount = lineCount
+                });
+            }
+
+            return labelInfoList;
+        }
+
+        /// <summary>
+        /// Detect collisions between label bounding boxes
+        /// Returns groups of colliding labels
+        /// ラベルのバウンディングボックス間の衝突を検出
+        /// 衝突しているラベルのグループを返す
+        /// </summary>
+        private List<List<IslandLabelInfo>> DetectLabelCollisions(List<IslandLabelInfo> labelInfoList)
+        {
+            var collisionGroups = new List<List<IslandLabelInfo>>();
+            var processed = new HashSet<int>();
+
+            for (int i = 0; i < labelInfoList.Count; i++)
+            {
+                if (processed.Contains(i)) continue;
+
+                var group = new List<IslandLabelInfo> { labelInfoList[i] };
+                processed.Add(i);
+
+                // Find all labels that collide with this one or with any in the group
+                bool foundNew = true;
+                while (foundNew)
+                {
+                    foundNew = false;
+                    for (int j = 0; j < labelInfoList.Count; j++)
+                    {
+                        if (processed.Contains(j)) continue;
+
+                        // Check if this label collides with any in the group
+                        bool collides = false;
+                        foreach (var groupLabel in group)
+                        {
+                            if (groupLabel.boundingBox.Overlaps(labelInfoList[j].boundingBox))
+                            {
+                                collides = true;
+                                break;
+                            }
+                        }
+
+                        if (collides)
+                        {
+                            group.Add(labelInfoList[j]);
+                            processed.Add(j);
+                            foundNew = true;
+                        }
+                    }
+                }
+
+                // Only add groups with actual collisions (2 or more labels)
+                if (group.Count >= 2)
+                {
+                    collisionGroups.Add(group);
+                }
+            }
+
+            return collisionGroups;
+        }
+
+        /// <summary>
+        /// Calculate display priority for a label
+        /// Higher priority = more important to display
+        /// Priority: Selected > Large Area > Small Area
+        /// ラベルの表示優先度を計算
+        /// 優先度が高い = 表示が重要
+        /// 優先度: 選択中 > 大きい面積 > 小さい面積
+        /// </summary>
+        private float CalculateDisplayPriority(IslandLabelInfo labelInfo)
+        {
+            float priority = 0f;
+
+            // Selected islands have highest priority
+            if (labelInfo.isSelected)
+            {
+                priority += 1000000f;
+            }
+
+            // Area contributes to priority
+            priority += labelInfo.area * 1000f;
+
+            return priority;
+        }
+
+        /// <summary>
+        /// Determine which label to show in a collision group
+        /// 衝突グループ内でどのラベルを表示するかを決定
+        /// </summary>
+        private IslandLabelInfo GetLabelToShow(List<IslandLabelInfo> collisionGroup, int hoveredIslandID)
+        {
+            // If hovering over an island in this group, show that one
+            var hoveredLabel = collisionGroup.Find(l => l.islandID == hoveredIslandID);
+            if (hoveredLabel != null)
+                return hoveredLabel;
+
+            // Otherwise, show the one with highest priority
+            IslandLabelInfo bestLabel = null;
+            float bestPriority = float.MinValue;
+
+            foreach (var label in collisionGroup)
+            {
+                float priority = CalculateDisplayPriority(label);
+                if (priority > bestPriority)
+                {
+                    bestPriority = priority;
+                    bestLabel = label;
+                }
+            }
+
+            return bestLabel;
         }
 
         private void CreateIslandList()

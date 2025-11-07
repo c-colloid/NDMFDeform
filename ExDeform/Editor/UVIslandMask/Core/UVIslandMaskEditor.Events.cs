@@ -94,9 +94,13 @@ namespace DeformEditor.Masking
         private void HandleMouseMove(MouseMoveEvent evt)
         {
             if (selector == null) return;
-            
+
             var localPosition = evt.localMousePosition;
-            
+
+            // Update current mouse position for hover detection
+            currentUVMapMousePos = localPosition;
+            UpdateHoverIsland(localPosition);
+
             if (isMagnifyingGlassActive)
             {
                 UpdateMagnifyingGlass(localPosition);
@@ -116,16 +120,48 @@ namespace DeformEditor.Masking
                     deltaPos.x * panSensitivity,
                     -deltaPos.y * panSensitivity
                 );
-                
+
                 var currentOffset = selector.UvMapPanOffset;
                 selector.SetPanOffset(currentOffset + uvDelta);
-                
+
                 lastMousePos = localPosition;
 
                 // Always update with throttling for immediate feedback
                 UpdateTextureWithThrottle();
 
                 evt.StopPropagation();
+            }
+        }
+
+        /// <summary>
+        /// Update the hovered island based on current mouse position
+        /// 現在のマウス位置に基づいてホバー中のアイランドを更新
+        /// </summary>
+        private void UpdateHoverIsland(Vector2 localPosition)
+        {
+            if (selector == null || !selector.ShowIslandNames)
+            {
+                if (hoveredIslandID != -1)
+                {
+                    hoveredIslandID = -1;
+                    UpdateIslandNamesOverlay();
+                    UpdateHoverTooltipOverlay();
+                }
+                return;
+            }
+
+            // Convert local position to UV coordinate
+            var uvCoordinate = LocalPosToUV(localPosition);
+            int newHoveredID = selector.GetIslandAtUVCoordinate(uvCoordinate);
+
+            // Update if changed
+            if (newHoveredID != hoveredIslandID)
+            {
+                hoveredIslandID = newHoveredID;
+                // Trigger redraw of island names overlay (to update abbreviations)
+                UpdateIslandNamesOverlay();
+                // Trigger redraw of hover tooltip
+                UpdateHoverTooltipOverlay();
             }
         }
         
@@ -191,27 +227,39 @@ namespace DeformEditor.Masking
         private void OnRootMouseMove(MouseMoveEvent evt)
         {
             if (selector == null) return;
-            
+
             var containerWorldBound = uvMapContainer.worldBound;
             var relativeX = evt.mousePosition.x - containerWorldBound.x;
             var relativeY = evt.mousePosition.y - containerWorldBound.y;
             var localPos = new Vector2(relativeX, relativeY);
-            
+
+            // Check if mouse is outside UV map bounds
+            bool isOutsideUVMap = localPos.x < 0 || localPos.x > UV_MAP_SIZE ||
+                                  localPos.y < 0 || localPos.y > UV_MAP_SIZE;
+
+            if (isOutsideUVMap && hoveredIslandID != -1)
+            {
+                // Reset hover state when mouse leaves UV map
+                hoveredIslandID = -1;
+                UpdateIslandNamesOverlay();
+                UpdateHoverTooltipOverlay();
+            }
+
             if (selector.IsRangeSelecting)
             {
                 var clampedPos = new Vector2(
                     Mathf.Clamp(localPos.x, 0, UV_MAP_SIZE),
                     Mathf.Clamp(localPos.y, 0, UV_MAP_SIZE)
                 );
-                
+
                 var uvCoord = LocalPosToUV(clampedPos);
                 selector.UpdateRangeSelection(uvCoord);
-                
+
 	            bool removeFromSelection = evt.ctrlKey && evt.shiftKey;
                 // Update deselection mode state based on current key state during dragging
                 // Use Input class for cross-platform key detection
 	            isRangeDeselecting = removeFromSelection;
-                
+
                 UpdateRangeSelectionVisual();
                 evt.StopPropagation();
             }
@@ -221,7 +269,7 @@ namespace DeformEditor.Masking
                     Mathf.Clamp(localPos.x, 0, UV_MAP_SIZE),
                     Mathf.Clamp(localPos.y, 0, UV_MAP_SIZE)
                 );
-                
+
                 UpdateMagnifyingGlass(clampedPos);
                 evt.StopPropagation();
             }
@@ -231,7 +279,7 @@ namespace DeformEditor.Masking
                     Mathf.Clamp(localPos.x, 0, UV_MAP_SIZE),
                     Mathf.Clamp(localPos.y, 0, UV_MAP_SIZE)
                 );
-                
+
                 var deltaPos = clampedPos - lastMousePos;
                 // Fixed pan sensitivity to maintain consistent movement regardless of zoom
                 var panSensitivity = 1f / UV_MAP_SIZE;
@@ -239,10 +287,10 @@ namespace DeformEditor.Masking
                     deltaPos.x * panSensitivity,
                     -deltaPos.y * panSensitivity
                 );
-                
+
                 var currentOffset = selector.UvMapPanOffset;
                 selector.SetPanOffset(currentOffset + uvDelta);
-                
+
                 lastMousePos = clampedPos;
 
                 // Always update with throttling for immediate feedback
