@@ -31,10 +31,12 @@ namespace DeformEditor.Masking
             public int submeshIndex;
             public string displayName;
             public Vector2 centerPos;       // Center position in screen coordinates
-            public Rect boundingBox;        // Bounding box in screen coordinates
+            public Rect boundingBox;        // Bounding box in screen coordinates (for full name)
+            public Rect abbreviatedBox;     // Bounding box for circled number
             public float area;              // Island area (for priority calculation)
             public bool isSelected;         // Is this island selected?
             public int lineCount;           // Number of lines in the label
+            public string circledNumber;    // Circled number text (①②③)
         }
 
         /// <summary>
@@ -60,6 +62,58 @@ namespace DeformEditor.Masking
         /// マウスオーバー時にアイランド名を表示するホバーツールチップオーバーレイ
         /// </summary>
         private VisualElement hoverTooltipOverlay;
+
+        #endregion
+
+        #region Circled Number Generation
+        // 丸数字生成
+        // Helper methods for generating circled numbers
+
+        /// <summary>
+        /// Convert a number (1-50) to a circled number character
+        /// 数字（1-50）を丸数字文字に変換
+        /// </summary>
+        /// <param name="number">Number to convert (1-50)</param>
+        /// <returns>Circled number string (①-⑳, ㉑-㊿, or (51)+ for larger numbers)</returns>
+        private string GetCircledNumber(int number)
+        {
+            if (number < 1)
+                return "(0)";
+
+            // Unicode circled numbers 1-20: ① (U+2460) to ⑳ (U+2473)
+            if (number <= 20)
+                return char.ConvertFromUtf32(0x2460 + number - 1);
+
+            // Unicode circled numbers 21-35: ㉑ (U+3251) to ㉟ (U+325F)
+            if (number <= 35)
+                return char.ConvertFromUtf32(0x3251 + number - 21);
+
+            // Unicode circled numbers 36-50: ㊱ (U+32B1) to ㊿ (U+32BF)
+            if (number <= 50)
+                return char.ConvertFromUtf32(0x32B1 + number - 36);
+
+            // For numbers > 50, use parentheses format
+            return $"({number})";
+        }
+
+        /// <summary>
+        /// Get the display index (1-based) for an island in the current list
+        /// 現在のリスト内でのアイランドの表示インデックス（1始まり）を取得
+        /// </summary>
+        private int GetIslandDisplayIndex(int islandID, int submeshIndex)
+        {
+            if (selector?.UVIslands == null)
+                return -1;
+
+            for (int i = 0; i < selector.UVIslands.Count; i++)
+            {
+                var island = selector.UVIslands[i];
+                if (island.islandID == islandID && island.submeshIndex == submeshIndex)
+                    return i + 1; // 1-based index
+            }
+
+            return -1;
+        }
 
         #endregion
 
@@ -605,23 +659,24 @@ namespace DeformEditor.Masking
             var labelInfoList = CalculateLabelInfo(uvIslands, transformMatrix, width, height, fontSize);
             cachedLabelInfo = labelInfoList; // Cache for hover detection
 
-            // Step 2: Detect collisions between labels
+            // Step 2: Detect collisions between full name labels
             var collisionGroups = DetectLabelCollisions(labelInfoList);
 
-            // Step 3: Create a set of labels that should be abbreviated
-            var labelsToAbbreviate = new HashSet<int>();
-            var labelsToShow = new HashSet<int>();
+            // Step 3: Create sets for display modes
+            var labelsToAbbreviate = new HashSet<int>();  // Show as circled numbers
+            var labelsToShowFull = new HashSet<int>();     // Show full names
+            var denseAreaGroups = new List<List<IslandLabelInfo>>(); // Groups to show as count
 
             foreach (var group in collisionGroups)
             {
-                // Determine which label to show fully
+                // Determine which label to show fully (prioritize hovered and selected)
                 var labelToShow = GetLabelToShow(group, hoveredIslandID);
                 if (labelToShow != null)
                 {
-                    labelsToShow.Add(labelToShow.islandID);
+                    labelsToShowFull.Add(labelToShow.islandID);
                 }
 
-                // Mark others for abbreviation
+                // Mark others for abbreviation (circled numbers)
                 foreach (var label in group)
                 {
                     if (labelToShow == null || label.islandID != labelToShow.islandID)
@@ -631,7 +686,53 @@ namespace DeformEditor.Masking
                 }
             }
 
-            // Step 4: Draw labels
+            // Step 4: Detect collisions between circled numbers (2nd level collision detection)
+            var abbreviatedLabels = labelInfoList.Where(l => labelsToAbbreviate.Contains(l.islandID)).ToList();
+            if (abbreviatedLabels.Count > 0)
+            {
+                var abbreviatedCollisionGroups = DetectAbbreviatedLabelCollisions(abbreviatedLabels);
+
+                // For groups with circled number collisions, show count instead
+                foreach (var group in abbreviatedCollisionGroups)
+                {
+                    if (group.Count >= 2)
+                    {
+                        denseAreaGroups.Add(group);
+                        // Remove from abbreviated set, will show as count instead
+                        foreach (var label in group)
+                        {
+                            labelsToAbbreviate.Remove(label.islandID);
+                        }
+                    }
+                }
+            }
+
+            // Step 5: Draw labels
+            // First, draw dense area counts (these have highest priority for display)
+            foreach (var group in denseAreaGroups)
+            {
+                // Calculate center position of the group
+                Vector2 groupCenter = Vector2.zero;
+                foreach (var label in group)
+                {
+                    groupCenter += label.centerPos;
+                }
+                groupCenter /= group.Count;
+
+                // Draw count label
+                DrawCountLabel(mgc, groupCenter, group.Count, fontSize);
+            }
+
+            // Then, draw individual labels
+            var drawnInDenseArea = new HashSet<int>();
+            foreach (var group in denseAreaGroups)
+            {
+                foreach (var label in group)
+                {
+                    drawnInDenseArea.Add(label.islandID);
+                }
+            }
+
             foreach (var labelInfo in labelInfoList)
             {
                 // Skip if outside visible bounds
@@ -639,9 +740,13 @@ namespace DeformEditor.Masking
                     labelInfo.centerPos.y < 0 || labelInfo.centerPos.y >= height)
                     continue;
 
+                // Skip if already drawn as part of dense area
+                if (drawnInDenseArea.Contains(labelInfo.islandID))
+                    continue;
+
                 if (labelsToAbbreviate.Contains(labelInfo.islandID))
                 {
-                    // Draw abbreviated indicator
+                    // Draw circled number
                     DrawAbbreviatedLabel(mgc, labelInfo, fontSize);
                 }
                 else
@@ -653,13 +758,71 @@ namespace DeformEditor.Masking
         }
 
         /// <summary>
-        /// Draw abbreviated label indicator (bullet point or count)
-        /// 省略されたラベルインジケーターを描画（点または個数）
+        /// Detect collisions between abbreviated labels (circled numbers)
+        /// 省略ラベル（丸数字）間の衝突を検出
+        /// </summary>
+        private List<List<IslandLabelInfo>> DetectAbbreviatedLabelCollisions(List<IslandLabelInfo> labelInfoList)
+        {
+            var collisionGroups = new List<List<IslandLabelInfo>>();
+            var processed = new HashSet<int>();
+
+            for (int i = 0; i < labelInfoList.Count; i++)
+            {
+                if (processed.Contains(i)) continue;
+
+                var group = new List<IslandLabelInfo> { labelInfoList[i] };
+                processed.Add(i);
+
+                // Find all labels that collide with this one using abbreviated bounding boxes
+                bool foundNew = true;
+                while (foundNew)
+                {
+                    foundNew = false;
+                    for (int j = 0; j < labelInfoList.Count; j++)
+                    {
+                        if (processed.Contains(j)) continue;
+
+                        // Check if this label's abbreviated box collides with any in the group
+                        bool collides = false;
+                        foreach (var groupLabel in group)
+                        {
+                            if (groupLabel.abbreviatedBox.Overlaps(labelInfoList[j].abbreviatedBox))
+                            {
+                                collides = true;
+                                break;
+                            }
+                        }
+
+                        if (collides)
+                        {
+                            group.Add(labelInfoList[j]);
+                            processed.Add(j);
+                            foundNew = true;
+                        }
+                    }
+                }
+
+                // Only add groups with actual collisions (2 or more labels)
+                if (group.Count >= 2)
+                {
+                    collisionGroups.Add(group);
+                }
+            }
+
+            return collisionGroups;
+        }
+
+        /// <summary>
+        /// Draw abbreviated label indicator (circled number)
+        /// 省略されたラベルインジケーターを描画（丸数字）
         /// </summary>
         private void DrawAbbreviatedLabel(MeshGenerationContext mgc, IslandLabelInfo labelInfo, float fontSize)
         {
-            // Use a bullet point symbol for abbreviated labels
-            string abbreviation = "●";
+            // Get circled number based on list position
+            int displayIndex = GetIslandDisplayIndex(labelInfo.islandID, labelInfo.submeshIndex);
+            if (displayIndex < 0) return;
+
+            string circledNumber = GetCircledNumber(displayIndex);
 
             // Draw with outline for visibility
             Vector2 pos = labelInfo.centerPos;
@@ -668,21 +831,50 @@ namespace DeformEditor.Masking
             Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             if (font == null) return;
 
-            font.RequestCharactersInTexture(abbreviation, (int)fontSize, FontStyle.Normal);
-            Vector2 textDimensions = CalculateTextDimensions(abbreviation, fontSize);
+            font.RequestCharactersInTexture(circledNumber, (int)fontSize, FontStyle.Normal);
+            Vector2 textDimensions = CalculateTextDimensions(circledNumber, fontSize);
             Vector2 centeredPos = new Vector2(
                 pos.x - textDimensions.x * 0.5f,
                 pos.y - textDimensions.y * 0.5f
             );
 
-            // Draw outline (4-direction)
-            mgc.DrawText(abbreviation, centeredPos + new Vector2(-1, 0), fontSize, Color.black, null);
-            mgc.DrawText(abbreviation, centeredPos + new Vector2(1, 0), fontSize, Color.black, null);
-            mgc.DrawText(abbreviation, centeredPos + new Vector2(0, -1), fontSize, Color.black, null);
-            mgc.DrawText(abbreviation, centeredPos + new Vector2(0, 1), fontSize, Color.black, null);
+            // Draw outline (4-direction) for better visibility
+            mgc.DrawText(circledNumber, centeredPos + new Vector2(-1, 0), fontSize, Color.black, null);
+            mgc.DrawText(circledNumber, centeredPos + new Vector2(1, 0), fontSize, Color.black, null);
+            mgc.DrawText(circledNumber, centeredPos + new Vector2(0, -1), fontSize, Color.black, null);
+            mgc.DrawText(circledNumber, centeredPos + new Vector2(0, 1), fontSize, Color.black, null);
 
-            // Draw main symbol with slight transparency to indicate it's abbreviated
-            mgc.DrawText(abbreviation, centeredPos, fontSize, new Color(1f, 1f, 1f, 0.7f), null);
+            // Draw main circled number (full opacity for readability)
+            mgc.DrawText(circledNumber, centeredPos, fontSize, Color.white, null);
+        }
+
+        /// <summary>
+        /// Draw count label for dense areas where even circled numbers overlap
+        /// 丸数字同士も重なる密集エリア用の個数ラベルを描画
+        /// </summary>
+        private void DrawCountLabel(MeshGenerationContext mgc, Vector2 centerPos, int count, float fontSize)
+        {
+            string countText = $"[{count}]";
+
+            // Calculate dimensions for centering
+            Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            if (font == null) return;
+
+            font.RequestCharactersInTexture(countText, (int)fontSize, FontStyle.Normal);
+            Vector2 textDimensions = CalculateTextDimensions(countText, fontSize);
+            Vector2 centeredPos = new Vector2(
+                centerPos.x - textDimensions.x * 0.5f,
+                centerPos.y - textDimensions.y * 0.5f
+            );
+
+            // Draw outline (4-direction)
+            mgc.DrawText(countText, centeredPos + new Vector2(-1, 0), fontSize, Color.black, null);
+            mgc.DrawText(countText, centeredPos + new Vector2(1, 0), fontSize, Color.black, null);
+            mgc.DrawText(countText, centeredPos + new Vector2(0, -1), fontSize, Color.black, null);
+            mgc.DrawText(countText, centeredPos + new Vector2(0, 1), fontSize, Color.black, null);
+
+            // Draw main count text with slightly yellow tint to distinguish from circled numbers
+            mgc.DrawText(countText, centeredPos, fontSize, new Color(1f, 1f, 0.8f), null);
         }
 
         /// <summary>
@@ -1001,8 +1193,9 @@ namespace DeformEditor.Masking
             Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             if (font == null) return labelInfoList;
 
-            foreach (var island in islands)
+            for (int i = 0; i < islands.Count; i++)
             {
+                var island = islands[i];
                 string displayName = !string.IsNullOrEmpty(island.customName)
                     ? island.customName
                     : $"Island {island.islandID}";
@@ -1019,16 +1212,29 @@ namespace DeformEditor.Masking
                 if (x < -width || x >= width * 2 || y < -height || y >= height * 2)
                     continue;
 
-                // Calculate text dimensions
+                // Calculate text dimensions for full name
                 font.RequestCharactersInTexture(displayName, (int)fontSize, FontStyle.Normal);
                 Vector2 textDimensions = CalculateTextDimensions(displayName, fontSize);
 
-                // Calculate bounding box
+                // Calculate bounding box for full name
                 Rect boundingBox = new Rect(
                     x - textDimensions.x * 0.5f,
                     y - textDimensions.y * 0.5f,
                     textDimensions.x,
                     textDimensions.y
+                );
+
+                // Generate circled number (based on list position, 1-indexed)
+                string circledNumber = GetCircledNumber(i + 1);
+                font.RequestCharactersInTexture(circledNumber, (int)fontSize, FontStyle.Normal);
+                Vector2 abbreviatedDimensions = CalculateTextDimensions(circledNumber, fontSize);
+
+                // Calculate bounding box for circled number
+                Rect abbreviatedBox = new Rect(
+                    x - abbreviatedDimensions.x * 0.5f,
+                    y - abbreviatedDimensions.y * 0.5f,
+                    abbreviatedDimensions.x,
+                    abbreviatedDimensions.y
                 );
 
                 // Count lines
@@ -1048,9 +1254,11 @@ namespace DeformEditor.Masking
                     displayName = displayName,
                     centerPos = new Vector2(x, y),
                     boundingBox = boundingBox,
+                    abbreviatedBox = abbreviatedBox,
                     area = area,
                     isSelected = isSelected,
-                    lineCount = lineCount
+                    lineCount = lineCount,
+                    circledNumber = circledNumber
                 });
             }
 
@@ -1415,10 +1623,12 @@ namespace DeformEditor.Masking
                 // Update nameLabel (display mode)
                 if (nameLabel != null)
                 {
+                    // Add circled number prefix based on list position (1-indexed)
+                    string circledNumber = GetCircledNumber(index + 1);
                     string displayText = !string.IsNullOrEmpty(customName)
                         ? customName
                         : $"Island {island.islandID} (SM{island.submeshIndex})";
-                    nameLabel.text = displayText;
+                    nameLabel.text = $"{circledNumber} {displayText}";
                     nameLabel.userData = islandKey;
                     nameLabel.style.display = isEditing ? DisplayStyle.None : DisplayStyle.Flex;
                 }
