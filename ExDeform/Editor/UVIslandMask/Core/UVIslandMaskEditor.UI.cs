@@ -473,7 +473,7 @@ namespace DeformEditor.Masking
             var hoverFontSizeSlider = new Slider("サイズ", 8f, 32f)
             {
                 value = selector?.HoverTooltipFontSize ?? 18f,
-                style = { flexGrow = 1, marginRight = 5 }
+                style = { flexGrow = 1, marginRight = 5, maxWidth = 300 }
             };
             hoverFontSizeSlider.tooltip = "ホバー時の名前表示サイズ (8-32pt, ズーム非依存)";
             hoverFontSizeSlider.RegisterValueChangedCallback(evt =>
@@ -742,10 +742,46 @@ namespace DeformEditor.Masking
                 }
                 else
                 {
+                    // Draw background for selected islands to make selection visible
+                    if (labelInfo.isSelected)
+                    {
+                        DrawLabelBackground(mgc, labelInfo, fontSize);
+                    }
+
                     // Draw full label
                     DrawTextMultilineCentered(mgc, labelInfo.displayName, labelInfo.centerPos, fontSize);
                 }
             }
+        }
+
+        /// <summary>
+        /// Draw background for selected island labels to improve visibility
+        /// 選択されたアイランドラベルの背景を描画して視認性を向上
+        /// </summary>
+        private void DrawLabelBackground(MeshGenerationContext mgc, IslandLabelInfo labelInfo, float fontSize)
+        {
+            // Calculate text dimensions
+            Vector2 textDimensions = CalculateTextDimensions(labelInfo.displayName, fontSize);
+            Vector2 centerPos = labelInfo.centerPos;
+
+            // Add padding
+            float padding = 6f;
+            Rect bgRect = new Rect(
+                centerPos.x - textDimensions.x * 0.5f - padding,
+                centerPos.y - textDimensions.y * 0.5f - padding,
+                textDimensions.x + padding * 2,
+                textDimensions.y + padding * 2
+            );
+
+            // Draw semi-transparent orange background for selected islands
+            var bgMesh = mgc.Allocate(4, 6);
+            bgMesh.SetAllVertices(new Vertex[] {
+                new Vertex { position = new Vector3(bgRect.xMin, bgRect.yMin, Vertex.nearZ), tint = new Color(1f, 0.5f, 0f, 0.3f) },
+                new Vertex { position = new Vector3(bgRect.xMax, bgRect.yMin, Vertex.nearZ), tint = new Color(1f, 0.5f, 0f, 0.3f) },
+                new Vertex { position = new Vector3(bgRect.xMax, bgRect.yMax, Vertex.nearZ), tint = new Color(1f, 0.5f, 0f, 0.3f) },
+                new Vertex { position = new Vector3(bgRect.xMin, bgRect.yMax, Vertex.nearZ), tint = new Color(1f, 0.5f, 0f, 0.3f) }
+            });
+            bgMesh.SetAllIndices(new ushort[] { 0, 1, 2, 0, 2, 3 });
         }
 
         /// <summary>
@@ -780,9 +816,8 @@ namespace DeformEditor.Masking
             mgc.DrawText(circledNumber, centeredPos + new Vector2(0, -1), fontSize, Color.black, null);
             mgc.DrawText(circledNumber, centeredPos + new Vector2(0, 1), fontSize, Color.black, null);
 
-            // Draw main circled number with cyan color for better visibility on UV maps
-            // Cyan stands out well against typical UV texture colors
-            mgc.DrawText(circledNumber, centeredPos, fontSize, new Color(0.3f, 1f, 1f), null);
+            // Draw main circled number with white color for consistency with full names
+            mgc.DrawText(circledNumber, centeredPos, fontSize, Color.white, null);
         }
 
         /// <summary>
@@ -1066,15 +1101,57 @@ namespace DeformEditor.Masking
                 textDimensions.y + padding * 2
             );
 
-            // Draw semi-transparent background
-            var bgMesh = mgc.Allocate(4, 6);
-            bgMesh.SetAllVertices(new Vertex[] {
-                new Vertex { position = new Vector3(bgRect.xMin, bgRect.yMin, Vertex.nearZ), tint = new Color(0.2f, 0.2f, 0.2f, 0.9f) },
-                new Vertex { position = new Vector3(bgRect.xMax, bgRect.yMin, Vertex.nearZ), tint = new Color(0.2f, 0.2f, 0.2f, 0.9f) },
-                new Vertex { position = new Vector3(bgRect.xMax, bgRect.yMax, Vertex.nearZ), tint = new Color(0.2f, 0.2f, 0.2f, 0.9f) },
-                new Vertex { position = new Vector3(bgRect.xMin, bgRect.yMax, Vertex.nearZ), tint = new Color(0.2f, 0.2f, 0.2f, 0.9f) }
+            // Check if island is selected
+            bool isSelected = selector.SelectedIslandIDs.Contains(hoveredIslandID);
+
+            // Draw border outline to show which island is being hovered (no fill background)
+            // Use different color for selected vs unselected islands
+            Color outlineColor = isSelected
+                ? new Color(1f, 0.5f, 0f, 0.8f)  // Orange for selected
+                : new Color(0.6f, 0.6f, 0.6f, 0.7f);  // Gray for unselected
+
+            float borderWidth = 2f;
+
+            // Draw border as 4 rectangles (top, right, bottom, left)
+            // Top border
+            var topBorder = mgc.Allocate(4, 6);
+            topBorder.SetAllVertices(new Vertex[] {
+                new Vertex { position = new Vector3(bgRect.xMin, bgRect.yMin, Vertex.nearZ), tint = outlineColor },
+                new Vertex { position = new Vector3(bgRect.xMax, bgRect.yMin, Vertex.nearZ), tint = outlineColor },
+                new Vertex { position = new Vector3(bgRect.xMax, bgRect.yMin + borderWidth, Vertex.nearZ), tint = outlineColor },
+                new Vertex { position = new Vector3(bgRect.xMin, bgRect.yMin + borderWidth, Vertex.nearZ), tint = outlineColor }
             });
-            bgMesh.SetAllIndices(new ushort[] { 0, 1, 2, 0, 2, 3 });
+            topBorder.SetAllIndices(new ushort[] { 0, 1, 2, 0, 2, 3 });
+
+            // Right border
+            var rightBorder = mgc.Allocate(4, 6);
+            rightBorder.SetAllVertices(new Vertex[] {
+                new Vertex { position = new Vector3(bgRect.xMax - borderWidth, bgRect.yMin, Vertex.nearZ), tint = outlineColor },
+                new Vertex { position = new Vector3(bgRect.xMax, bgRect.yMin, Vertex.nearZ), tint = outlineColor },
+                new Vertex { position = new Vector3(bgRect.xMax, bgRect.yMax, Vertex.nearZ), tint = outlineColor },
+                new Vertex { position = new Vector3(bgRect.xMax - borderWidth, bgRect.yMax, Vertex.nearZ), tint = outlineColor }
+            });
+            rightBorder.SetAllIndices(new ushort[] { 0, 1, 2, 0, 2, 3 });
+
+            // Bottom border
+            var bottomBorder = mgc.Allocate(4, 6);
+            bottomBorder.SetAllVertices(new Vertex[] {
+                new Vertex { position = new Vector3(bgRect.xMin, bgRect.yMax - borderWidth, Vertex.nearZ), tint = outlineColor },
+                new Vertex { position = new Vector3(bgRect.xMax, bgRect.yMax - borderWidth, Vertex.nearZ), tint = outlineColor },
+                new Vertex { position = new Vector3(bgRect.xMax, bgRect.yMax, Vertex.nearZ), tint = outlineColor },
+                new Vertex { position = new Vector3(bgRect.xMin, bgRect.yMax, Vertex.nearZ), tint = outlineColor }
+            });
+            bottomBorder.SetAllIndices(new ushort[] { 0, 1, 2, 0, 2, 3 });
+
+            // Left border
+            var leftBorder = mgc.Allocate(4, 6);
+            leftBorder.SetAllVertices(new Vertex[] {
+                new Vertex { position = new Vector3(bgRect.xMin, bgRect.yMin, Vertex.nearZ), tint = outlineColor },
+                new Vertex { position = new Vector3(bgRect.xMin + borderWidth, bgRect.yMin, Vertex.nearZ), tint = outlineColor },
+                new Vertex { position = new Vector3(bgRect.xMin + borderWidth, bgRect.yMax, Vertex.nearZ), tint = outlineColor },
+                new Vertex { position = new Vector3(bgRect.xMin, bgRect.yMax, Vertex.nearZ), tint = outlineColor }
+            });
+            leftBorder.SetAllIndices(new ushort[] { 0, 1, 2, 0, 2, 3 });
 
             // Draw highlighted text
             DrawTextMultilineCentered(mgc, displayName, new Vector2(x, y), fontSize);
