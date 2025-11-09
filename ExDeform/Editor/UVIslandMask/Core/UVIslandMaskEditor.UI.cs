@@ -742,46 +742,15 @@ namespace DeformEditor.Masking
                 }
                 else
                 {
-                    // Draw background for selected islands to make selection visible
-                    if (labelInfo.isSelected)
-                    {
-                        DrawLabelBackground(mgc, labelInfo, fontSize);
-                    }
+                    // Skip if this is the hovered island (will be drawn by hover tooltip)
+                    if (labelInfo.islandID == hoveredIslandID)
+                        continue;
 
-                    // Draw full label
-                    DrawTextMultilineCentered(mgc, labelInfo.displayName, labelInfo.centerPos, fontSize);
+                    // Draw full label with color based on selection state
+                    Color textColor = labelInfo.isSelected ? new Color(1f, 0.6f, 0.2f) : Color.white;
+                    DrawTextMultilineCentered(mgc, labelInfo.displayName, labelInfo.centerPos, fontSize, textColor);
                 }
             }
-        }
-
-        /// <summary>
-        /// Draw background for selected island labels to improve visibility
-        /// 選択されたアイランドラベルの背景を描画して視認性を向上
-        /// </summary>
-        private void DrawLabelBackground(MeshGenerationContext mgc, IslandLabelInfo labelInfo, float fontSize)
-        {
-            // Calculate text dimensions
-            Vector2 textDimensions = CalculateTextDimensions(labelInfo.displayName, fontSize);
-            Vector2 centerPos = labelInfo.centerPos;
-
-            // Add padding
-            float padding = 6f;
-            Rect bgRect = new Rect(
-                centerPos.x - textDimensions.x * 0.5f - padding,
-                centerPos.y - textDimensions.y * 0.5f - padding,
-                textDimensions.x + padding * 2,
-                textDimensions.y + padding * 2
-            );
-
-            // Draw semi-transparent orange background for selected islands
-            var bgMesh = mgc.Allocate(4, 6);
-            bgMesh.SetAllVertices(new Vertex[] {
-                new Vertex { position = new Vector3(bgRect.xMin, bgRect.yMin, Vertex.nearZ), tint = new Color(1f, 0.5f, 0f, 0.3f) },
-                new Vertex { position = new Vector3(bgRect.xMax, bgRect.yMin, Vertex.nearZ), tint = new Color(1f, 0.5f, 0f, 0.3f) },
-                new Vertex { position = new Vector3(bgRect.xMax, bgRect.yMax, Vertex.nearZ), tint = new Color(1f, 0.5f, 0f, 0.3f) },
-                new Vertex { position = new Vector3(bgRect.xMin, bgRect.yMax, Vertex.nearZ), tint = new Color(1f, 0.5f, 0f, 0.3f) }
-            });
-            bgMesh.SetAllIndices(new ushort[] { 0, 1, 2, 0, 2, 3 });
         }
 
         /// <summary>
@@ -803,21 +772,50 @@ namespace DeformEditor.Masking
             Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             if (font == null) return;
 
-            font.RequestCharactersInTexture(circledNumber, (int)fontSize, FontStyle.Normal);
-            Vector2 textDimensions = CalculateTextDimensions(circledNumber, fontSize);
+            // Normalize font size across different Unicode circled number ranges
+            // Different ranges have different visual sizes, so we apply scaling factors
+            float adjustedFontSize = fontSize;
+            if (displayIndex >= 1 && displayIndex <= 9)
+            {
+                // ① - ⑨: Baseline size
+                adjustedFontSize = fontSize;
+            }
+            else if (displayIndex >= 10 && displayIndex <= 20)
+            {
+                // ⑩ - ⑳: Slightly larger visually, scale down
+                adjustedFontSize = fontSize * 0.95f;
+            }
+            else if (displayIndex >= 21 && displayIndex <= 35)
+            {
+                // ㉑ - ㉟: Much larger visually, scale down more
+                adjustedFontSize = fontSize * 0.85f;
+            }
+            else if (displayIndex >= 36 && displayIndex <= 50)
+            {
+                // ㊱ - ㊿: Much larger visually, scale down more
+                adjustedFontSize = fontSize * 0.85f;
+            }
+            else
+            {
+                // (51)+ : Parenthesized numbers, smaller visually, scale up slightly
+                adjustedFontSize = fontSize * 1.1f;
+            }
+
+            font.RequestCharactersInTexture(circledNumber, (int)adjustedFontSize, FontStyle.Normal);
+            Vector2 textDimensions = CalculateTextDimensions(circledNumber, adjustedFontSize);
             Vector2 centeredPos = new Vector2(
                 pos.x - textDimensions.x * 0.5f,
                 pos.y - textDimensions.y * 0.5f
             );
 
             // Draw outline (4-direction) for better visibility
-            mgc.DrawText(circledNumber, centeredPos + new Vector2(-1, 0), fontSize, Color.black, null);
-            mgc.DrawText(circledNumber, centeredPos + new Vector2(1, 0), fontSize, Color.black, null);
-            mgc.DrawText(circledNumber, centeredPos + new Vector2(0, -1), fontSize, Color.black, null);
-            mgc.DrawText(circledNumber, centeredPos + new Vector2(0, 1), fontSize, Color.black, null);
+            mgc.DrawText(circledNumber, centeredPos + new Vector2(-1, 0), adjustedFontSize, Color.black, null);
+            mgc.DrawText(circledNumber, centeredPos + new Vector2(1, 0), adjustedFontSize, Color.black, null);
+            mgc.DrawText(circledNumber, centeredPos + new Vector2(0, -1), adjustedFontSize, Color.black, null);
+            mgc.DrawText(circledNumber, centeredPos + new Vector2(0, 1), adjustedFontSize, Color.black, null);
 
             // Draw main circled number with white color for consistency with full names
-            mgc.DrawText(circledNumber, centeredPos, fontSize, Color.white, null);
+            mgc.DrawText(circledNumber, centeredPos, adjustedFontSize, Color.white, null);
         }
 
         /// <summary>
@@ -827,7 +825,8 @@ namespace DeformEditor.Masking
         /// <param name="text">Text to draw (supports multiline)</param>
         /// <param name="centerPos">Center position where text should be drawn</param>
         /// <param name="fontSize">Font size</param>
-        private void DrawTextMultilineCentered(MeshGenerationContext mgc, string text, Vector2 centerPos, float fontSize)
+        /// <param name="textColor">Text color (defaults to white)</param>
+        private void DrawTextMultilineCentered(MeshGenerationContext mgc, string text, Vector2 centerPos, float fontSize, Color? textColor = null)
         {
             if (string.IsNullOrEmpty(text))
                 return;
@@ -855,6 +854,9 @@ namespace DeformEditor.Masking
             float lineHeight = fontSize * LINE_HEIGHT_MULTIPLIER;
             float startY = centerPos.y - textDimensions.y * 0.5f;
 
+            // Use provided color or default to white
+            Color finalColor = textColor ?? Color.white;
+
             // Draw each line center-aligned
             for (int i = 0; i < lines.Length; i++)
             {
@@ -872,8 +874,8 @@ namespace DeformEditor.Masking
                 mgc.DrawText(line, linePos + new Vector2(0, -1), fontSize, Color.black, null);
                 mgc.DrawText(line, linePos + new Vector2(0, 1), fontSize, Color.black, null);
 
-                // Draw main text
-                mgc.DrawText(line, linePos, fontSize, Color.white, null);
+                // Draw main text with specified color
+                mgc.DrawText(line, linePos, fontSize, finalColor, null);
             }
         }
 
@@ -1082,15 +1084,25 @@ namespace DeformEditor.Masking
             if (x < 0 || x >= width || y < 0 || y >= height)
                 return;
 
+            // Calculate background label font size (zoom-dependent)
+            float zoom = selector.UvMapZoom;
+            float baseFontSize = selector.IslandNameFontSize;
+            float backgroundFontSize = baseFontSize * zoom;
+
             // Use fixed font size for hover tooltip (zoom-independent)
-            float fontSize = selector.HoverTooltipFontSize;
+            float hoverFontSize = selector.HoverTooltipFontSize;
+
+            // Only show hover tooltip if it's larger than background label
+            // This prevents obscuring larger background text with smaller hover text
+            if (hoverFontSize < backgroundFontSize)
+                return;
 
             // Draw tooltip with prominent background
             Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             if (font == null) return;
 
-            font.RequestCharactersInTexture(displayName, (int)fontSize, FontStyle.Normal);
-            Vector2 textDimensions = CalculateTextDimensions(displayName, fontSize);
+            font.RequestCharactersInTexture(displayName, (int)hoverFontSize, FontStyle.Normal);
+            Vector2 textDimensions = CalculateTextDimensions(displayName, hoverFontSize);
 
             // Add padding around text
             float padding = 8f;
@@ -1153,8 +1165,9 @@ namespace DeformEditor.Masking
             });
             leftBorder.SetAllIndices(new ushort[] { 0, 1, 2, 0, 2, 3 });
 
-            // Draw highlighted text
-            DrawTextMultilineCentered(mgc, displayName, new Vector2(x, y), fontSize);
+            // Draw highlighted text with color based on selection state
+            Color textColor = isSelected ? new Color(1f, 0.6f, 0.2f) : Color.white;
+            DrawTextMultilineCentered(mgc, displayName, new Vector2(x, y), hoverFontSize, textColor);
         }
 
         private void UpdateHoverTooltipOverlay()
