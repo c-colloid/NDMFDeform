@@ -727,6 +727,10 @@ namespace DeformEditor.Masking
                 }
             }
 
+            // Calculate whether hover tooltip will be shown
+            float hoverFontSize = selector.HoverTooltipFontSize;
+            bool willShowHoverTooltip = (hoveredIslandID >= 0 && hoverFontSize >= fontSize);
+
             // Step 4: Draw labels
             foreach (var labelInfo in labelInfoList)
             {
@@ -737,13 +741,14 @@ namespace DeformEditor.Masking
 
                 if (labelsToAbbreviate.Contains(labelInfo.islandID))
                 {
-                    // Draw circled number
-                    DrawAbbreviatedLabel(mgc, labelInfo, fontSize);
+                    // Draw circled number with selection-based color
+                    Color textColor = labelInfo.isSelected ? new Color(1f, 0.6f, 0.2f) : Color.white;
+                    DrawAbbreviatedLabel(mgc, labelInfo, fontSize, textColor);
                 }
                 else
                 {
-                    // Skip if this is the hovered island (will be drawn by hover tooltip)
-                    if (labelInfo.islandID == hoveredIslandID)
+                    // Skip if this is the hovered island AND hover tooltip will be shown
+                    if (labelInfo.islandID == hoveredIslandID && willShowHoverTooltip)
                         continue;
 
                     // Draw full label with color based on selection state
@@ -757,7 +762,8 @@ namespace DeformEditor.Masking
         /// Draw abbreviated label indicator (circled number)
         /// 省略されたラベルインジケーターを描画（丸数字）
         /// </summary>
-        private void DrawAbbreviatedLabel(MeshGenerationContext mgc, IslandLabelInfo labelInfo, float fontSize)
+        /// <param name="textColor">Text color for the circled number</param>
+        private void DrawAbbreviatedLabel(MeshGenerationContext mgc, IslandLabelInfo labelInfo, float fontSize, Color textColor)
         {
             // Get circled number based on list position
             int displayIndex = GetIslandDisplayIndex(labelInfo.islandID, labelInfo.submeshIndex);
@@ -773,32 +779,33 @@ namespace DeformEditor.Masking
             if (font == null) return;
 
             // Normalize font size across different Unicode circled number ranges
-            // Different ranges have different visual sizes, so we apply scaling factors
+            // Observations: ①-⑨ and (51)+ appear large, ⑩-㊿ appear smaller
+            // Apply inverse scaling to normalize visual size
             float adjustedFontSize = fontSize;
             if (displayIndex >= 1 && displayIndex <= 9)
             {
-                // ① - ⑨: Baseline size
-                adjustedFontSize = fontSize;
+                // ① - ⑨: Appear large, scale down
+                adjustedFontSize = fontSize * 0.85f;
             }
             else if (displayIndex >= 10 && displayIndex <= 20)
             {
-                // ⑩ - ⑳: Slightly larger visually, scale down
-                adjustedFontSize = fontSize * 0.95f;
+                // ⑩ - ⑳: Appear small, scale up
+                adjustedFontSize = fontSize * 1.15f;
             }
             else if (displayIndex >= 21 && displayIndex <= 35)
             {
-                // ㉑ - ㉟: Much larger visually, scale down more
-                adjustedFontSize = fontSize * 0.85f;
+                // ㉑ - ㉟: Appear small, scale up
+                adjustedFontSize = fontSize * 1.15f;
             }
             else if (displayIndex >= 36 && displayIndex <= 50)
             {
-                // ㊱ - ㊿: Much larger visually, scale down more
-                adjustedFontSize = fontSize * 0.85f;
+                // ㊱ - ㊿: Appear small, scale up
+                adjustedFontSize = fontSize * 1.15f;
             }
             else
             {
-                // (51)+ : Parenthesized numbers, smaller visually, scale up slightly
-                adjustedFontSize = fontSize * 1.1f;
+                // (51)+ : Parenthesized numbers, appear large, scale down
+                adjustedFontSize = fontSize * 0.85f;
             }
 
             font.RequestCharactersInTexture(circledNumber, (int)adjustedFontSize, FontStyle.Normal);
@@ -814,8 +821,8 @@ namespace DeformEditor.Masking
             mgc.DrawText(circledNumber, centeredPos + new Vector2(0, -1), adjustedFontSize, Color.black, null);
             mgc.DrawText(circledNumber, centeredPos + new Vector2(0, 1), adjustedFontSize, Color.black, null);
 
-            // Draw main circled number with white color for consistency with full names
-            mgc.DrawText(circledNumber, centeredPos, adjustedFontSize, Color.white, null);
+            // Draw main circled number with specified color for selection indication
+            mgc.DrawText(circledNumber, centeredPos, adjustedFontSize, textColor, null);
         }
 
         /// <summary>
