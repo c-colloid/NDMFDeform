@@ -66,7 +66,9 @@ namespace MeshModifier.NDMFDeform.NDMFPlugin
 				});
 				
 				MeshDic.ToList().ForEach(d => {
-					d.Key.GetComponent<SkinnedMeshRenderer>().sharedMesh = d.Value;
+					var SMR = d.Key.GetComponent<SkinnedMeshRenderer>();
+					SMR.sharedMesh = d.Value;
+					SMR.updateWhenOffscreen = false;
 				});
 			})
 				.PreviewingWith(ConfigurePreview());
