@@ -36,29 +36,62 @@ namespace MeshModifier.NDMFDeform.Editor
 
 			var slice = new Toggle("スライス表示") { value = PointGridViewState.SliceEnabled };
 			var sliceAxis = new EnumField("スライス軸", PointGridViewState.SliceAxis);
-			var sliceIndex = new SliderInt("スライス位置", 0, 16)
-			{
-				value = PointGridViewState.SliceIndex,
-				showInputField = true,
-			};
 			slice.RegisterValueChangedCallback(e =>
 			{
 				PointGridViewState.SliceEnabled = e.newValue;
 				SceneView.RepaintAll();
 			});
+			root.Add(slice);
+			root.Add(sliceAxis);
+
+			// スライス位置: −/+ ボタンで加減算。上限は選択中ラティスの解像度でクランプ
+			var sliceRow = new VisualElement();
+			sliceRow.style.flexDirection = FlexDirection.Row;
+			sliceRow.style.alignItems = Align.Center;
+
+			var sliceLabel = new Label("スライス位置");
+			sliceLabel.style.minWidth = 80;
+			var minus = new Button { text = "−" };
+			var indexField = new IntegerField { value = PointGridViewState.SliceIndex };
+			indexField.style.minWidth = 36;
+			var plus = new Button { text = "+" };
+			var rangeLabel = new Label($"/ {SliceMaxIndex()}");
+			rangeLabel.style.opacity = 0.7f;
+
+			void SetSliceIndex(int value)
+			{
+				var max = SliceMaxIndex();
+				value = Mathf.Clamp(value, 0, max);
+				PointGridViewState.SliceIndex = value;
+				indexField.SetValueWithoutNotify(value);
+				rangeLabel.text = $"/ {max}";
+				SceneView.RepaintAll();
+			}
+
+			minus.clicked += () => SetSliceIndex(PointGridViewState.SliceIndex - 1);
+			plus.clicked += () => SetSliceIndex(PointGridViewState.SliceIndex + 1);
+			indexField.RegisterValueChangedCallback(e => SetSliceIndex(e.newValue));
 			sliceAxis.RegisterValueChangedCallback(e =>
 			{
 				PointGridViewState.SliceAxis = (HandleAxis)e.newValue;
-				SceneView.RepaintAll();
+				SetSliceIndex(PointGridViewState.SliceIndex);
 			});
-			sliceIndex.RegisterValueChangedCallback(e =>
+
+			sliceRow.Add(sliceLabel);
+			sliceRow.Add(minus);
+			sliceRow.Add(indexField);
+			sliceRow.Add(plus);
+			sliceRow.Add(rangeLabel);
+			root.Add(sliceRow);
+
+			// 選択や解像度の変化に上限表示を追従させる
+			root.schedule.Execute(() =>
 			{
-				PointGridViewState.SliceIndex = e.newValue;
-				SceneView.RepaintAll();
-			});
-			root.Add(slice);
-			root.Add(sliceAxis);
-			root.Add(sliceIndex);
+				var max = SliceMaxIndex();
+				rangeLabel.text = $"/ {max}";
+				if (PointGridViewState.SliceIndex > max)
+					SetSliceIndex(max);
+			}).Every(500);
 
 			var buttons = new VisualElement();
 			buttons.style.flexDirection = FlexDirection.Row;
@@ -77,6 +110,23 @@ namespace MeshModifier.NDMFDeform.Editor
 				PointGridCommands.Pending = command;
 				SceneView.RepaintAll();
 			}) { text = label };
+		}
+
+		/// <summary>選択中のラティスの解像度から現在のスライス軸の最大インデックスを得る</summary>
+		private static int SliceMaxIndex()
+		{
+			var go = Selection.activeGameObject;
+			var lattice = go != null ? go.GetComponent<LatticeDeformer>() : null;
+			if (lattice == null)
+				return 15;
+
+			var res = lattice.Resolution;
+			switch (PointGridViewState.SliceAxis)
+			{
+				case HandleAxis.X: return res.x - 1;
+				case HandleAxis.Y: return res.y - 1;
+				default: return res.z - 1;
+			}
 		}
 	}
 }

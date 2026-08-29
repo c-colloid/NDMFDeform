@@ -78,9 +78,15 @@ namespace MeshModifier.NDMFDeform.Editor
 		private Matrix4x4 _axisMatrix = Matrix4x4.identity;
 		private Matrix4x4 _axisInverse = Matrix4x4.identity;
 
-		// イベント毎に構築する位置キャッシュ
+		// イベント毎に構築する位置キャッシュ。
+		// ドラッグ中はキャッシュを直接編集し、フィールドへの反映(Undo 付きコミット)は
+		// 約 20Hz + ドラッグ終了時にまとめる(大量選択時の書き込みコスト削減)
 		private float3[] _localCache = System.Array.Empty<float3>();
 		private Vector3[] _worldCache = System.Array.Empty<Vector3>();
+		private readonly HashSet<int> _dirtyIndices = new HashSet<int>();
+		private bool _cacheDirty;
+		private double _lastCommitTime;
+		private const double CommitInterval = 0.05;
 
 		// ワイヤーフレームの線分バッファ(構成が変わった時のみ組み直す)
 		private Vector3[] _wireSegments = System.Array.Empty<Vector3>();
@@ -121,16 +127,15 @@ namespace MeshModifier.NDMFDeform.Editor
 			var sliceAxis = PointGridViewState.SliceAxis;
 			var sliceIndex = Mathf.Clamp(PointGridViewState.SliceIndex, 0, AxisRes(resolution, sliceAxis) - 1);
 
-			var changed = false;
 			using (new Handles.DrawingScope(Matrix4x4.identity))
 			{
 				DrawWireframe(resolution, sliceOnly, sliceAxis, sliceIndex);
 				DrawPointsAndPick(resolution, sliceOnly, sliceAxis, sliceIndex);
 				HandleMarquee(resolution, sliceOnly, sliceAxis, sliceIndex);
-				changed = MoveSelection(points, resolution, mirror);
+				MoveSelection(resolution, mirror);
 			}
 
-			return changed;
+			return CommitIfNeeded(serializedObject, points);
 		}
 
 		/// <summary>
@@ -144,27 +149,22 @@ namespace MeshModifier.NDMFDeform.Editor
 			{
 				_localCache = new float3[count];
 				_worldCache = new Vector3[count];
+				_dirtyIndices.Clear();
+				_cacheDirty = false;
 			}
 
-			var fast = TryGetFieldArray(serializedObject.targetObject, points.name);
-			if (fast != null && fast.Length == count)
+			// 未コミットの編集があるあいだはキャッシュが正であり、フィールドから読み戻さない
+			if (!_cacheDirty)
 			{
-				System.Array.Copy(fast, _localCache, count);
-			}
-			else
-			{
-				for (var i = 0; i < count; i++)
-					_localCache[i] = GetPoint(points, i);
-			}
-
-			foreach (var i in _selection)
-			{
-				_localCache[i] = GetPoint(points, i);
-				if (mirror != MirrorAxis.None)
+				var fast = TryGetFieldArray(serializedObject.targetObject, points.name);
+				if (fast != null && fast.Length == count)
 				{
-					var partner = PointGridUtility.MirrorIndex(resolution, i, mirror);
-					if (partner != i)
-						_localCache[partner] = GetPoint(points, partner);
+					System.Array.Copy(fast, _localCache, count);
+				}
+				else
+				{
+					for (var i = 0; i < count; i++)
+						_localCache[i] = GetPoint(points, i);
 				}
 			}
 
@@ -228,10 +228,10 @@ namespace MeshModifier.NDMFDeform.Editor
 			Handles.zTest = CompareFunction.Always;
 		}
 
-		private bool MoveSelection(SerializedProperty points, Vector3Int resolution, MirrorAxis mirror)
+		private void MoveSelection(Vector3Int resolution, MirrorAxis mirror)
 		{
 			if (_selection.Count == 0)
-				return false;
+				return;
 
 			var pivot = Vector3.zero;
 			foreach (var i in _selection)
@@ -241,16 +241,17 @@ namespace MeshModifier.NDMFDeform.Editor
 			EditorGUI.BeginChangeCheck();
 			var newPivot = Handles.PositionHandle(pivot, Quaternion.identity);
 			if (!EditorGUI.EndChangeCheck())
-				return false;
+				return;
 
-			// ワールドのデルタを軸空間へ変換して各点に適用する
+			// ワールドのデルタを軸空間へ変換し、キャッシュにのみ適用する
+			// (フィールドへの反映は CommitIfNeeded がまとめて行う)
 			var localDelta = (float3)_axisInverse.MultiplyVector(newPivot - pivot);
 			foreach (var i in _selection)
 			{
 				var newPos = _localCache[i] + localDelta;
-				SetPoint(points, i, newPos);
 				_localCache[i] = newPos;
 				_worldCache[i] = _axisMatrix.MultiplyPoint3x4((Vector3)newPos);
+				_dirtyIndices.Add(i);
 
 				if (mirror != MirrorAxis.None)
 				{
@@ -258,12 +259,50 @@ namespace MeshModifier.NDMFDeform.Editor
 					if (partner != i && !_selection.Contains(partner))
 					{
 						var mirrored = PointGridUtility.MirrorPosition(newPos, mirror);
-						SetPoint(points, partner, mirrored);
 						_localCache[partner] = mirrored;
 						_worldCache[partner] = _axisMatrix.MultiplyPoint3x4((Vector3)mirrored);
+						_dirtyIndices.Add(partner);
 					}
 				}
 			}
+			_cacheDirty = true;
+		}
+
+		/// <summary>
+		/// キャッシュ上の編集をフィールドへ反映する(Undo 付き)。
+		/// ドラッグ中は CommitInterval に間引き、ドラッグ終了時は即時。
+		/// SerializedProperty 経由の適用が必要な場合のみ true を返す。
+		/// </summary>
+		private bool CommitIfNeeded(SerializedObject serializedObject, SerializedProperty points)
+		{
+			if (!_cacheDirty)
+				return false;
+
+			var dragging = GUIUtility.hotControl != 0;
+			var now = EditorApplication.timeSinceStartup;
+			if (dragging && now - _lastCommitTime < CommitInterval)
+				return false;
+
+			_lastCommitTime = now;
+			_cacheDirty = false;
+
+			var target = serializedObject.targetObject;
+			var fast = TryGetFieldArray(target, points.name);
+			if (fast != null && fast.Length == _localCache.Length)
+			{
+				Undo.RecordObject(target, "Move Lattice Points");
+				foreach (var i in _dirtyIndices)
+					fast[i] = _localCache[i];
+				PrefabUtility.RecordPrefabInstancePropertyModifications(target);
+				EditorUtility.SetDirty(target);
+				_dirtyIndices.Clear();
+				return false;
+			}
+
+			// フォールバック: SerializedProperty 経由(呼び出し側が Apply する)
+			foreach (var i in _dirtyIndices)
+				SetPoint(points, i, _localCache[i]);
+			_dirtyIndices.Clear();
 			return true;
 		}
 
