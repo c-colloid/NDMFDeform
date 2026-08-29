@@ -434,6 +434,13 @@ EditMode テスト(golden mesh: 入力メッシュ + パラメータ → 期待�
 | M6 | 移行ツール → フォーク削除 → パッケージング整備(vpmDependencies、タグ、VPM リスティング、THIRD-PARTY-NOTICES)。UITK Font Fix(jp.colloid.uitk-font-fix)も同じ VPM リスティングへ登録し、vpmDependencies による自動取得を成立させる。将来的には OpenUPM への登録も併用し、UPM 経路でも依存自動解決を可能にする(スコープドレジストリ追加が前提) | 1.0.0 |
 | M7(候補) | **Bake as BlendShape**: デフォーマ効果をブレンドシェイプとして焼き込み、Animator / Udon から駆動(§2.1 の橋渡し機能) | 1.1.0 |
 
+リリース経路(2026-08-29 決定): 旧パッケージと同名(`jp.colloid.nemfdeform`)のため、
+フォーク削除版へ直接更新すると旧コンポーネントが Missing Script になり移行不能になる。そこで
+**0.9.0 = フォーク同梱 + v2 + 移行ツールの「移行リリース」**を先に配布し、既存ユーザーは
+そこで移行してから **1.0.0(フォーク削除後)** へ更新する 2 段構えとする。
+VPM リスティングは新規リポジトリ(c-colloid)を作成して配信し、NDMFDeform と
+UITK Font Fix の両方を登録する。
+
 現行 main(v0.0.x 系)への Phase 0 的なバグ修正(GameObject 誤削除・SMR キャスト等)は、
 v2 完成まで既存ユーザーが v0.0.x を使い続ける場合にのみ適用を検討する(別作業)。
 
