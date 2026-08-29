@@ -25,6 +25,14 @@ namespace MeshModifier.NDMFDeform.Core
 		public virtual Transform Axis => transform;
 
 		/// <summary>
+		/// ベイク直前にソースメッシュ全体を参照する解析を行う任意フック
+		/// (UV 島解析など、NativeArray 化されない情報が必要な場合に使う)。
+		/// ベイクコアが Schedule より前にメインスレッドで呼ぶ。
+		/// 結果はインスタンス内にキャッシュし、Schedule で参照すること。
+		/// </summary>
+		public virtual void PrepareBake(Mesh source) { }
+
+		/// <summary>
 		/// 変形ジョブをスケジュールする。
 		/// バッファへのインプレース変形のみ許可(頂点数・順序は変更不可)。
 		/// buffers.Vertices 以外のチャンネルは元メッシュに存在しない場合

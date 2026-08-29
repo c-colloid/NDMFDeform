@@ -33,6 +33,10 @@ namespace MeshModifier.NDMFDeform.Editor
 			foreach (var d in deformers)
 				flags |= d.DataFlags;
 
+			// メッシュ全体を参照する解析(UV 島など)を先に済ませる
+			foreach (var d in deformers)
+				d.PrepareBake(source);
+
 			var buffers = CreateBuffers(source, flags);
 			var handle = default(JobHandle);
 			try
@@ -119,6 +123,23 @@ namespace MeshModifier.NDMFDeform.Editor
 					for (var i = 0; i < tangents.Length; i++)
 						buffers.Tangents[i] = tangents[i];
 				}
+			}
+
+			if ((flags & DeformDataFlags.UVs) != 0)
+			{
+				var uvs = source.uv;
+				if (uvs.Length == buffers.Length)
+				{
+					buffers.UVs = new NativeArray<float2>(uvs.Length, Allocator.TempJob,
+						NativeArrayOptions.UninitializedMemory);
+					for (var i = 0; i < uvs.Length; i++)
+						buffers.UVs[i] = uvs[i];
+				}
+			}
+
+			if ((flags & DeformDataFlags.OriginalVertices) != 0)
+			{
+				buffers.OriginalVertices = new NativeArray<float3>(buffers.Vertices, Allocator.TempJob);
 			}
 
 			return buffers;
