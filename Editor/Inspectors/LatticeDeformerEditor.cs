@@ -1,5 +1,6 @@
 using MeshModifier.NDMFDeform.Core;
 using UnityEditor;
+using UnityEditor.UIElements;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -20,6 +21,18 @@ namespace MeshModifier.NDMFDeform.Editor
 		public override VisualElement CreateInspectorGUI()
 		{
 			var root = base.CreateInspectorGUI();
+
+			// 解像度は確定時(Enter / フォーカスアウト)にのみ反映する。
+			// 即時反映だと入力途中の "1" が OnValidate の最小値クランプで "2" に
+			// 上書きされ、"11" が "21" になってしまう
+			root.schedule.Execute(() =>
+			{
+				root.Query<PropertyField>().ForEach(pf =>
+				{
+					if (pf.bindingPath == "resolution")
+						pf.Query<IntegerField>().ForEach(f => f.isDelayed = true);
+				});
+			});
 
 			var buttons = new VisualElement();
 			buttons.style.flexDirection = FlexDirection.Row;
