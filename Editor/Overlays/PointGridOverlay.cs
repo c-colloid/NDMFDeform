@@ -103,8 +103,9 @@ namespace MeshModifier.NDMFDeform.Editor
 			var selectionSection = AddSection(root, "選択");
 
 			var hint = new Label(
-				"Ctrl+クリック: 行選択(近い辺の方向 / 再クリックで方向切替)\n" +
-				"Ctrl+Shift+クリック: リング選択(再クリックでシート全体)");
+				"Ctrl+ドラッグ: スワイプ方向の軸で行選択\n" +
+				"Ctrl+Shift+ドラッグ: スワイプ方向の軸のリング選択\n" +
+				"クリックのみ: 再クリックで軸循環 / ダブルクリック: シート全体");
 			hint.style.opacity = 0.6f;
 			hint.style.fontSize = 10;
 			hint.style.whiteSpace = WhiteSpace.Normal;

@@ -141,6 +141,7 @@ namespace MeshModifier.NDMFDeform.Editor
 			using (new Handles.DrawingScope(Matrix4x4.identity))
 			{
 				DrawWireframe(resolution);
+				HandleAxisGesture(resolution);
 				DrawPointsAndPick(resolution);
 				HandleMarquee(resolution);
 				MoveSelection(resolution, mirror);
@@ -233,7 +234,7 @@ namespace MeshModifier.NDMFDeform.Editor
 				if (Handles.Button(world, Quaternion.identity, size, size * 1.4f, Handles.DotHandleCap))
 				{
 					ApplyClickSelection(i, PointGridUtility.GetCoord(resolution, i), resolution,
-						evt.modifiers, evt.mousePosition);
+						evt.modifiers, evt.mousePosition, evt.clickCount);
 				}
 			}
 			Handles.zTest = CompareFunction.Always;
@@ -321,35 +322,43 @@ namespace MeshModifier.NDMFDeform.Editor
 		private int _lastClickIndex = -1;
 		private bool _lastClickWasExpand;
 		private int _directionStep;
-		private bool _expandAsSheet;
+		private int _expandStep;
+		private HandleAxis _lastNormalAxis = HandleAxis.Z;
 
 		private void ApplyClickSelection(int index, Vector3Int coord, Vector3Int resolution,
-			EventModifiers modifiers, Vector2 mousePosition)
+			EventModifiers modifiers, Vector2 mousePosition, int clickCount)
 		{
 			var ctrl = (modifiers & EventModifiers.Control) != 0 || (modifiers & EventModifiers.Command) != 0;
 			var shift = (modifiers & EventModifiers.Shift) != 0;
 
 			if (ctrl && shift)
 			{
-				// リング(ループ)選択: クリック位置に近い辺方向に垂直なシートの外周。
-				// 同じ点への連続クリックでシート全面⇄リングを切替える
-				if (index == _lastClickIndex && _lastClickWasExpand)
-					_expandAsSheet = !_expandAsSheet;
+				if (clickCount >= 2 && index == _lastClickIndex && _lastClickWasExpand)
+				{
+					// ダブルクリック: 直近のリングをシート全面に拡張
+					ReplaceSelection(PointGridUtility.SheetIndices(
+						resolution, _lastNormalAxis, AxisCoord(coord, _lastNormalAxis)));
+				}
 				else
-					_expandAsSheet = false;
+				{
+					// リング(ループ)選択。同じ点への連続クリックで法線軸を循環させる
+					if (index == _lastClickIndex && _lastClickWasExpand)
+						_expandStep++;
+					else
+						_expandStep = 0;
 
-				var normal = DirectionsByProximity(index, coord, resolution, mousePosition)[0];
-				ReplaceSelection(_expandAsSheet
-					? PointGridUtility.SheetIndices(resolution, normal, AxisCoord(coord, normal))
-					: PointGridUtility.RingIndices(resolution, normal, coord));
+					var directions = DirectionsByProximity(index, coord, resolution, mousePosition);
+					var normal = directions[_expandStep % directions.Count];
+					_lastNormalAxis = normal;
+					ReplaceSelection(PointGridUtility.RingIndices(resolution, normal, coord));
+				}
 
 				_lastClickIndex = index;
 				_lastClickWasExpand = true;
 			}
 			else if (ctrl)
 			{
-				// 行選択: クリック位置に最も近い辺の方向。
-				// 同じ点への連続クリックで方向を近い順に循環させる
+				// 行選択。同じ点への連続クリックで方向を近い順に循環させる
 				if (index == _lastClickIndex && !_lastClickWasExpand)
 					_directionStep++;
 				else
@@ -375,6 +384,196 @@ namespace MeshModifier.NDMFDeform.Editor
 				_lastClickIndex = -1;
 			}
 			SceneView.RepaintAll();
+		}
+
+		// ==== 軸スワイプジェスチャ(Ctrl+ドラッグ) ====
+		// 点の上で Ctrl(+Shift) を押しながらドラッグすると、点から X/Y/Z の
+		// 軸ガイドが表示され、スワイプ方向に最も近い軸で行(またはリング)を選択する。
+		// デッドゾーン内で離した場合は従来のクリック選択(近接辺推定+循環)になる。
+
+		private bool _gestureActive;
+		private int _gestureIndex = -1;
+		private Vector2 _gestureStart;
+		private Vector2 _gestureCurrent;
+		private bool _gestureShift;
+		private int _gestureClickCount;
+
+		private const float GestureDeadzone = 8f;
+		private const float GesturePickRadius = 14f;
+
+		private static readonly Color[] AxisColors =
+		{
+			new Color(1f, 0.35f, 0.35f),  // X
+			new Color(0.55f, 1f, 0.4f),   // Y
+			new Color(0.35f, 0.6f, 1f),   // Z
+		};
+
+		private void HandleAxisGesture(Vector3Int resolution)
+		{
+			var evt = Event.current;
+			var control = GUIUtility.GetControlID(FocusType.Passive);
+
+			switch (evt.GetTypeForControl(control))
+			{
+				case EventType.MouseDown:
+				{
+					var ctrl = evt.control || evt.command;
+					if (!ctrl || evt.button != 0 || evt.alt) break;
+					var index = PickPointAt(evt.mousePosition, resolution);
+					if (index < 0) break;
+
+					_gestureActive = true;
+					_gestureIndex = index;
+					_gestureStart = _gestureCurrent = evt.mousePosition;
+					_gestureShift = evt.shift;
+					_gestureClickCount = evt.clickCount;
+					GUIUtility.hotControl = control;
+					evt.Use();
+					break;
+				}
+
+				case EventType.MouseDrag:
+					if (GUIUtility.hotControl == control)
+					{
+						_gestureCurrent = evt.mousePosition;
+						evt.Use();
+					}
+					break;
+
+				case EventType.MouseUp:
+					if (GUIUtility.hotControl == control)
+					{
+						GUIUtility.hotControl = 0;
+						var coord = PointGridUtility.GetCoord(resolution, _gestureIndex);
+						var delta = _gestureCurrent - _gestureStart;
+
+						if (delta.magnitude < GestureDeadzone)
+						{
+							var modifiers = EventModifiers.Control |
+								(_gestureShift ? EventModifiers.Shift : EventModifiers.None);
+							ApplyClickSelection(_gestureIndex, coord, resolution,
+								modifiers, _gestureStart, _gestureClickCount);
+						}
+						else
+						{
+							var axis = BestAxisByScreenDirection(_gestureIndex, delta);
+							if (axis.HasValue)
+							{
+								if (_gestureShift)
+								{
+									_lastNormalAxis = axis.Value;
+									ReplaceSelection(PointGridUtility.RingIndices(resolution, axis.Value, coord));
+								}
+								else
+								{
+									ReplaceSelection(PointGridUtility.LineIndices(resolution, coord, axis.Value));
+								}
+								_lastClickIndex = _gestureIndex;
+								_lastClickWasExpand = _gestureShift;
+							}
+						}
+
+						_gestureActive = false;
+						_gestureIndex = -1;
+						evt.Use();
+						SceneView.RepaintAll();
+					}
+					break;
+
+				case EventType.Repaint:
+					if (_gestureActive && GUIUtility.hotControl == control &&
+					    (_gestureCurrent - _gestureStart).magnitude >= GestureDeadzone)
+					{
+						DrawAxisGuides();
+					}
+					break;
+			}
+		}
+
+		/// <summary>GUI 座標に最も近い可視の制御点を返す(半径外なら -1)</summary>
+		private int PickPointAt(Vector2 guiPosition, Vector3Int resolution)
+		{
+			var best = -1;
+			var bestDistance = GesturePickRadius * GesturePickRadius;
+			for (var i = 0; i < _worldCache.Length; i++)
+			{
+				if (!PointGridViewState.IsSliceVisible(PointGridUtility.GetCoord(resolution, i)))
+					continue;
+				var d = (HandleUtility.WorldToGUIPoint(_worldCache[i]) - guiPosition).sqrMagnitude;
+				if (d < bestDistance)
+				{
+					bestDistance = d;
+					best = i;
+				}
+			}
+			return best;
+		}
+
+		/// <summary>スワイプ方向(GUI 座標)に画面上で最も平行な軸を返す</summary>
+		private HandleAxis? BestAxisByScreenDirection(int index, Vector2 delta)
+		{
+			var world = _worldCache[index];
+			var handleSize = HandleUtility.GetHandleSize(world);
+			var origin = HandleUtility.WorldToGUIPoint(world);
+			var direction = delta.normalized;
+
+			HandleAxis? best = null;
+			var bestScore = 0f;
+			foreach (var axis in new[] { HandleAxis.X, HandleAxis.Y, HandleAxis.Z })
+			{
+				var screenDir = AxisScreenDirection(axis, world, handleSize, origin);
+				// 画面上でほぼ潰れている軸(奥行き方向)はスワイプでは選ばせない
+				if (screenDir.magnitude < 4f)
+					continue;
+				var score = Mathf.Abs(Vector2.Dot(screenDir.normalized, direction));
+				if (score > bestScore)
+				{
+					bestScore = score;
+					best = axis;
+				}
+			}
+			return best;
+		}
+
+		private Vector2 AxisScreenDirection(HandleAxis axis, Vector3 world, float handleSize, Vector2 origin)
+		{
+			Vector3 unit;
+			switch (axis)
+			{
+				case HandleAxis.X: unit = Vector3.right; break;
+				case HandleAxis.Y: unit = Vector3.up; break;
+				default: unit = Vector3.forward; break;
+			}
+			var worldDir = _axisMatrix.MultiplyVector(unit).normalized;
+			return HandleUtility.WorldToGUIPoint(world + worldDir * handleSize) - origin;
+		}
+
+		/// <summary>ドラッグ中の軸ガイド(X=赤 / Y=緑 / Z=青、選択中の軸を強調)を描く</summary>
+		private void DrawAxisGuides()
+		{
+			var world = _worldCache[_gestureIndex];
+			var handleSize = HandleUtility.GetHandleSize(world);
+			var delta = _gestureCurrent - _gestureStart;
+			var active = BestAxisByScreenDirection(_gestureIndex, delta);
+
+			Handles.zTest = CompareFunction.Always;
+			foreach (var axis in new[] { HandleAxis.X, HandleAxis.Y, HandleAxis.Z })
+			{
+				Vector3 unit;
+				switch (axis)
+				{
+					case HandleAxis.X: unit = Vector3.right; break;
+					case HandleAxis.Y: unit = Vector3.up; break;
+					default: unit = Vector3.forward; break;
+				}
+				var worldDir = _axisMatrix.MultiplyVector(unit).normalized;
+				var isActive = active.HasValue && active.Value == axis;
+				var color = AxisColors[(int)axis];
+				Handles.color = isActive ? color : color * new Color(1f, 1f, 1f, 0.35f);
+				var length = handleSize * 2.2f;
+				var thickness = isActive ? 4f : 1.5f;
+				Handles.DrawLine(world - worldDir * length, world + worldDir * length, thickness);
+			}
 		}
 
 		/// <summary>
