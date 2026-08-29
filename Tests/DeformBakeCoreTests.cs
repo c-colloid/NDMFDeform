@@ -120,6 +120,27 @@ namespace MeshModifier.NDMFDeform.Tests
 		}
 
 		[Test]
+		public void Bake_VertexTransformPushesRadially()
+		{
+			var (stack, _) = CreateSetup();
+			var deformer = _root.transform.GetChild(0).gameObject
+				.AddComponent<CylindricalVertexTransformDeformer>();
+			deformer.Factor = 1f;
+			deformer.Radius = 2f;
+			deformer.Scope = 1f;
+			stack.AddDeformer(deformer);
+
+			_baked = DeformBakeCore.Bake(stack, _source, _root.transform);
+
+			var v = _baked.vertices;
+			// 内側: 放射方向へ (radius - scope) = 1 押し出し
+			Assert.That(Vector3.Distance(v[0], new Vector3(1.5f, 0f, 0f)), Is.LessThan(1e-4f));
+			Assert.That(Vector3.Distance(v[1], new Vector3(0f, 1.5f, 0f)), Is.LessThan(1e-4f));
+			// 外側: 変化なし
+			Assert.That(Vector3.Distance(v[2], new Vector3(5f, 0f, 0f)), Is.LessThan(1e-4f));
+		}
+
+		[Test]
 		public void Bake_RespectsAxisTransform()
 		{
 			var (stack, deformer) = CreateSetup();

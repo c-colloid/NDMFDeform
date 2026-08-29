@@ -51,14 +51,22 @@ jobs:
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         working-directory: ${{ runner.temp }}
         run: |
-          "$HOME/unity-editor/Editor/Unity" -batchmode -nographics -quit \
-            -username "$UNITY_EMAIL" -password "$UNITY_PASSWORD" \
-            -logFile "$RUNNER_TEMP/activation.log" || true
-          if ! grep -q "Serial number assigned" "$RUNNER_TEMP/activation.log"; then
-            echo "::error::Unity license activation failed"
-            tail -50 "$RUNNER_TEMP/activation.log"
-            exit 1
-          fi
+          # 1回目はライセンスクライアントのアクセストークン取得までで終わることがあるため、
+          # アクティベーション完了(シリアル割当て)までリトライする
+          for attempt in 1 2 3; do
+            "$HOME/unity-editor/Editor/Unity" -batchmode -nographics -quit \
+              -username "$UNITY_EMAIL" -password "$UNITY_PASSWORD" \
+              -logFile "$RUNNER_TEMP/activation.log" || true
+            if grep -q "Serial number assigned" "$RUNNER_TEMP/activation.log"; then
+              echo "activated on attempt $attempt"
+              exit 0
+            fi
+            echo "activation attempt $attempt incomplete; retrying..."
+            sleep 5
+          done
+          echo "::error::Unity license activation failed"
+          tail -60 "$RUNNER_TEMP/activation.log"
+          exit 1
 
       - name: Run EditMode tests
         run: |

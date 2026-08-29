@@ -31,5 +31,13 @@ namespace MeshModifier.NDMFDeform.Core
 		/// 未生成のことがあるため、使用前に IsCreated を確認すること。
 		/// </summary>
 		public abstract JobHandle Schedule(in MeshBuffers buffers, in DeformSpace space, JobHandle dependency);
+
+#if UNITY_EDITOR
+		/// <summary>
+		/// 編集ハンドルを宣言する(任意)。宣言は軸空間で解釈される。
+		/// 描画・バインド・Undo はフレームワーク(DeformerBaseEditor)が処理する。
+		/// </summary>
+		public virtual void DescribeHandles(IHandleBuilder h) { }
+#endif
 	}
 }

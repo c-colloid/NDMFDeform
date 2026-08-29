@@ -1,4 +1,4 @@
-// 移植元: dev ブランチ ExDeform/CylindricalScaleDeformer.cs(自作コード)
+// 移植元: dev ブランチ ExDeform/CylindricalVertexTransformDefomer.cs(自作コード)
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
@@ -9,13 +9,14 @@ using static Unity.Mathematics.math;
 namespace MeshModifier.NDMFDeform.Core
 {
 	/// <summary>
-	/// 円柱コントローラによる範囲スケール。
-	/// 軸空間で半径 scope・区間 [bottom, top] 内の頂点の XY を radius/scope 倍へ補間する。
+	/// 円柱コントローラによる放射状頂点移動。
+	/// 軸空間で半径 scope・区間 [bottom, top] 内の頂点を、
+	/// XY 放射方向へ (radius - scope) × factor だけ押し出す。
 	/// </summary>
-	[DeformerMeta(Name = "Cylindrical Scale", Category = DeformerCategory.Shape,
-	              Description = "円柱コントローラで範囲をスケールする")]
-	[AddComponentMenu("NDMF Deform/Deformers/Cylindrical Scale")]
-	public class CylindricalScaleDeformer : DeformerBase
+	[DeformerMeta(Name = "Cylindrical Vertex Transform", Category = DeformerCategory.Shape,
+	              Description = "円柱コントローラで頂点を放射状に移動する")]
+	[AddComponentMenu("NDMF Deform/Deformers/Cylindrical Vertex Transform")]
+	public class CylindricalVertexTransformDeformer : DeformerBase
 	{
 		[SerializeField, Range(0f, 1f)] private float factor = 0f;
 		[SerializeField] private float radius = 1f;
@@ -53,7 +54,7 @@ namespace MeshModifier.NDMFDeform.Core
 			if (Mathf.Approximately(factor, 0f))
 				return dependency;
 
-			return new CylindricalScaleJob
+			return new CylindricalVertexTransformJob
 			{
 				factor = factor,
 				radius = radius,
@@ -67,7 +68,7 @@ namespace MeshModifier.NDMFDeform.Core
 		}
 
 		[BurstCompile]
-		public struct CylindricalScaleJob : IJobParallelFor
+		public struct CylindricalVertexTransformJob : IJobParallelFor
 		{
 			public float factor;
 			public float radius;
@@ -83,9 +84,9 @@ namespace MeshModifier.NDMFDeform.Core
 				var point = mul(meshToAxis, float4(vertices[index], 1f));
 				var d = length(point.xy);
 
-				if (d < scope && point.z < top && point.z > bottom)
+				if (d < scope && point.z <= top && point.z >= bottom)
 				{
-					point.xy *= lerp(1f, radius / scope, factor);
+					point.xy += lerp(new float2(0f), normalize(point.xy) * (radius - scope), factor);
 				}
 
 				vertices[index] = mul(axisToMesh, point).xyz;
