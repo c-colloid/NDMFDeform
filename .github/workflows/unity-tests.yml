@@ -3,6 +3,7 @@ name: Unity Tests
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: unity-tests-${{ github.ref }}
@@ -10,10 +11,20 @@ concurrency:
 
 jobs:
   editmode:
+    name: EditMode tests (Unity 2022.3.22f1)
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    container:
+      image: unityci/editor:ubuntu-2022.3.22f1-base-3
+    permissions:
+      contents: read
+    env:
+      UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+      UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+      LICENSING_CLIENT: /opt/unity/Editor/Data/Resources/Licensing/Client/Unity.Licensing.Client
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup test project
         run: bash .github/scripts/setup_test_project.sh "$GITHUB_WORKSPACE/TestProject"
@@ -22,26 +33,50 @@ jobs:
         uses: actions/cache@v4
         with:
           path: TestProject/Library
-          key: unity-library-2022.3.22f1-${{ hashFiles('.github/scripts/setup_test_project.sh') }}
+          key: Library-2022.3.22f1-${{ hashFiles('**/*.asmdef', '.github/scripts/setup_test_project.sh') }}
+          restore-keys: |
+            Library-2022.3.22f1-
 
-      # Personal ライセンスは UNITY_LICENSE(.ulf の中身)+ UNITY_EMAIL + UNITY_PASSWORD が必要
-      # https://game.ci/docs/github/activation
+      # Personal ライセンスのシートを email/password で直接取得する
+      # (エディタへの -username/-password 渡しではシート取得まで行われない)
+      - name: Activate Unity license (personal seat via credentials)
+        run: |
+          if [ -z "$UNITY_EMAIL" ] || [ -z "$UNITY_PASSWORD" ]; then
+            echo "::error::UNITY_EMAIL / UNITY_PASSWORD repository secrets are not set."
+            exit 1
+          fi
+          "$LICENSING_CLIENT" --activate-all --include-personal \
+            --username "$UNITY_EMAIL" --password "$UNITY_PASSWORD"
+
       - name: Run EditMode tests
-        uses: game-ci/unity-test-runner@v4
-        env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-        with:
-          projectPath: TestProject
-          unityVersion: 2022.3.22f1
-          testMode: editmode
-          customParameters: -assemblyNames NDMFDeform.Tests
+        run: |
+          mkdir -p test-results
+          /opt/unity/Editor/Unity -batchmode -nographics \
+            -projectPath "$GITHUB_WORKSPACE/TestProject" \
+            -runTests -testPlatform EditMode -assemblyNames "NDMFDeform.Tests" \
+            -testResults "$GITHUB_WORKSPACE/test-results/results.xml" \
+            -logFile "$GITHUB_WORKSPACE/test-results/tests.log"
+
+      - name: Summarize results
+        if: always()
+        run: |
+          if [ -f test-results/results.xml ]; then
+            head -c 400 test-results/results.xml | tr '\n' ' ' | grep -oE 'total="[0-9]+" passed="[0-9]+" failed="[0-9]+" inconclusive="[0-9]+" skipped="[0-9]+"' || true
+          else
+            echo "no results.xml produced (see tests.log artifact)"
+          fi
+
+      - name: Return license seat
+        if: always()
+        run: |
+          if [ -n "$UNITY_EMAIL" ] && [ -n "$UNITY_PASSWORD" ]; then
+            "$LICENSING_CLIENT" --deactivate-all \
+              --username "$UNITY_EMAIL" --password "$UNITY_PASSWORD" || true
+          fi
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: artifacts
-          if-no-files-found: ignore
+          path: test-results
