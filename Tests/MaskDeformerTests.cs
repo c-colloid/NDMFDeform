@@ -53,16 +53,17 @@ namespace MeshModifier.NDMFDeform.Tests
 		[Test]
 		public void SphereMask_RestoresInsideAndFadesOut()
 		{
-			// ジョブ内半径は指定値の 0.5 倍: inner 2→1, outer 4→2
+			// 領域判定は変形後(+Y 1 移動後)の位置に対して行われる。
+			// ジョブ内半径は指定値の 0.5 倍: inner 4→2, outer 8→4
 			var (stack, maskGo) = CreateSetup(new[]
 			{
-				new Vector3(0.5f, 0f, 0f),   // 内側 → 打ち消し
-				new Vector3(3f, 0f, 0f),     // 外側 → 変形のまま
-				new Vector3(1.5f, 0f, 0f),   // 中間 → 半分
+				new Vector3(0f, 0f, 0f),             // 移動後 dist=1 < 2 → 打ち消し
+				new Vector3(10f, 0f, 0f),            // 移動後 dist>4 → 変形のまま
+				new Vector3(Mathf.Sqrt(8f), 0f, 0f), // 移動後 dist=3 → 半分
 			});
 			var mask = maskGo.AddComponent<SphereMaskDeformer>();
-			mask.InnerRadius = 2f;
-			mask.OuterRadius = 4f;
+			mask.InnerRadius = 4f;
+			mask.OuterRadius = 8f;
 			stack.AddDeformer(mask);
 
 			_baked = DeformBakeCore.Bake(stack, _source, _root.transform);
@@ -82,15 +83,17 @@ namespace MeshModifier.NDMFDeform.Tests
 		[Test]
 		public void BoxMask_RestoresInsideAndFadesOut()
 		{
+			// 領域判定は変形後(+Y 1 移動後)の位置に対して行われるため、
+			// Y 方向に余裕のあるバウンズにする(inner extents (0.5,2,0.5) / outer (1,3,1))
 			var (stack, maskGo) = CreateSetup(new[]
 			{
-				new Vector3(0.2f, 0f, 0f),   // inner(extents 0.5) の内側 → 打ち消し
-				new Vector3(5f, 0f, 0f),     // outer(extents 1) の外側 → 変形のまま
+				new Vector3(0.2f, 0f, 0f),   // 移動後も inner 内 → 打ち消し
+				new Vector3(5f, 0f, 0f),     // outer の外 → 変形のまま
 				new Vector3(0.75f, 0f, 0f),  // 中間 → 半分
 			});
 			var mask = maskGo.AddComponent<BoxMaskDeformer>();
-			mask.InnerBounds = new Bounds(Vector3.zero, Vector3.one);      // extents 0.5
-			mask.OuterBounds = new Bounds(Vector3.zero, Vector3.one * 2f); // extents 1
+			mask.InnerBounds = new Bounds(Vector3.zero, new Vector3(1f, 4f, 1f));
+			mask.OuterBounds = new Bounds(Vector3.zero, new Vector3(2f, 6f, 2f));
 			stack.AddDeformer(mask);
 
 			_baked = DeformBakeCore.Bake(stack, _source, _root.transform);

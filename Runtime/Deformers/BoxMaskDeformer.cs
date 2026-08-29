@@ -11,6 +11,7 @@ namespace MeshModifier.NDMFDeform.Core
 	/// <summary>
 	/// 直方体領域のマスク。内側バウンズの中で変形を完全に打ち消し、
 	/// 外側バウンズまで減衰する(invert で外側を打ち消す)。
+	/// 元実装と同じく、領域判定は変形後の頂点位置に対して行う。
 	/// </summary>
 	[DeformerMeta(Name = "Box Mask", Category = DeformerCategory.Mask,
 	              Description = "直方体領域の変形を打ち消す(反転で外側を打ち消す)")]

@@ -11,7 +11,8 @@ namespace MeshModifier.NDMFDeform.Core
 	/// <summary>
 	/// 球形領域のマスク。内半径の内側で変形を完全に打ち消し、
 	/// 外半径まで減衰する(invert で外側を打ち消す)。
-	/// 元実装と同じく、半径は直径的な値(ジョブ内で 0.5 倍)として扱う。
+	/// 元実装と同じく、半径は直径的な値(ジョブ内で 0.5 倍)として扱い、
+	/// 領域判定は変形後の頂点位置に対して行う。
 	/// </summary>
 	[DeformerMeta(Name = "Sphere Mask", Category = DeformerCategory.Mask,
 	              Description = "球形領域の変形を打ち消す(反転で外側を打ち消す)")]
