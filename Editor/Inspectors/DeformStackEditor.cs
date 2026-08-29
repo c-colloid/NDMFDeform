@@ -18,6 +18,7 @@ namespace MeshModifier.NDMFDeform.Editor
 			var root = new VisualElement();
 			NdmfDeformFonts.ApplyEditorUiFont(root);
 			root.Add(new PropertyField(serializedObject.FindProperty("deformers")));
+			root.Add(new PropertyField(serializedObject.FindProperty("normalsMode"), "法線"));
 			return root;
 		}
 	}

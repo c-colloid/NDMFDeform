@@ -24,9 +24,26 @@ namespace MeshModifier.NDMFDeform.Core
 			public bool enabled;
 		}
 
+		/// <summary>ベイク時の法線の扱い</summary>
+		public enum NormalsMode
+		{
+			/// <summary>作り込まれた法線を保持する(既定。シームやトゥーン調整を壊さない)</summary>
+			PreserveAuthored = 0,
+
+			/// <summary>変形後の形状から再計算する</summary>
+			Recalculate = 1,
+		}
+
 		[SerializeField] private List<DeformerEntry> deformers = new List<DeformerEntry>();
+		[SerializeField] private NormalsMode normalsMode = NormalsMode.PreserveAuthored;
 
 		public IReadOnlyList<DeformerEntry> Deformers => deformers;
+
+		public NormalsMode Normals
+		{
+			get => normalsMode;
+			set => normalsMode = value;
+		}
 
 		/// <summary>スタック末尾にデフォーマを追加する(テスト・移行ツール用 API)</summary>
 		public void AddDeformer(DeformerBase deformer, bool enabled = true)

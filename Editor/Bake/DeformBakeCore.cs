@@ -12,6 +12,10 @@ namespace MeshModifier.NDMFDeform.Editor
 	/// コンポーネントのライフサイクル副作用に依存せず、
 	/// 「元メッシュ + デフォーマスタック → 新メッシュ」の純関数としてベイクする。
 	/// ビルド(NDMF Transforming)とプレビュー(IRenderFilter)の両方から呼ばれる。
+	///
+	/// ブレンドシェイプは各フレームについて
+	/// deformedDelta = Deform(base + delta) − Deform(base) で再ベイクする
+	/// (旧実装で変形後もデルタが元メッシュ基準のまま顔などが壊れていた問題の解消)。
 	/// </summary>
 	public static class DeformBakeCore
 	{
@@ -37,30 +41,46 @@ namespace MeshModifier.NDMFDeform.Editor
 			foreach (var d in deformers)
 				d.PrepareBake(source);
 
-			var buffers = CreateBuffers(source, flags);
-			var handle = default(JobHandle);
-			try
-			{
-				foreach (var deformer in deformers)
-				{
-					var space = new DeformSpace(GetMeshToAxis(deformer.Axis, rendererTransform));
-					handle = deformer.Schedule(in buffers, in space, handle);
-				}
-				handle.Complete();
+			// 軸空間はフレーム間で不変なので 1 回だけ計算する
+			var spaces = new DeformSpace[deformers.Count];
+			for (var i = 0; i < deformers.Count; i++)
+				spaces[i] = new DeformSpace(GetMeshToAxis(deformers[i].Axis, rendererTransform));
 
-				var result = Object.Instantiate(source);
-				result.name = source.name + " (NDMFDeform)";
-				ApplyBuffers(result, buffers, flags);
-				result.RecalculateBounds();
-				return result;
-			}
-			finally
+			// 各パスで共有するソースチャンネル(頂点以外はフレーム間で共通)
+			var channels = new SourceChannels
 			{
-				// 例外時もスケジュール済みジョブを完了させてから破棄する
-				// (未完了ジョブが参照する NativeArray の Dispose は安全性エラーになる)
-				handle.Complete();
-				buffers.Dispose();
+				VertexCount = source.vertexCount,
+				Vertices = source.vertices,
+			};
+			if ((flags & DeformDataFlags.Normals) != 0)
+				channels.Normals = source.normals;
+			if ((flags & DeformDataFlags.Tangents) != 0)
+				channels.Tangents = source.tangents;
+			if ((flags & DeformDataFlags.UVs) != 0)
+				channels.Uvs = source.uv;
+
+			var result = Object.Instantiate(source);
+			result.name = source.name + " (NDMFDeform)";
+
+			// 基本形状のベイク(結果メッシュへ書き戻し)
+			var bakedBase = new Vector3[channels.VertexCount];
+			RunPipeline(deformers, spaces, in channels, flags, null, bakedBase, result);
+
+			RebakeBlendShapes(result, source, deformers, spaces, in channels, flags, bakedBase);
+
+			// 再計算モードの時のみ法線・タンジェントを変形後の形状から作り直す。
+			// 既定(PreserveAuthored)では作り込まれた法線・タンジェント
+			// (シーム調整・トゥーンのハイライト等)を保持する。
+			if (stack.Normals == DeformStack.NormalsMode.Recalculate)
+			{
+				result.RecalculateNormals();
+				// タンジェント再構築には UV0 と法線が必要
+				if (source.uv.Length == channels.VertexCount)
+					result.RecalculateTangents();
 			}
+
+			result.RecalculateBounds();
+			return result;
 		}
 
 		public static List<DeformerBase> CollectEnabledDeformers(DeformStack stack)
@@ -89,56 +109,132 @@ namespace MeshModifier.NDMFDeform.Editor
 			return new float4x4(m.GetColumn(0), m.GetColumn(1), m.GetColumn(2), m.GetColumn(3));
 		}
 
-		private static MeshBuffers CreateBuffers(Mesh source, DeformDataFlags flags)
+		/// <summary>各パスで共有するソースメッシュのチャンネル配列</summary>
+		private struct SourceChannels
+		{
+			public int VertexCount;
+			public Vector3[] Vertices;
+			public Vector3[] Normals;
+			public Vector4[] Tangents;
+			public Vector2[] Uvs;
+		}
+
+		/// <summary>
+		/// 頂点パイプラインを 1 回実行する。
+		/// overrideVertices が null なら channels.Vertices(基本形状)を入力にする。
+		/// 結果の頂点を output に書き込み、applyTo が非 null なら全チャンネルを書き戻す。
+		/// </summary>
+		private static void RunPipeline(List<DeformerBase> deformers, DeformSpace[] spaces,
+			in SourceChannels channels, DeformDataFlags flags,
+			Vector3[] overrideVertices, Vector3[] output, Mesh applyTo)
+		{
+			var buffers = CreateBuffers(in channels, flags, overrideVertices);
+			var handle = default(JobHandle);
+			try
+			{
+				for (var i = 0; i < deformers.Count; i++)
+					handle = deformers[i].Schedule(in buffers, in spaces[i], handle);
+				handle.Complete();
+
+				for (var i = 0; i < buffers.Length; i++)
+					output[i] = buffers.Vertices[i];
+
+				if (applyTo != null)
+					ApplyBuffers(applyTo, buffers, flags);
+			}
+			finally
+			{
+				// 例外時もスケジュール済みジョブを完了させてから破棄する
+				// (未完了ジョブが参照する NativeArray の Dispose は安全性エラーになる)
+				handle.Complete();
+				buffers.Dispose();
+			}
+		}
+
+		/// <summary>
+		/// ブレンドシェイプを再ベイクする:
+		/// 各フレームの頂点デルタを Deform(base + delta) − Deform(base) で作り直す。
+		/// 法線・タンジェントデルタは元の値を引き継ぐ
+		/// (現行デフォーマは法線・タンジェントを変更しないため)。
+		/// </summary>
+		private static void RebakeBlendShapes(Mesh result, Mesh source,
+			List<DeformerBase> deformers, DeformSpace[] spaces,
+			in SourceChannels channels, DeformDataFlags flags, Vector3[] bakedBase)
+		{
+			var shapeCount = source.blendShapeCount;
+			if (shapeCount == 0)
+				return;
+
+			var n = channels.VertexCount;
+			var deltaVertices = new Vector3[n];
+			var deltaNormals = new Vector3[n];
+			var deltaTangents = new Vector3[n];
+			var frameInput = new Vector3[n];
+			var frameOutput = new Vector3[n];
+
+			result.ClearBlendShapes();
+			for (var s = 0; s < shapeCount; s++)
+			{
+				var name = source.GetBlendShapeName(s);
+				var frameCount = source.GetBlendShapeFrameCount(s);
+				for (var f = 0; f < frameCount; f++)
+				{
+					source.GetBlendShapeFrameVertices(s, f, deltaVertices, deltaNormals, deltaTangents);
+					var weight = source.GetBlendShapeFrameWeight(s, f);
+
+					for (var i = 0; i < n; i++)
+						frameInput[i] = channels.Vertices[i] + deltaVertices[i];
+
+					RunPipeline(deformers, spaces, in channels, flags, frameInput, frameOutput, null);
+
+					for (var i = 0; i < n; i++)
+						deltaVertices[i] = frameOutput[i] - bakedBase[i];
+
+					result.AddBlendShapeFrame(name, weight, deltaVertices, deltaNormals, deltaTangents);
+				}
+			}
+		}
+
+		private static MeshBuffers CreateBuffers(in SourceChannels channels, DeformDataFlags flags,
+			Vector3[] overrideVertices)
 		{
 			// エディタ実行のため Read/Write 設定に関わらずメッシュを読める前提で実装する。
 			// (プレイヤービルドでの制約はベイクには関係しない)
-			var buffers = new MeshBuffers { Length = source.vertexCount };
+			var buffers = new MeshBuffers { Length = channels.VertexCount };
+			var vertices = overrideVertices ?? channels.Vertices;
 
-			var vertices = source.vertices;
-			buffers.Vertices = new NativeArray<float3>(vertices.Length, Allocator.TempJob,
+			buffers.Vertices = new NativeArray<float3>(channels.VertexCount, Allocator.TempJob,
 				NativeArrayOptions.UninitializedMemory);
-			for (var i = 0; i < vertices.Length; i++)
+			for (var i = 0; i < channels.VertexCount; i++)
 				buffers.Vertices[i] = vertices[i];
 
-			if ((flags & DeformDataFlags.Normals) != 0)
+			if (channels.Normals != null && channels.Normals.Length == buffers.Length)
 			{
-				var normals = source.normals;
-				if (normals.Length == buffers.Length)
-				{
-					buffers.Normals = new NativeArray<float3>(normals.Length, Allocator.TempJob,
-						NativeArrayOptions.UninitializedMemory);
-					for (var i = 0; i < normals.Length; i++)
-						buffers.Normals[i] = normals[i];
-				}
+				buffers.Normals = new NativeArray<float3>(channels.Normals.Length, Allocator.TempJob,
+					NativeArrayOptions.UninitializedMemory);
+				for (var i = 0; i < channels.Normals.Length; i++)
+					buffers.Normals[i] = channels.Normals[i];
 			}
 
-			if ((flags & DeformDataFlags.Tangents) != 0)
+			if (channels.Tangents != null && channels.Tangents.Length == buffers.Length)
 			{
-				var tangents = source.tangents;
-				if (tangents.Length == buffers.Length)
-				{
-					buffers.Tangents = new NativeArray<float4>(tangents.Length, Allocator.TempJob,
-						NativeArrayOptions.UninitializedMemory);
-					for (var i = 0; i < tangents.Length; i++)
-						buffers.Tangents[i] = tangents[i];
-				}
+				buffers.Tangents = new NativeArray<float4>(channels.Tangents.Length, Allocator.TempJob,
+					NativeArrayOptions.UninitializedMemory);
+				for (var i = 0; i < channels.Tangents.Length; i++)
+					buffers.Tangents[i] = channels.Tangents[i];
 			}
 
-			if ((flags & DeformDataFlags.UVs) != 0)
+			if (channels.Uvs != null && channels.Uvs.Length == buffers.Length)
 			{
-				var uvs = source.uv;
-				if (uvs.Length == buffers.Length)
-				{
-					buffers.UVs = new NativeArray<float2>(uvs.Length, Allocator.TempJob,
-						NativeArrayOptions.UninitializedMemory);
-					for (var i = 0; i < uvs.Length; i++)
-						buffers.UVs[i] = uvs[i];
-				}
+				buffers.UVs = new NativeArray<float2>(channels.Uvs.Length, Allocator.TempJob,
+					NativeArrayOptions.UninitializedMemory);
+				for (var i = 0; i < channels.Uvs.Length; i++)
+					buffers.UVs[i] = channels.Uvs[i];
 			}
 
 			if ((flags & DeformDataFlags.OriginalVertices) != 0)
 			{
+				// スナップショットは「そのパスの入力」(フレームなら base + delta)
 				buffers.OriginalVertices = new NativeArray<float3>(buffers.Vertices, Allocator.TempJob);
 			}
 
