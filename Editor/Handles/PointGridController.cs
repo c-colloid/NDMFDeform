@@ -25,9 +25,26 @@ namespace MeshModifier.NDMFDeform.Editor
 		public static PointGridOcclusionMode OcclusionMode = PointGridOcclusionMode.Fade;
 		public static bool SliceEnabled;
 		public static HandleAxis SliceAxis = HandleAxis.Z;
-		public static int SliceIndex;
+		/// <summary>表示するスライス番号の集合(複数選択可)</summary>
+		public static readonly HashSet<int> SliceIndices = new HashSet<int> { 0 };
+		/// <summary>SliceIndices の変更カウンタ(ワイヤーフレーム再構築の検知用)</summary>
+		public static int SliceVersion;
 		/// <summary>Ctrl+クリックのループ選択が伸びる軸</summary>
 		public static HandleAxis LoopAxis = HandleAxis.X;
+
+		/// <summary>スライス表示設定のもとで、この格子座標の点を表示するか</summary>
+		public static bool IsSliceVisible(Vector3Int coord)
+		{
+			if (!SliceEnabled) return true;
+			int c;
+			switch (SliceAxis)
+			{
+				case HandleAxis.X: c = coord.x; break;
+				case HandleAxis.Y: c = coord.y; break;
+				default: c = coord.z; break;
+			}
+			return SliceIndices.Contains(c);
+		}
 	}
 
 	/// <summary>オーバーレイ→コントローラへの一回きりの選択コマンド</summary>
@@ -123,15 +140,11 @@ namespace MeshModifier.NDMFDeform.Editor
 			ConsumePendingCommand(count);
 			RefreshCaches(serializedObject, points, count, resolution, mirror);
 
-			var sliceOnly = PointGridViewState.SliceEnabled;
-			var sliceAxis = PointGridViewState.SliceAxis;
-			var sliceIndex = Mathf.Clamp(PointGridViewState.SliceIndex, 0, AxisRes(resolution, sliceAxis) - 1);
-
 			using (new Handles.DrawingScope(Matrix4x4.identity))
 			{
-				DrawWireframe(resolution, sliceOnly, sliceAxis, sliceIndex);
-				DrawPointsAndPick(resolution, sliceOnly, sliceAxis, sliceIndex);
-				HandleMarquee(resolution, sliceOnly, sliceAxis, sliceIndex);
+				DrawWireframe(resolution);
+				DrawPointsAndPick(resolution);
+				HandleMarquee(resolution);
 				MoveSelection(resolution, mirror);
 			}
 
@@ -189,8 +202,7 @@ namespace MeshModifier.NDMFDeform.Editor
 			return field?.GetValue(target) as float3[];
 		}
 
-		private void DrawPointsAndPick(Vector3Int resolution,
-			bool sliceOnly, HandleAxis sliceAxis, int sliceIndex)
+		private void DrawPointsAndPick(Vector3Int resolution)
 		{
 			var evt = Event.current;
 			var isRepaint = evt.type == EventType.Repaint;
@@ -201,7 +213,7 @@ namespace MeshModifier.NDMFDeform.Editor
 
 			for (var i = 0; i < _worldCache.Length; i++)
 			{
-				if (sliceOnly && AxisCoord(PointGridUtility.GetCoord(resolution, i), sliceAxis) != sliceIndex)
+				if (!PointGridViewState.IsSliceVisible(PointGridUtility.GetCoord(resolution, i)))
 					continue;
 
 				var world = _worldCache[i];
@@ -342,8 +354,7 @@ namespace MeshModifier.NDMFDeform.Editor
 				_selection.Add(i);
 		}
 
-		private void HandleMarquee(Vector3Int resolution,
-			bool sliceOnly, HandleAxis sliceAxis, int sliceIndex)
+		private void HandleMarquee(Vector3Int resolution)
 		{
 			var evt = Event.current;
 			var control = GUIUtility.GetControlID(FocusType.Passive);
@@ -381,8 +392,7 @@ namespace MeshModifier.NDMFDeform.Editor
 						{
 							for (var i = 0; i < _worldCache.Length; i++)
 							{
-								if (sliceOnly &&
-								    AxisCoord(PointGridUtility.GetCoord(resolution, i), sliceAxis) != sliceIndex)
+								if (!PointGridViewState.IsSliceVisible(PointGridUtility.GetCoord(resolution, i)))
 									continue;
 								var gui = HandleUtility.WorldToGUIPoint(_worldCache[i]);
 								if (rect.Contains(gui))
@@ -432,14 +442,15 @@ namespace MeshModifier.NDMFDeform.Editor
 			SceneView.RepaintAll();
 		}
 
-		private void DrawWireframe(Vector3Int res, bool sliceOnly, HandleAxis sliceAxis, int sliceIndex)
+		private void DrawWireframe(Vector3Int res)
 		{
 			if (Event.current.type != EventType.Repaint) return;
 
-			var config = (res, sliceOnly, sliceAxis, sliceIndex);
+			var config = (res, PointGridViewState.SliceEnabled, PointGridViewState.SliceAxis,
+				PointGridViewState.SliceVersion);
 			if (_wireConfig != config || _wireIndexPairs.Length == 0)
 			{
-				RebuildWireIndexPairs(res, sliceOnly, sliceAxis, sliceIndex);
+				RebuildWireIndexPairs(res);
 				_wireConfig = config;
 			}
 
@@ -451,29 +462,30 @@ namespace MeshModifier.NDMFDeform.Editor
 			Handles.DrawLines(_wireSegments);
 		}
 
-		private void RebuildWireIndexPairs(Vector3Int res, bool sliceOnly, HandleAxis sliceAxis, int sliceIndex)
+		private void RebuildWireIndexPairs(Vector3Int res)
 		{
+			// 辺は両端の点が可視の場合のみ描く(単一・複数スライスの両方で自然な表示になる)
 			var pairs = new List<int>();
 			for (var z = 0; z < res.z; z++)
 			for (var y = 0; y < res.y; y++)
 			for (var x = 0; x < res.x; x++)
 			{
 				var c = new Vector3Int(x, y, z);
-				if (sliceOnly && AxisCoord(c, sliceAxis) != sliceIndex)
+				if (!PointGridViewState.IsSliceVisible(c))
 					continue;
 
 				var from = PointGridUtility.GetIndex(res, x, y, z);
-				if (x + 1 < res.x && (!sliceOnly || sliceAxis != HandleAxis.X))
+				if (x + 1 < res.x && PointGridViewState.IsSliceVisible(new Vector3Int(x + 1, y, z)))
 				{
 					pairs.Add(from);
 					pairs.Add(PointGridUtility.GetIndex(res, x + 1, y, z));
 				}
-				if (y + 1 < res.y && (!sliceOnly || sliceAxis != HandleAxis.Y))
+				if (y + 1 < res.y && PointGridViewState.IsSliceVisible(new Vector3Int(x, y + 1, z)))
 				{
 					pairs.Add(from);
 					pairs.Add(PointGridUtility.GetIndex(res, x, y + 1, z));
 				}
-				if (z + 1 < res.z && (!sliceOnly || sliceAxis != HandleAxis.Z))
+				if (z + 1 < res.z && PointGridViewState.IsSliceVisible(new Vector3Int(x, y, z + 1)))
 				{
 					pairs.Add(from);
 					pairs.Add(PointGridUtility.GetIndex(res, x, y, z + 1));

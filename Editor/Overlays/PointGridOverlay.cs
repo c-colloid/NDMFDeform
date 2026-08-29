@@ -9,15 +9,20 @@ namespace MeshModifier.NDMFDeform.Editor
 {
 	/// <summary>
 	/// PointGrid(格子ハンドル)の表示・選択操作を集約した SceneView オーバーレイ。
-	/// 奥点マスク・スライス表示・ループ選択軸・選択コマンドを提供する。
+	/// 「表示」「スライス」「選択」の 3 セクションで構成する。
 	/// </summary>
 	[Overlay(typeof(SceneView), "NDMF Deform Lattice", true)]
 	public class PointGridOverlay : Overlay
 	{
+		private static readonly Color StripOnColor = new Color(0.2f, 0.42f, 0.68f);
+
 		public override VisualElement CreatePanelContent()
 		{
 			var root = new VisualElement();
-			root.style.minWidth = 200;
+			root.style.minWidth = 210;
+
+			// --- 表示 ---
+			var displaySection = AddSection(root, "表示");
 
 			var occlusion = new EnumField("奥点の表示", PointGridViewState.OcclusionMode);
 			occlusion.RegisterValueChangedCallback(e =>
@@ -25,7 +30,77 @@ namespace MeshModifier.NDMFDeform.Editor
 				PointGridViewState.OcclusionMode = (PointGridOcclusionMode)e.newValue;
 				SceneView.RepaintAll();
 			});
-			root.Add(occlusion);
+			displaySection.Add(occlusion);
+
+			// --- スライス ---
+			var sliceSection = AddSection(root, "スライス");
+
+			var sliceToggle = new Toggle("スライス表示") { value = PointGridViewState.SliceEnabled };
+			var sliceAxis = new EnumField("スライス軸", PointGridViewState.SliceAxis);
+			var strip = new VisualElement();
+			strip.style.flexDirection = FlexDirection.Row;
+			strip.style.flexWrap = Wrap.Wrap;
+			strip.style.marginTop = 2;
+
+			void RebuildStrip()
+			{
+				strip.Clear();
+				var max = SliceMaxIndex();
+				for (var i = 0; i <= max; i++)
+				{
+					var index = i;
+					var button = new Button { text = index.ToString() };
+					button.style.width = 26;
+					button.style.marginLeft = 0;
+					button.style.marginRight = 1;
+					button.style.flexShrink = 0;
+					StyleStripButton(button, PointGridViewState.SliceIndices.Contains(index));
+					button.clicked += () =>
+					{
+						if (!PointGridViewState.SliceIndices.Add(index))
+							PointGridViewState.SliceIndices.Remove(index);
+						PointGridViewState.SliceVersion++;
+						StyleStripButton(button, PointGridViewState.SliceIndices.Contains(index));
+						SceneView.RepaintAll();
+					};
+					strip.Add(button);
+				}
+			}
+
+			sliceToggle.RegisterValueChangedCallback(e =>
+			{
+				PointGridViewState.SliceEnabled = e.newValue;
+				strip.SetEnabled(e.newValue);
+				SceneView.RepaintAll();
+			});
+			sliceAxis.RegisterValueChangedCallback(e =>
+			{
+				PointGridViewState.SliceAxis = (HandleAxis)e.newValue;
+				PointGridViewState.SliceVersion++;
+				RebuildStrip();
+				SceneView.RepaintAll();
+			});
+
+			RebuildStrip();
+			strip.SetEnabled(PointGridViewState.SliceEnabled);
+			sliceSection.Add(sliceToggle);
+			sliceSection.Add(sliceAxis);
+			sliceSection.Add(strip);
+
+			// 選択や解像度の変化に番号ボタンを追従させる
+			var lastMax = SliceMaxIndex();
+			root.schedule.Execute(() =>
+			{
+				var max = SliceMaxIndex();
+				if (max != lastMax)
+				{
+					lastMax = max;
+					RebuildStrip();
+				}
+			}).Every(500);
+
+			// --- 選択 ---
+			var selectionSection = AddSection(root, "選択");
 
 			var loopAxis = new EnumField("ループ選択軸", PointGridViewState.LoopAxis);
 			loopAxis.RegisterValueChangedCallback(e =>
@@ -33,86 +108,37 @@ namespace MeshModifier.NDMFDeform.Editor
 				PointGridViewState.LoopAxis = (HandleAxis)e.newValue;
 				SceneView.RepaintAll();
 			});
-			root.Add(loopAxis);
-
-			var slice = new Toggle("スライス表示") { value = PointGridViewState.SliceEnabled };
-			var sliceAxis = new EnumField("スライス軸", PointGridViewState.SliceAxis);
-			slice.RegisterValueChangedCallback(e =>
-			{
-				PointGridViewState.SliceEnabled = e.newValue;
-				SceneView.RepaintAll();
-			});
-			root.Add(slice);
-			root.Add(sliceAxis);
-
-			// スライス位置: −/+ ボタンで加減算。上限は選択中ラティスの解像度でクランプ
-			var sliceRow = new VisualElement();
-			sliceRow.style.flexDirection = FlexDirection.Row;
-			sliceRow.style.alignItems = Align.Center;
-
-			var sliceLabel = new Label("スライス位置");
-			sliceLabel.style.minWidth = 80;
-			sliceLabel.style.flexShrink = 0;
-			var minus = new Button { text = "−" };
-			minus.style.width = 22;
-			minus.style.flexShrink = 0;
-			var indexField = new IntegerField { value = PointGridViewState.SliceIndex };
-			// IntegerField は既定で flex-grow するため、幅を固定しないと
-			// 行の残り幅を占有して + ボタンと上限表示が押し出される
-			indexField.style.flexGrow = 0;
-			indexField.style.flexShrink = 0;
-			indexField.style.width = 44;
-			var plus = new Button { text = "+" };
-			plus.style.width = 22;
-			plus.style.flexShrink = 0;
-			var rangeLabel = new Label($"/ {SliceMaxIndex()}");
-			rangeLabel.style.opacity = 0.7f;
-			rangeLabel.style.marginLeft = 4;
-			rangeLabel.style.flexShrink = 0;
-
-			void SetSliceIndex(int value)
-			{
-				var max = SliceMaxIndex();
-				value = Mathf.Clamp(value, 0, max);
-				PointGridViewState.SliceIndex = value;
-				indexField.SetValueWithoutNotify(value);
-				rangeLabel.text = $"/ {max}";
-				SceneView.RepaintAll();
-			}
-
-			minus.clicked += () => SetSliceIndex(PointGridViewState.SliceIndex - 1);
-			plus.clicked += () => SetSliceIndex(PointGridViewState.SliceIndex + 1);
-			indexField.RegisterValueChangedCallback(e => SetSliceIndex(e.newValue));
-			sliceAxis.RegisterValueChangedCallback(e =>
-			{
-				PointGridViewState.SliceAxis = (HandleAxis)e.newValue;
-				SetSliceIndex(PointGridViewState.SliceIndex);
-			});
-
-			sliceRow.Add(sliceLabel);
-			sliceRow.Add(minus);
-			sliceRow.Add(indexField);
-			sliceRow.Add(plus);
-			sliceRow.Add(rangeLabel);
-			root.Add(sliceRow);
-
-			// 選択や解像度の変化に上限表示を追従させる
-			root.schedule.Execute(() =>
-			{
-				var max = SliceMaxIndex();
-				rangeLabel.text = $"/ {max}";
-				if (PointGridViewState.SliceIndex > max)
-					SetSliceIndex(max);
-			}).Every(500);
+			selectionSection.Add(loopAxis);
 
 			var buttons = new VisualElement();
 			buttons.style.flexDirection = FlexDirection.Row;
 			buttons.Add(MakeCommandButton("全選択", PointGridCommand.SelectAll));
 			buttons.Add(MakeCommandButton("解除", PointGridCommand.ClearSelection));
 			buttons.Add(MakeCommandButton("反転", PointGridCommand.InvertSelection));
-			root.Add(buttons);
+			selectionSection.Add(buttons);
 
 			return root;
+		}
+
+		/// <summary>見出し付きセクションを追加し、内容用コンテナを返す</summary>
+		private static VisualElement AddSection(VisualElement root, string title)
+		{
+			var header = new Label(title);
+			header.style.unityFontStyleAndWeight = FontStyle.Bold;
+			header.style.fontSize = 11;
+			header.style.opacity = 0.75f;
+			header.style.marginTop = root.childCount == 0 ? 0 : 8;
+			root.Add(header);
+
+			var content = new VisualElement();
+			content.style.marginLeft = 6;
+			root.Add(content);
+			return content;
+		}
+
+		private static void StyleStripButton(Button button, bool on)
+		{
+			button.style.backgroundColor = on ? (StyleColor)StripOnColor : StyleKeyword.Null;
 		}
 
 		private static Button MakeCommandButton(string label, PointGridCommand command)
