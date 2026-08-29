@@ -8,10 +8,6 @@ concurrency:
   group: unity-tests-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  UNITY_VERSION: 2022.3.22f1
-  UNITY_CHANGESET: 887be4894c44
-
 jobs:
   editmode:
     runs-on: ubuntu-latest
@@ -19,100 +15,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache Unity editor
-        id: cache-unity
+      - name: Setup test project
+        run: bash .github/scripts/setup_test_project.sh "$GITHUB_WORKSPACE/TestProject"
+
+      - name: Cache Library
         uses: actions/cache@v4
         with:
-          path: ~/unity-editor
-          key: unity-editor-${{ env.UNITY_VERSION }}-linux-x64
+          path: TestProject/Library
+          key: unity-library-2022.3.22f1-${{ hashFiles('.github/scripts/setup_test_project.sh') }}
 
-      - name: Install Unity editor
-        if: steps.cache-unity.outputs.cache-hit != 'true'
-        run: |
-          curl -sSL --retry 3 -o /tmp/unity.tar.xz \
-            "https://download.unity3d.com/download_unity/${UNITY_CHANGESET}/LinuxEditorInstaller/Unity-${UNITY_VERSION}.tar.xz"
-          mkdir -p "$HOME/unity-editor"
-          tar -xJf /tmp/unity.tar.xz -C "$HOME/unity-editor"
-          rm /tmp/unity.tar.xz
-
-      - name: Install editor dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-            libasound2t64 libglu1-mesa libgtk-3-0t64 libnss3 libxtst6 libxss1 \
-            libnotify4 libcap2 libgbm1
-
-      - name: Setup test project
-        run: bash .github/scripts/setup_test_project.sh "$RUNNER_TEMP/TestProject"
-
-      - name: Activate Unity license
+      # Personal ライセンスは UNITY_LICENSE(.ulf の中身)+ UNITY_EMAIL + UNITY_PASSWORD が必要
+      # https://game.ci/docs/github/activation
+      - name: Run EditMode tests
+        uses: game-ci/unity-test-runner@v4
         env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-        working-directory: ${{ runner.temp }}
-        run: |
-          # 1回目はライセンスクライアントのアクセストークン取得までで終わることがあるため、
-          # アクティベーション完了(シリアル割当て)までリトライする
-          for attempt in 1 2 3; do
-            "$HOME/unity-editor/Editor/Unity" -batchmode -nographics -quit \
-              -username "$UNITY_EMAIL" -password "$UNITY_PASSWORD" \
-              -logFile "$RUNNER_TEMP/activation.log" || true
-            if grep -q "Serial number assigned" "$RUNNER_TEMP/activation.log"; then
-              echo "activated on attempt $attempt"
-              exit 0
-            fi
-            echo "activation attempt $attempt incomplete; retrying..."
-            sleep 5
-          done
-          echo "::error::Unity license activation failed"
-          tail -60 "$RUNNER_TEMP/activation.log"
-          exit 1
+        with:
+          projectPath: TestProject
+          unityVersion: 2022.3.22f1
+          testMode: editmode
+          customParameters: -assemblyNames NDMFDeform.Tests
 
-      - name: Run EditMode tests
-        run: |
-          "$HOME/unity-editor/Editor/Unity" -batchmode -nographics \
-            -projectPath "$RUNNER_TEMP/TestProject" \
-            -runTests -testPlatform EditMode -assemblyNames "NDMFDeform.Tests" \
-            -testResults "$RUNNER_TEMP/results.xml" \
-            -logFile "$RUNNER_TEMP/test.log" || true
-          python3 - <<'PY'
-          import os, sys
-          import xml.etree.ElementTree as ET
-          path = os.path.join(os.environ["RUNNER_TEMP"], "results.xml")
-          if not os.path.exists(path):
-              print("::error::results.xml not found (compile error?)")
-              sys.exit(1)
-          root = ET.parse(path).getroot()
-          summary = {k: root.get(k) for k in ("total", "passed", "failed", "skipped", "result")}
-          print("Test summary:", summary)
-          for tc in root.iter("test-case"):
-              print(f"  [{tc.get('result')}] {tc.get('fullname')} ({tc.get('duration')}s)")
-              if tc.get("result") not in ("Passed", "Skipped"):
-                  msg = tc.find(".//message")
-                  if msg is not None:
-                      print("   ", (msg.text or "")[:800])
-          if int(root.get("failed") or 0) > 0 or int(root.get("total") or 0) == 0:
-              sys.exit(1)
-          PY
-
-      - name: Upload logs
+      - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: unity-logs
-          path: |
-            ${{ runner.temp }}/results.xml
-            ${{ runner.temp }}/test.log
-            ${{ runner.temp }}/activation.log
+          name: test-results
+          path: artifacts
           if-no-files-found: ignore
-
-      - name: Return Unity license
-        if: always()
-        env:
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-        working-directory: ${{ runner.temp }}
-        run: |
-          "$HOME/unity-editor/Editor/Unity" -batchmode -nographics -quit \
-            -returnlicense -username "$UNITY_EMAIL" -password "$UNITY_PASSWORD" \
-            -logFile "$RUNNER_TEMP/returnlicense.log" || true

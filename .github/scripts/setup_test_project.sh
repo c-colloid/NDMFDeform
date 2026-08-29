@@ -20,6 +20,7 @@ rm -rf "$PKG" && mkdir -p "$PKG"
     --exclude=./Deform --exclude=./Deform.meta \
     --exclude=./NDMFPlugin --exclude=./NDMFPlugin.meta \
     --exclude=./NDMFDeform.asmdef --exclude='./NDMFDeform.asmdef.meta' \
+    --exclude=./TestProject \
     .) | tar -xf - -C "$PKG"
 
 # NDMF: リリース zip は Dependencies~ を実フォルダへ変換して配布しているが、
