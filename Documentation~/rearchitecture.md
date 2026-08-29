@@ -423,7 +423,7 @@ EditMode テスト(golden mesh: 入力メッシュ + パラメータ → 期待�
 | M3 | Lattice + PointGrid(選択・矩形・ミラー) | 0.3.0 |
 | M4 | UVIslandMask(マスク段 + UVIslandSelectorView) | 0.4.0 |
 | M5 | ブレンドシェイプ再ベイク + タンジェント + 法線保持オプション + golden mesh テスト整備 | 0.5.0 |
-| M6 | 移行ツール → フォーク削除 → パッケージング整備(vpmDependencies、タグ、VPM リスティング、THIRD-PARTY-NOTICES)。UITK Font Fix(jp.colloid.uitk-font-fix)も同じ VPM リスティングへ登録し、vpmDependencies による自動取得を成立させる | 1.0.0 |
+| M6 | 移行ツール → フォーク削除 → パッケージング整備(vpmDependencies、タグ、VPM リスティング、THIRD-PARTY-NOTICES)。UITK Font Fix(jp.colloid.uitk-font-fix)も同じ VPM リスティングへ登録し、vpmDependencies による自動取得を成立させる。将来的には OpenUPM への登録も併用し、UPM 経路でも依存自動解決を可能にする(スコープドレジストリ追加が前提) | 1.0.0 |
 | M7(候補) | **Bake as BlendShape**: デフォーマ効果をブレンドシェイプとして焼き込み、Animator / Udon から駆動(§2.1 の橋渡し機能) | 1.1.0 |
 
 現行 main(v0.0.x 系)への Phase 0 的なバグ修正(GameObject 誤削除・SMR キャスト等)は、
