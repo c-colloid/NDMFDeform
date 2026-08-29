@@ -22,8 +22,44 @@ namespace MeshModifier.NDMFDeform.Editor
 
 		private double _lastApplyTime;
 		private bool _hasPendingChanges;
-		private readonly System.Collections.Generic.Dictionary<string, PointGridController> _pointGrids =
-			new System.Collections.Generic.Dictionary<string, PointGridController>();
+
+		// OnSceneGUI 内で Editor.serializedObject を使うと Unity が警告するため、
+		// シーン用にターゲット毎の SerializedObject を自前で保持する
+		private readonly System.Collections.Generic.Dictionary<int, SerializedObject> _sceneSerializedObjects =
+			new System.Collections.Generic.Dictionary<int, SerializedObject>();
+		private readonly System.Collections.Generic.Dictionary<int,
+				System.Collections.Generic.Dictionary<string, PointGridController>> _pointGrids =
+			new System.Collections.Generic.Dictionary<int,
+				System.Collections.Generic.Dictionary<string, PointGridController>>();
+
+		protected virtual void OnDisable()
+		{
+			foreach (var so in _sceneSerializedObjects.Values)
+				so?.Dispose();
+			_sceneSerializedObjects.Clear();
+		}
+
+		private SerializedObject GetSceneSerializedObject(DeformerBase deformer)
+		{
+			var id = deformer.GetInstanceID();
+			if (!_sceneSerializedObjects.TryGetValue(id, out var so) || so == null)
+			{
+				so = new SerializedObject(deformer);
+				_sceneSerializedObjects[id] = so;
+			}
+			return so;
+		}
+
+		private System.Collections.Generic.Dictionary<string, PointGridController> GetPointGrids(DeformerBase deformer)
+		{
+			var id = deformer.GetInstanceID();
+			if (!_pointGrids.TryGetValue(id, out var grids))
+			{
+				grids = new System.Collections.Generic.Dictionary<string, PointGridController>();
+				_pointGrids[id] = grids;
+			}
+			return grids;
+		}
 
 		public override VisualElement CreateInspectorGUI()
 		{
@@ -64,11 +100,13 @@ namespace MeshModifier.NDMFDeform.Editor
 			var axis = deformer.Axis;
 			if (axis == null) return;
 
+			var sceneSerializedObject = GetSceneSerializedObject(deformer);
+
 			// 未適用の変更があるあいだは Update で巻き戻さない
 			if (!_hasPendingChanges)
-				serializedObject.UpdateIfRequiredOrScript();
+				sceneSerializedObject.UpdateIfRequiredOrScript();
 
-			var builder = new SceneHandleBuilder(serializedObject, _pointGrids);
+			var builder = new SceneHandleBuilder(sceneSerializedObject, GetPointGrids(deformer));
 			using (new Handles.DrawingScope(Matrix4x4.TRS(axis.position, axis.rotation, axis.lossyScale)))
 			{
 				deformer.DescribeHandles(builder);
@@ -83,7 +121,7 @@ namespace MeshModifier.NDMFDeform.Editor
 				var now = EditorApplication.timeSinceStartup;
 				if (!dragging || now - _lastApplyTime >= DragApplyInterval)
 				{
-					serializedObject.ApplyModifiedProperties();
+					sceneSerializedObject.ApplyModifiedProperties();
 					_lastApplyTime = now;
 					_hasPendingChanges = false;
 				}

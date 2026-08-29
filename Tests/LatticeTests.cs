@@ -79,6 +79,27 @@ namespace MeshModifier.NDMFDeform.Tests
 		}
 
 		[Test]
+		public void ResolutionResample_PreservesDeformation()
+		{
+			var (_, lattice) = CreateSetup();
+			var delta = new float3(0f, 0.4f, 0f);
+			var oldPoints = lattice.ControlPoints;
+			oldPoints[lattice.GetIndex(1, 1, 1)] += delta; // 2x2x2 の (+,+,+) コーナー
+
+			lattice.GenerateControlPoints(new Vector3Int(3, 3, 3), oldPoints, new Vector3Int(2, 2, 2));
+
+			// 新格子のコーナー (2,2,2) は旧コーナーの変形位置を引き継ぐ
+			var corner = lattice.ControlPoints[lattice.GetIndex(2, 2, 2)];
+			Assert.That(math.distance(corner, new float3(0.5f, 0.9f, 0.5f)), Is.LessThan(1e-4f));
+			// 中心 (1,1,1) はトライリニアで 1/8 だけ動く
+			var center = lattice.ControlPoints[lattice.GetIndex(1, 1, 1)];
+			Assert.That(math.distance(center, new float3(0f, 0.05f, 0f)), Is.LessThan(1e-4f));
+			// 反対側コーナーは恒等のまま
+			var opposite = lattice.ControlPoints[lattice.GetIndex(0, 0, 0)];
+			Assert.That(math.distance(opposite, new float3(-0.5f, -0.5f, -0.5f)), Is.LessThan(1e-4f));
+		}
+
+		[Test]
 		public void PointGridUtility_IndexCoordRoundtrip()
 		{
 			var res = new Vector3Int(3, 4, 5);

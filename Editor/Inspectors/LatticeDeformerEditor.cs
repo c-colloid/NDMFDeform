@@ -25,17 +25,19 @@ namespace MeshModifier.NDMFDeform.Editor
 			buttons.style.flexDirection = FlexDirection.Row;
 			buttons.style.marginTop = 4;
 
-			var applyResolution = new Button(() =>
+			// 解像度の変更は OnValidate で自動適用(既存変形はリサンプリングで引継ぎ)されるため、
+			// ここは恒等格子への明示リセットのみ
+			var resetPoints = new Button(() =>
 			{
 				foreach (var t in targets)
 				{
 					if (t is not LatticeDeformer lattice) continue;
-					Undo.RecordObject(lattice, "Apply Lattice Resolution");
+					Undo.RecordObject(lattice, "Reset Lattice Control Points");
 					lattice.GenerateControlPoints(lattice.Resolution);
 					EditorUtility.SetDirty(lattice);
 				}
 				SceneView.RepaintAll();
-			}) { text = "解像度を適用(制御点リセット)" };
+			}) { text = "制御点をリセット" };
 
 			var fitBounds = new Button(() =>
 			{
@@ -48,7 +50,7 @@ namespace MeshModifier.NDMFDeform.Editor
 				SceneView.RepaintAll();
 			}) { text = "バウンズへフィット" };
 
-			buttons.Add(applyResolution);
+			buttons.Add(resetPoints);
 			buttons.Add(fitBounds);
 			root.Add(buttons);
 

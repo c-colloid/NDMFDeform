@@ -25,6 +25,7 @@ namespace MeshModifier.NDMFDeform.Core
 	{
 		[SerializeField] private Vector3Int resolution = new Vector3Int(2, 2, 2);
 		[SerializeField, HideInInspector] private float3[] controlPoints;
+		[SerializeField, HideInInspector] private Vector3Int appliedResolution;
 		[SerializeField] private MirrorAxis mirrorAxis = MirrorAxis.None;
 
 		public Vector3Int Resolution => resolution;
@@ -43,8 +44,28 @@ namespace MeshModifier.NDMFDeform.Core
 		{
 			resolution = new Vector3Int(
 				Mathf.Max(2, resolution.x), Mathf.Max(2, resolution.y), Mathf.Max(2, resolution.z));
+
 			if (controlPoints == null || controlPoints.Length == 0)
+			{
 				GenerateControlPoints(resolution);
+				return;
+			}
+
+			// 旧データ(appliedResolution 未保存)は現状を採用する
+			if (appliedResolution.x < 2 || appliedResolution.y < 2 || appliedResolution.z < 2)
+			{
+				if (controlPoints.Length == resolution.x * resolution.y * resolution.z)
+				{
+					appliedResolution = resolution;
+					return;
+				}
+				GenerateControlPoints(resolution);
+				return;
+			}
+
+			// 解像度の変更は即時適用(既存の変形はリサンプリングで引き継ぐ)
+			if (resolution != appliedResolution)
+				GenerateControlPoints(resolution, controlPoints, appliedResolution);
 		}
 
 		public int GetIndex(int x, int y, int z)
@@ -55,8 +76,20 @@ namespace MeshModifier.NDMFDeform.Core
 		/// <summary>制御点を指定分割数の恒等格子(変形なし)で作り直す</summary>
 		public void GenerateControlPoints(Vector3Int newResolution)
 		{
+			GenerateControlPoints(newResolution, null, Vector3Int.zero);
+		}
+
+		/// <summary>
+		/// 制御点を指定分割数で作り直す。
+		/// resampleOriginalPoints を渡すと、旧格子の変形をトライリニア補間で
+		/// 新しい制御点へ引き継ぐ(upstream Deform の resample 手法)。
+		/// </summary>
+		public void GenerateControlPoints(Vector3Int newResolution,
+			float3[] resampleOriginalPoints, Vector3Int resampleOriginalResolution)
+		{
 			resolution = new Vector3Int(
 				Mathf.Max(2, newResolution.x), Mathf.Max(2, newResolution.y), Mathf.Max(2, newResolution.z));
+			appliedResolution = resolution;
 			controlPoints = new float3[resolution.x * resolution.y * resolution.z];
 			for (var z = 0; z < resolution.z; z++)
 			for (var y = 0; y < resolution.y; y++)
@@ -67,6 +100,29 @@ namespace MeshModifier.NDMFDeform.Core
 					y / (float)(resolution.y - 1) - 0.5f,
 					z / (float)(resolution.z - 1) - 0.5f);
 			}
+
+			var canResample = resampleOriginalPoints != null
+				&& resampleOriginalResolution.x >= 2
+				&& resampleOriginalResolution.y >= 2
+				&& resampleOriginalResolution.z >= 2
+				&& resampleOriginalPoints.Length ==
+					resampleOriginalResolution.x * resampleOriginalResolution.y * resampleOriginalResolution.z;
+			if (!canResample)
+				return;
+
+			// 恒等格子の各点([-0.5,0.5] 空間)を旧格子で変形して新しい制御点にする
+			var vertices = new NativeArray<float3>(controlPoints, Allocator.TempJob);
+			new LatticeJob
+			{
+				controlPoints = new NativeArray<float3>(resampleOriginalPoints, Allocator.TempJob),
+				resolution = new int3(resampleOriginalResolution.x, resampleOriginalResolution.y,
+					resampleOriginalResolution.z),
+				meshToTarget = float4x4.identity,
+				targetToMesh = float4x4.identity,
+				vertices = vertices,
+			}.Run(controlPoints.Length);
+			vertices.CopyTo(controlPoints);
+			vertices.Dispose();
 		}
 
 		/// <summary>親の DeformStack のレンダラーのバウンズへ格子をフィットさせる</summary>
