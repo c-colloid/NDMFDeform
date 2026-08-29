@@ -70,6 +70,42 @@ namespace MeshModifier.NDMFDeform.Editor
 			return result;
 		}
 
+		/// <summary>normal 軸に垂直な2軸を返す</summary>
+		public static (HandleAxis a, HandleAxis b) OtherAxes(HandleAxis normal)
+		{
+			switch (normal)
+			{
+				case HandleAxis.X: return (HandleAxis.Y, HandleAxis.Z);
+				case HandleAxis.Y: return (HandleAxis.X, HandleAxis.Z);
+				default: return (HandleAxis.X, HandleAxis.Y);
+			}
+		}
+
+		/// <summary>
+		/// normal 軸の座標を through に固定したシートの外周(リング/ループ)。
+		/// 例: 縦軸に垂直なシートのリング = 腰回りの輪。
+		/// </summary>
+		public static List<int> RingIndices(Vector3Int res, HandleAxis normal, Vector3Int through)
+		{
+			var (a, b) = OtherAxes(normal);
+			var fixedCoord = AxisComponent(through, normal);
+			var result = new List<int>();
+			for (var z = 0; z < res.z; z++)
+			for (var y = 0; y < res.y; y++)
+			for (var x = 0; x < res.x; x++)
+			{
+				var c = new Vector3Int(x, y, z);
+				if (AxisComponent(c, normal) != fixedCoord)
+					continue;
+				var onBoundary =
+					AxisComponent(c, a) == 0 || AxisComponent(c, a) == AxisComponent(res, a) - 1 ||
+					AxisComponent(c, b) == 0 || AxisComponent(c, b) == AxisComponent(res, b) - 1;
+				if (onBoundary)
+					result.Add(GetIndex(res, x, y, z));
+			}
+			return result;
+		}
+
 		/// <summary>対称側の制御点インデックス(axis=None なら同じインデックス)</summary>
 		public static int MirrorIndex(Vector3Int res, int index, MirrorAxis axis)
 		{

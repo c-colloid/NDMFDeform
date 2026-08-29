@@ -29,8 +29,6 @@ namespace MeshModifier.NDMFDeform.Editor
 		public static readonly HashSet<int> SliceIndices = new HashSet<int> { 0 };
 		/// <summary>SliceIndices の変更カウンタ(ワイヤーフレーム再構築の検知用)</summary>
 		public static int SliceVersion;
-		/// <summary>Ctrl+クリックのループ選択が伸びる軸</summary>
-		public static HandleAxis LoopAxis = HandleAxis.X;
 
 		/// <summary>スライス表示設定のもとで、この格子座標の点を表示するか</summary>
 		public static bool IsSliceVisible(Vector3Int coord)
@@ -234,7 +232,8 @@ namespace MeshModifier.NDMFDeform.Editor
 				Handles.color = color;
 				if (Handles.Button(world, Quaternion.identity, size, size * 1.4f, Handles.DotHandleCap))
 				{
-					ApplyClickSelection(i, PointGridUtility.GetCoord(resolution, i), resolution, evt.modifiers);
+					ApplyClickSelection(i, PointGridUtility.GetCoord(resolution, i), resolution,
+						evt.modifiers, evt.mousePosition);
 				}
 			}
 			Handles.zTest = CompareFunction.Always;
@@ -318,33 +317,99 @@ namespace MeshModifier.NDMFDeform.Editor
 			return true;
 		}
 
-		private void ApplyClickSelection(int index, Vector3Int coord, Vector3Int resolution, EventModifiers modifiers)
+		// Ctrl 系クリックの循環状態(同じ点への連続クリックで方向・範囲を切替える)
+		private int _lastClickIndex = -1;
+		private bool _lastClickWasExpand;
+		private int _directionStep;
+		private bool _expandAsSheet;
+
+		private void ApplyClickSelection(int index, Vector3Int coord, Vector3Int resolution,
+			EventModifiers modifiers, Vector2 mousePosition)
 		{
 			var ctrl = (modifiers & EventModifiers.Control) != 0 || (modifiers & EventModifiers.Command) != 0;
 			var shift = (modifiers & EventModifiers.Shift) != 0;
 
 			if (ctrl && shift)
 			{
-				// シート選択: LoopAxis に垂直な面
-				var axis = PointGridViewState.LoopAxis;
-				ReplaceSelection(PointGridUtility.SheetIndices(resolution, axis, AxisCoord(coord, axis)));
+				// リング(ループ)選択: クリック位置に近い辺方向に垂直なシートの外周。
+				// 同じ点への連続クリックでシート全面⇄リングを切替える
+				if (index == _lastClickIndex && _lastClickWasExpand)
+					_expandAsSheet = !_expandAsSheet;
+				else
+					_expandAsSheet = false;
+
+				var normal = DirectionsByProximity(index, coord, resolution, mousePosition)[0];
+				ReplaceSelection(_expandAsSheet
+					? PointGridUtility.SheetIndices(resolution, normal, AxisCoord(coord, normal))
+					: PointGridUtility.RingIndices(resolution, normal, coord));
+
+				_lastClickIndex = index;
+				_lastClickWasExpand = true;
 			}
 			else if (ctrl)
 			{
-				// ループ(行)選択: LoopAxis 沿い
-				ReplaceSelection(PointGridUtility.LineIndices(resolution, coord, PointGridViewState.LoopAxis));
+				// 行選択: クリック位置に最も近い辺の方向。
+				// 同じ点への連続クリックで方向を近い順に循環させる
+				if (index == _lastClickIndex && !_lastClickWasExpand)
+					_directionStep++;
+				else
+					_directionStep = 0;
+
+				var directions = DirectionsByProximity(index, coord, resolution, mousePosition);
+				var axis = directions[_directionStep % directions.Count];
+				ReplaceSelection(PointGridUtility.LineIndices(resolution, coord, axis));
+
+				_lastClickIndex = index;
+				_lastClickWasExpand = false;
 			}
 			else if (shift)
 			{
 				if (!_selection.Add(index))
 					_selection.Remove(index);
+				_lastClickIndex = -1;
 			}
 			else
 			{
 				_selection.Clear();
 				_selection.Add(index);
+				_lastClickIndex = -1;
 			}
 			SceneView.RepaintAll();
+		}
+
+		/// <summary>
+		/// クリック位置(GUI 座標)から、この点につながる辺の方向を近い順に返す。
+		/// 各方向の隣接点との辺の中点を画面座標に投影して距離を比較する。
+		/// </summary>
+		private List<HandleAxis> DirectionsByProximity(int index, Vector3Int coord, Vector3Int resolution,
+			Vector2 mousePosition)
+		{
+			var candidates = new List<(HandleAxis axis, float distance)>(3);
+			foreach (var axis in new[] { HandleAxis.X, HandleAxis.Y, HandleAxis.Z })
+			{
+				var neighbor = coord;
+				var max = AxisRes(resolution, axis) - 1;
+				if (max < 1)
+					continue;
+				switch (axis)
+				{
+					case HandleAxis.X: neighbor.x += coord.x < max ? 1 : -1; break;
+					case HandleAxis.Y: neighbor.y += coord.y < max ? 1 : -1; break;
+					default: neighbor.z += coord.z < max ? 1 : -1; break;
+				}
+				var neighborIndex = PointGridUtility.GetIndex(resolution, neighbor.x, neighbor.y, neighbor.z);
+				var midpoint = (_worldCache[index] + _worldCache[neighborIndex]) * 0.5f;
+				var gui = HandleUtility.WorldToGUIPoint(midpoint);
+				candidates.Add((axis, (gui - mousePosition).sqrMagnitude));
+			}
+			candidates.Sort((a, b) => a.distance.CompareTo(b.distance));
+
+			var result = new List<HandleAxis>(candidates.Count);
+			foreach (var c in candidates)
+				result.Add(c.axis);
+			if (result.Count == 0)
+				result.Add(HandleAxis.X);
+			return result;
 		}
 
 		private void ReplaceSelection(List<int> indices)

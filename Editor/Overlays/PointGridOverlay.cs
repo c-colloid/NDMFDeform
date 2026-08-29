@@ -102,13 +102,14 @@ namespace MeshModifier.NDMFDeform.Editor
 			// --- 選択 ---
 			var selectionSection = AddSection(root, "選択");
 
-			var loopAxis = new EnumField("ループ選択軸", PointGridViewState.LoopAxis);
-			loopAxis.RegisterValueChangedCallback(e =>
-			{
-				PointGridViewState.LoopAxis = (HandleAxis)e.newValue;
-				SceneView.RepaintAll();
-			});
-			selectionSection.Add(loopAxis);
+			var hint = new Label(
+				"Ctrl+クリック: 行選択(近い辺の方向 / 再クリックで方向切替)\n" +
+				"Ctrl+Shift+クリック: リング選択(再クリックでシート全体)");
+			hint.style.opacity = 0.6f;
+			hint.style.fontSize = 10;
+			hint.style.whiteSpace = WhiteSpace.Normal;
+			hint.style.marginBottom = 2;
+			selectionSection.Add(hint);
 
 			var buttons = new VisualElement();
 			buttons.style.flexDirection = FlexDirection.Row;

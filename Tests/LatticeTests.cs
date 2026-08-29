@@ -137,6 +137,19 @@ namespace MeshModifier.NDMFDeform.Tests
 		}
 
 		[Test]
+		public void PointGridUtility_RingSelection()
+		{
+			var res = new Vector3Int(3, 3, 3);
+			// Y 軸に垂直なシート(y=1)の外周 = 中心 (1,1,1) を除く 8 点
+			var ring = PointGridUtility.RingIndices(res, HandleAxis.Y, new Vector3Int(1, 1, 1));
+
+			Assert.That(ring.Count, Is.EqualTo(8));
+			Assert.That(ring, Does.Not.Contain(PointGridUtility.GetIndex(res, 1, 1, 1)));
+			foreach (var i in ring)
+				Assert.That(PointGridUtility.GetCoord(res, i).y, Is.EqualTo(1));
+		}
+
+		[Test]
 		public void PointGridUtility_MirrorIndexAndPosition()
 		{
 			var res = new Vector3Int(3, 2, 2);

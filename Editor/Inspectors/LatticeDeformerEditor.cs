@@ -70,8 +70,10 @@ namespace MeshModifier.NDMFDeform.Editor
 			var hint = new Label(
 				"制御点はシーンビューで編集します:\n" +
 				"クリック選択 / Shift 追加 / ドラッグで矩形選択\n" +
-				"Ctrl+クリック: ループ選択 / Ctrl+Shift+クリック: シート選択\n" +
-				"表示設定(奥点フェード・スライス・ループ軸)は SceneView の\n" +
+				"Ctrl+クリック: 行選択(クリック位置に近い辺の方向。同じ点を\n" +
+				"  再クリックで方向切替)\n" +
+				"Ctrl+Shift+クリック: リング(ループ)選択。再クリックでシート全体\n" +
+				"表示設定(奥点フェード・スライス)は SceneView の\n" +
 				"「NDMF Deform Lattice」オーバーレイから切替えられます。");
 			hint.style.opacity = 0.6f;
 			hint.style.whiteSpace = WhiteSpace.Normal;
