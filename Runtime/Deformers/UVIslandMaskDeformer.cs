@@ -12,6 +12,25 @@ using static Unity.Mathematics.math;
 namespace MeshModifier.NDMFDeform.Core
 {
 	/// <summary>
+	/// 選択した UV 島への参照。島 ID はメッシュ変更で不安定なため、
+	/// 代表 UV とサブメッシュ番号で保存し、解析時に再解決する。
+	/// </summary>
+	[System.Serializable]
+	public struct IslandSeed
+	{
+		public Vector2 uv;
+
+		/// <summary>-1 = 全サブメッシュから検索(サブメッシュ情報の無い旧データ)</summary>
+		public int subMesh;
+
+		public IslandSeed(Vector2 uv, int subMesh)
+		{
+			this.uv = uv;
+			this.subMesh = subMesh;
+		}
+	}
+
+	/// <summary>
 	/// 選択した UV 島の変形を打ち消すマスク。
 	/// スタック内でこのマスクより前にあるデフォーマの変形結果を、
 	/// 島に属する頂点についてスタック適用前のスナップショットへ戻す。
@@ -25,27 +44,40 @@ namespace MeshModifier.NDMFDeform.Core
 		[SerializeField, Range(0f, 1f)] private float factor = 1f;
 		[SerializeField, Min(0f)] private float falloff = 0f;
 		[SerializeField] private bool invert;
+		[SerializeField, HideInInspector] private List<IslandSeed> selectedIslands = new List<IslandSeed>();
 
-		/// <summary>
-		/// 選択した島の代表 UV(UVIslandAnalysis.Island.Seed)。
-		/// 島 ID はメッシュ変更で不安定なため、UV 座標で保存し解析時に再解決する。
-		/// </summary>
+		// 旧形式(M4 初版): サブメッシュ情報なしの代表 UV。OnValidate で selectedIslands へ移行する
 		[SerializeField, HideInInspector] private List<Vector2> islandSeeds = new List<Vector2>();
 
 		public float Factor { get => factor; set => factor = Mathf.Clamp01(value); }
 		public float Falloff { get => falloff; set => falloff = Mathf.Max(0f, value); }
 		public bool Invert { get => invert; set => invert = value; }
-		public List<Vector2> IslandSeeds => islandSeeds;
+		public List<IslandSeed> SelectedIslands => selectedIslands;
 
 		public override DeformDataFlags DataFlags =>
 			DeformDataFlags.Vertices | DeformDataFlags.OriginalVertices;
 
-		// ---- PrepareBake キャッシュ(シリアライズ対象外) ----
+		private void OnValidate()
+		{
+			if (islandSeeds != null && islandSeeds.Count > 0)
+			{
+				foreach (var seed in islandSeeds)
+					selectedIslands.Add(new IslandSeed(seed, -1));
+				islandSeeds.Clear();
+			}
+		}
+
+		// ---- 解析・重みキャッシュ(シリアライズ対象外) ----
 		[System.NonSerialized] private Mesh _analyzedMesh;
 		[System.NonSerialized] private int _analyzedVertexCount;
 		[System.NonSerialized] private UVIslandAnalysis _analysis;
+
+		// 選択島からの UV 距離(0 = 島内)。選択が変わった時のみ再計算するため、
+		// falloff のドラッグ中は頂点数分の軽いループしか走らない
+		[System.NonSerialized] private float[] _distances;
+		[System.NonSerialized] private int _distancesHash;
+		[System.NonSerialized] private bool _distancesExact;
 		[System.NonSerialized] private float[] _weights;
-		[System.NonSerialized] private int _weightsHash;
 
 		/// <summary>
 		/// メッシュの UV 島解析を返す(メッシュが変わらない限りキャッシュされる)。
@@ -55,9 +87,7 @@ namespace MeshModifier.NDMFDeform.Core
 		{
 			if (source == null)
 			{
-				_analyzedMesh = null;
-				_analysis = null;
-				_weights = null;
+				InvalidateAnalysis();
 				return null;
 			}
 
@@ -66,6 +96,7 @@ namespace MeshModifier.NDMFDeform.Core
 				_analysis = UVIslandAnalysis.Analyze(source);
 				_analyzedMesh = source;
 				_analyzedVertexCount = source.vertexCount;
+				_distances = null;
 				_weights = null;
 			}
 			return _analysis;
@@ -76,21 +107,97 @@ namespace MeshModifier.NDMFDeform.Core
 		{
 			_analyzedMesh = null;
 			_analysis = null;
+			_distances = null;
 			_weights = null;
+		}
+
+		/// <summary>
+		/// 親の DeformStack が付いたレンダラーからソースメッシュを解決する。
+		/// renderer は MeshFilter のみの構成では null のことがある。
+		/// </summary>
+		public bool TryGetSourceMesh(out Mesh mesh, out Transform meshTransform, out Renderer renderer)
+		{
+			mesh = null;
+			meshTransform = null;
+			renderer = null;
+
+			var stack = GetComponentInParent<DeformStack>();
+			if (stack == null)
+				return false;
+
+			meshTransform = stack.transform;
+			if (stack.TryGetComponent<SkinnedMeshRenderer>(out var smr))
+			{
+				renderer = smr;
+				mesh = smr.sharedMesh;
+			}
+			else if (stack.TryGetComponent<MeshFilter>(out var mf))
+			{
+				stack.TryGetComponent<Renderer>(out renderer);
+				mesh = mf.sharedMesh;
+			}
+			return mesh != null;
+		}
+
+		/// <summary>保存されたシードを現在の解析結果の島へ解決する(重複なし)</summary>
+		public List<UVIslandAnalysis.Island> ResolveSelectedIslands(UVIslandAnalysis analysis)
+		{
+			var list = new List<UVIslandAnalysis.Island>();
+			if (analysis == null)
+				return list;
+			foreach (var seed in selectedIslands)
+			{
+				var island = analysis.FindIslandAt(seed.uv, seed.subMesh);
+				if (island != null && !list.Contains(island))
+					list.Add(island);
+			}
+			return list;
+		}
+
+		/// <summary>島選択のみのハッシュ(falloff / invert は含まない)</summary>
+		public int SelectionHash()
+		{
+			unchecked
+			{
+				var h = 17;
+				h = h * 31 + selectedIslands.Count;
+				foreach (var seed in selectedIslands)
+				{
+					h = h * 31 + seed.uv.x.GetHashCode();
+					h = h * 31 + seed.uv.y.GetHashCode();
+					h = h * 31 + seed.subMesh;
+				}
+				return h;
+			}
 		}
 
 		public override void PrepareBake(Mesh source)
 		{
 			var analysis = GetOrCreateAnalysis(source);
-			if (analysis == null)
+			if (analysis == null || analysis.VertexCount == 0)
+			{
+				_weights = null;
 				return;
+			}
 
-			var hash = ComputeSelectionHash();
-			if (_weights != null && _weights.Length == analysis.VertexCount && _weightsHash == hash)
-				return;
+			var n = analysis.VertexCount;
+			var selectionHash = SelectionHash();
+			var needExact = falloff > 0f;
+			if (_distances == null || _distances.Length != n ||
+			    _distancesHash != selectionHash || (needExact && !_distancesExact))
+			{
+				RebuildDistances(analysis, selectionHash, needExact);
+			}
 
-			_weights = BuildWeights(analysis);
-			_weightsHash = hash;
+			// 距離 → 重みは頂点数分の軽いループのみ(falloff / invert 変更時はここだけ走る)
+			if (_weights == null || _weights.Length != n)
+				_weights = new float[n];
+			for (var i = 0; i < n; i++)
+			{
+				var d = _distances[i];
+				var w = d <= 0f ? 1f : (falloff > 0f ? 1f - Mathf.Clamp01(d / falloff) : 0f);
+				_weights[i] = invert ? 1f - w : w;
+			}
 		}
 
 		public override JobHandle Schedule(in MeshBuffers buffers, in DeformSpace space, JobHandle dependency)
@@ -113,79 +220,73 @@ namespace MeshModifier.NDMFDeform.Core
 		}
 
 		/// <summary>
-		/// 頂点ごとのマスク強度(invert 適用済み)を構築する。
-		/// 選択島の頂点 = 1、falloff > 0 なら選択島の境界エッジからの
-		/// UV 距離に応じて外側の頂点にも減衰した強度を与える。
+		/// 選択島からの UV 距離を再構築する。島内の頂点は 0、
+		/// needExact の場合のみ外側の頂点へ境界エッジ距離を Burst ジョブで計算する
+		/// (falloff = 0 のあいだは内外フラグだけで済ませる)。
 		/// </summary>
-		private float[] BuildWeights(UVIslandAnalysis analysis)
+		private void RebuildDistances(UVIslandAnalysis analysis, int selectionHash, bool needExact)
 		{
-			var weights = new float[analysis.VertexCount];
+			var n = analysis.VertexCount;
+			if (_distances == null || _distances.Length != n)
+				_distances = new float[n];
+			for (var i = 0; i < n; i++)
+				_distances[i] = float.MaxValue;
 
-			var selected = new List<UVIslandAnalysis.Island>();
-			foreach (var seed in islandSeeds)
-			{
-				var island = analysis.FindIslandAt(seed);
-				if (island != null && !selected.Contains(island))
-					selected.Add(island);
-			}
-
+			var selected = ResolveSelectedIslands(analysis);
 			foreach (var island in selected)
 			{
 				foreach (var v in island.Vertices)
-					weights[v] = 1f;
+					_distances[v] = 0f;
 			}
 
-			if (falloff > 0f && selected.Count > 0)
+			_distancesExact = false;
+			if (needExact)
 			{
-				var borders = new List<Vector4>();
-				foreach (var island in selected)
-					borders.AddRange(island.BorderEdges);
-
-				var uvs = analysis.Uvs;
-				if (borders.Count > 0 && uvs.Length == weights.Length)
+				var borderList = new List<Vector4>();
+				if (analysis.Uvs.Length == n)
 				{
-					for (var i = 0; i < weights.Length; i++)
-					{
-						if (weights[i] >= 1f)
-							continue;
+					foreach (var island in selected)
+						borderList.AddRange(island.BorderEdges);
+				}
 
-						var minDistance = float.MaxValue;
-						foreach (var edge in borders)
+				if (borderList.Count > 0)
+				{
+					var uvs = new NativeArray<float2>(n, Allocator.TempJob,
+						NativeArrayOptions.UninitializedMemory);
+					for (var i = 0; i < n; i++)
+						uvs[i] = new float2(analysis.Uvs[i].x, analysis.Uvs[i].y);
+
+					var borders = new NativeArray<float4>(borderList.Count, Allocator.TempJob,
+						NativeArrayOptions.UninitializedMemory);
+					for (var i = 0; i < borderList.Count; i++)
+					{
+						var b = borderList[i];
+						borders[i] = new float4(b.x, b.y, b.z, b.w);
+					}
+
+					var distances = new NativeArray<float>(_distances, Allocator.TempJob);
+					try
+					{
+						new BorderDistanceJob
 						{
-							var d = UVIslandAnalysis.DistancePointSegment(uvs[i],
-								new Vector2(edge.x, edge.y), new Vector2(edge.z, edge.w));
-							if (d < minDistance)
-								minDistance = d;
-						}
-						weights[i] = Mathf.Max(weights[i], 1f - Mathf.Clamp01(minDistance / falloff));
+							uvs = uvs,
+							borders = borders,
+							distances = distances,
+						}.Schedule(n, 64, default).Complete();
+						distances.CopyTo(_distances);
+					}
+					finally
+					{
+						uvs.Dispose();
+						borders.Dispose();
+						distances.Dispose();
 					}
 				}
+				// 境界が無い(選択なし等)場合も内外フラグのままで正確なので再構築不要
+				_distancesExact = true;
 			}
 
-			if (invert)
-			{
-				for (var i = 0; i < weights.Length; i++)
-					weights[i] = 1f - weights[i];
-			}
-
-			return weights;
-		}
-
-		private int ComputeSelectionHash()
-		{
-			unchecked
-			{
-				var h = 17;
-				h = h * 31 + islandSeeds.Count;
-				foreach (var seed in islandSeeds)
-				{
-					h = h * 31 + seed.x.GetHashCode();
-					h = h * 31 + seed.y.GetHashCode();
-				}
-				h = h * 31 + falloff.GetHashCode();
-				h = h * 31 + invert.GetHashCode();
-				return h;
-			}
+			_distancesHash = selectionHash;
 		}
 
 		[BurstCompile]
@@ -199,6 +300,40 @@ namespace MeshModifier.NDMFDeform.Core
 			public void Execute(int index)
 			{
 				vertices[index] = lerp(vertices[index], original[index], saturate(mask[index] * factor));
+			}
+		}
+
+		/// <summary>島外の頂点について、選択島の境界エッジまでの最短 UV 距離を求める</summary>
+		[BurstCompile]
+		public struct BorderDistanceJob : IJobParallelFor
+		{
+			[ReadOnly] public NativeArray<float2> uvs;
+			[ReadOnly] public NativeArray<float4> borders;
+			public NativeArray<float> distances;
+
+			public void Execute(int index)
+			{
+				if (distances[index] <= 0f)
+					return;
+
+				var uv = uvs[index];
+				var best = float.MaxValue;
+				for (var e = 0; e < borders.Length; e++)
+				{
+					var b = borders[e];
+					best = min(best, SegmentDistance(uv, b.xy, b.zw));
+				}
+				distances[index] = best;
+			}
+
+			private static float SegmentDistance(float2 p, float2 a, float2 b)
+			{
+				var line = b - a;
+				var len2 = dot(line, line);
+				if (len2 <= 0f)
+					return distance(p, a);
+				var t = saturate(dot(p - a, line) / len2);
+				return distance(p, a + t * line);
 			}
 		}
 	}

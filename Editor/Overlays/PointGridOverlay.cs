@@ -9,11 +9,45 @@ namespace MeshModifier.NDMFDeform.Editor
 {
 	/// <summary>
 	/// PointGrid(格子ハンドル)の表示・選択操作のコンパクトな SceneView オーバーレイ。
+	/// ITransientOverlay により LatticeDeformer 選択中のみ表示される。
 	/// 操作方法の説明はインスペクタ側の「操作ガイド」にある。
 	/// </summary>
 	[Overlay(typeof(SceneView), "NDMF Deform Lattice", true)]
-	public class PointGridOverlay : Overlay
+	public class PointGridOverlay : Overlay, ITransientOverlay
 	{
+		// visible は毎フレーム参照されるため、選択変更時のみ再判定する
+		private static bool _visibleCache;
+		private static bool _visibleCacheValid;
+
+		static PointGridOverlay()
+		{
+			Selection.selectionChanged += () => _visibleCacheValid = false;
+		}
+
+		/// <summary>PointGrid ハンドルを持つデフォーマの選択中のみ表示する</summary>
+		public bool visible
+		{
+			get
+			{
+				if (!_visibleCacheValid)
+				{
+					_visibleCache = ComputeVisible();
+					_visibleCacheValid = true;
+				}
+				return _visibleCache;
+			}
+		}
+
+		private static bool ComputeVisible()
+		{
+			foreach (var go in Selection.gameObjects)
+			{
+				if (go != null && go.TryGetComponent<LatticeDeformer>(out _))
+					return true;
+			}
+			return false;
+		}
+
 		private static readonly Color StripOnColor = new Color(0.2f, 0.42f, 0.68f);
 		private const float LabelWidth = 58;
 

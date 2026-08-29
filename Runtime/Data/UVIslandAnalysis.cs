@@ -8,6 +8,7 @@ namespace MeshModifier.NDMFDeform.Core
 	/// UV0 空間での UV 島(アイランド)解析。
 	/// UV 座標を量子化したエッジを共有する三角形同士を同一の島とみなす
 	/// (頂点インデックスが分割されていても UV が一致するシームは接続される)。
+	/// 島はサブメッシュ単位で検出する(UV が重なる別マテリアルのパーツを区別するため)。
 	/// 結果はメッシュが変わらない限り再利用できる。
 	/// </summary>
 	public sealed class UVIslandAnalysis
@@ -19,6 +20,9 @@ namespace MeshModifier.NDMFDeform.Core
 		{
 			public int Id;
 
+			/// <summary>この島が属するサブメッシュ</summary>
+			public int SubMesh;
+
 			/// <summary>島に属する頂点インデックス(重複なし)</summary>
 			public List<int> Vertices = new List<int>();
 
@@ -27,6 +31,9 @@ namespace MeshModifier.NDMFDeform.Core
 
 			/// <summary>UV 空間の境界エッジ(x,y = 始点 / z,w = 終点)。フォールオフ距離に使う</summary>
 			public List<Vector4> BorderEdges = new List<Vector4>();
+
+			/// <summary>境界エッジの頂点インデックスペア(シーンビューの輪郭描画に使う)</summary>
+			public List<int> BorderEdgeVerts = new List<int>();
 
 			public Vector2 UvMin;
 			public Vector2 UvMax;
@@ -40,9 +47,21 @@ namespace MeshModifier.NDMFDeform.Core
 
 		public readonly List<Island> Islands = new List<Island>();
 		public int VertexCount { get; private set; }
+		public int SubMeshCount { get; private set; }
 
 		/// <summary>解析時の UV0(頂点インデックス順)。UV が無いメッシュでは空</summary>
 		public Vector2[] Uvs { get; private set; } = System.Array.Empty<Vector2>();
+
+		/// <summary>
+		/// 全サブメッシュ連結順の三角形インデックス → 島の対応
+		/// (RaycastHit.triangleIndex と同じ並び)。
+		/// 三角形トポロジ以外のサブメッシュを含むメッシュでは null。
+		/// </summary>
+		public Island[] IslandOfTriangle { get; private set; }
+
+		/// <summary>全島の UV 範囲(ビューの初期表示ウィンドウに使う)</summary>
+		public Vector2 UvBoundsMin { get; private set; } = Vector2.zero;
+		public Vector2 UvBoundsMax { get; private set; } = Vector2.one;
 
 		public static UVIslandAnalysis Analyze(Mesh mesh)
 		{
@@ -56,10 +75,59 @@ namespace MeshModifier.NDMFDeform.Core
 				return result;
 
 			result.Uvs = uvs;
-			var triangles = mesh.triangles;
+			result.SubMeshCount = mesh.subMeshCount;
+
+			var subTriangles = new int[result.SubMeshCount][];
+			var totalTriangles = 0;
+			var allTriangleTopology = true;
+			for (var s = 0; s < result.SubMeshCount; s++)
+			{
+				if (mesh.GetTopology(s) == MeshTopology.Triangles)
+				{
+					subTriangles[s] = mesh.GetTriangles(s);
+					totalTriangles += subTriangles[s].Length / 3;
+				}
+				else
+				{
+					subTriangles[s] = System.Array.Empty<int>();
+					allTriangleTopology = false;
+				}
+			}
+			if (totalTriangles == 0)
+				return result;
+
+			if (allTriangleTopology)
+				result.IslandOfTriangle = new Island[totalTriangles];
+
+			var globalTriangleOffset = 0;
+			for (var s = 0; s < result.SubMeshCount; s++)
+			{
+				AnalyzeSubMesh(result, s, subTriangles[s], uvs, globalTriangleOffset);
+				globalTriangleOffset += subTriangles[s].Length / 3;
+			}
+
+			if (result.Islands.Count > 0)
+			{
+				var min = result.Islands[0].UvMin;
+				var max = result.Islands[0].UvMax;
+				foreach (var island in result.Islands)
+				{
+					min = Vector2.Min(min, island.UvMin);
+					max = Vector2.Max(max, island.UvMax);
+				}
+				result.UvBoundsMin = min;
+				result.UvBoundsMax = max;
+			}
+
+			return result;
+		}
+
+		private static void AnalyzeSubMesh(
+			UVIslandAnalysis result, int subMesh, int[] triangles, Vector2[] uvs, int globalTriangleOffset)
+		{
 			var triangleCount = triangles.Length / 3;
 			if (triangleCount == 0)
-				return result;
+				return;
 
 			// Union-Find: 量子化 UV エッジを共有する三角形を統合する
 			var parent = new int[triangleCount];
@@ -90,9 +158,9 @@ namespace MeshModifier.NDMFDeform.Core
 				var baseIndex = t * 3;
 				for (var e = 0; e < 3; e++)
 				{
-					var uvA = uvs[triangles[baseIndex + e]];
-					var uvB = uvs[triangles[baseIndex + (e + 1) % 3]];
-					var key = EdgeKey(uvA, uvB);
+					var v1 = triangles[baseIndex + e];
+					var v2 = triangles[baseIndex + (e + 1) % 3];
+					var key = EdgeKey(uvs[v1], uvs[v2]);
 
 					if (edges.TryGetValue(key, out var info))
 					{
@@ -102,7 +170,11 @@ namespace MeshModifier.NDMFDeform.Core
 					}
 					else
 					{
-						edges[key] = new EdgeInfo { Triangle = t, Count = 1, A = uvA, B = uvB };
+						edges[key] = new EdgeInfo
+						{
+							Triangle = t, Count = 1,
+							A = uvs[v1], B = uvs[v2], V1 = v1, V2 = v2,
+						};
 					}
 				}
 			}
@@ -117,7 +189,7 @@ namespace MeshModifier.NDMFDeform.Core
 				var root = Find(t);
 				if (!islandOfRoot.TryGetValue(root, out var island))
 				{
-					island = new Island { Id = result.Islands.Count };
+					island = new Island { Id = result.Islands.Count, SubMesh = subMesh };
 					islandOfRoot[root] = island;
 					vertexSets[island] = new HashSet<int>();
 					result.Islands.Add(island);
@@ -129,6 +201,9 @@ namespace MeshModifier.NDMFDeform.Core
 				}
 
 				islandOfTriangle[t] = island;
+				if (result.IslandOfTriangle != null)
+					result.IslandOfTriangle[globalTriangleOffset + t] = island;
+
 				var set = vertexSets[island];
 				for (var e = 0; e < 3; e++)
 				{
@@ -146,23 +221,27 @@ namespace MeshModifier.NDMFDeform.Core
 			// 1 つの三角形しか使わないエッジ = UV 空間の境界エッジ
 			foreach (var info in edges.Values)
 			{
-				if (info.Count == 1)
-					islandOfTriangle[info.Triangle].BorderEdges.Add(
-						new Vector4(info.A.x, info.A.y, info.B.x, info.B.y));
+				if (info.Count != 1)
+					continue;
+				var island = islandOfTriangle[info.Triangle];
+				island.BorderEdges.Add(new Vector4(info.A.x, info.A.y, info.B.x, info.B.y));
+				island.BorderEdgeVerts.Add(info.V1);
+				island.BorderEdgeVerts.Add(info.V2);
 			}
-
-			return result;
 		}
 
 		/// <summary>
 		/// UV 座標が属する島を返す(見つからなければ null)。
+		/// subMesh が 0 以上の場合はそのサブメッシュの島のみを対象にする。
 		/// 三角形の内包判定を優先し、外れた場合は maxDistance 以内で
 		/// 境界エッジが最も近い島へフォールバックする。
 		/// </summary>
-		public Island FindIslandAt(Vector2 uv, float maxDistance = 0.02f)
+		public Island FindIslandAt(Vector2 uv, int subMesh = -1, float maxDistance = 0.02f)
 		{
 			foreach (var island in Islands)
 			{
+				if (subMesh >= 0 && island.SubMesh != subMesh)
+					continue;
 				if (uv.x < island.UvMin.x - UvEpsilon || uv.x > island.UvMax.x + UvEpsilon ||
 				    uv.y < island.UvMin.y - UvEpsilon || uv.y > island.UvMax.y + UvEpsilon)
 					continue;
@@ -174,6 +253,8 @@ namespace MeshModifier.NDMFDeform.Core
 			var bestDistance = maxDistance;
 			foreach (var island in Islands)
 			{
+				if (subMesh >= 0 && island.SubMesh != subMesh)
+					continue;
 				foreach (var edge in island.BorderEdges)
 				{
 					var d = DistancePointSegment(uv,
@@ -239,6 +320,8 @@ namespace MeshModifier.NDMFDeform.Core
 			public int Count;
 			public Vector2 A;
 			public Vector2 B;
+			public int V1;
+			public int V2;
 		}
 
 		private static (long, long) EdgeKey(Vector2 a, Vector2 b)

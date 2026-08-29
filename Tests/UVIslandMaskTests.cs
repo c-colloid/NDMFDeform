@@ -1,3 +1,4 @@
+using System.Reflection;
 using MeshModifier.NDMFDeform.Core;
 using MeshModifier.NDMFDeform.Editor;
 using NUnit.Framework;
@@ -48,7 +49,37 @@ namespace MeshModifier.NDMFDeform.Tests
 			};
 		}
 
-		private (DeformStack stack, TestTranslateDeformer translate, UVIslandMaskDeformer mask) CreateSetup()
+		/// <summary>
+		/// 2 サブメッシュが同じ UV 範囲([0.1,0.3]²)に重なるメッシュ。
+		/// サブメッシュ 0 = 頂点 0-3、サブメッシュ 1 = 頂点 4-7。
+		/// </summary>
+		private static Mesh CreateOverlappingSubMeshMesh()
+		{
+			var mesh = new Mesh
+			{
+				vertices = new[]
+				{
+					new Vector3(0f, 0f, 0f), new Vector3(1f, 0f, 0f),
+					new Vector3(0f, 1f, 0f), new Vector3(1f, 1f, 0f),
+					new Vector3(2f, 0f, 0f), new Vector3(3f, 0f, 0f),
+					new Vector3(2f, 1f, 0f), new Vector3(3f, 1f, 0f),
+				},
+				uv = new[]
+				{
+					new Vector2(0.1f, 0.1f), new Vector2(0.3f, 0.1f),
+					new Vector2(0.1f, 0.3f), new Vector2(0.3f, 0.3f),
+					new Vector2(0.1f, 0.1f), new Vector2(0.3f, 0.1f),
+					new Vector2(0.1f, 0.3f), new Vector2(0.3f, 0.3f),
+				},
+			};
+			mesh.subMeshCount = 2;
+			mesh.SetTriangles(new[] { 0, 2, 1, 1, 2, 3 }, 0);
+			mesh.SetTriangles(new[] { 4, 6, 5, 5, 6, 7 }, 1);
+			return mesh;
+		}
+
+		private (DeformStack stack, TestTranslateDeformer translate, UVIslandMaskDeformer mask) CreateSetup(
+			Mesh source)
 		{
 			_root = new GameObject("UVIslandMaskTestRoot");
 			var stack = _root.AddComponent<DeformStack>();
@@ -61,7 +92,7 @@ namespace MeshModifier.NDMFDeform.Tests
 			maskGo.transform.SetParent(_root.transform, false);
 			var mask = maskGo.AddComponent<UVIslandMaskDeformer>();
 
-			_source = CreateTwoIslandMesh();
+			_source = source;
 			return (stack, translate, mask);
 		}
 
@@ -102,7 +133,7 @@ namespace MeshModifier.NDMFDeform.Tests
 			var analysis = UVIslandAnalysis.Analyze(_source);
 
 			foreach (var island in analysis.Islands)
-				Assert.That(analysis.FindIslandAt(island.Seed), Is.SameAs(island));
+				Assert.That(analysis.FindIslandAt(island.Seed, island.SubMesh), Is.SameAs(island));
 		}
 
 		[Test]
@@ -113,7 +144,47 @@ namespace MeshModifier.NDMFDeform.Tests
 
 			// 各クワッドは外周 4 辺のみが境界(対角線は 2 三角形が共有)
 			foreach (var island in analysis.Islands)
+			{
 				Assert.That(island.BorderEdges.Count, Is.EqualTo(4));
+				Assert.That(island.BorderEdgeVerts.Count, Is.EqualTo(8));
+			}
+		}
+
+		[Test]
+		public void Analyze_MapsTrianglesToIslands()
+		{
+			_source = CreateTwoIslandMesh();
+			var analysis = UVIslandAnalysis.Analyze(_source);
+
+			Assert.That(analysis.IslandOfTriangle, Is.Not.Null);
+			Assert.That(analysis.IslandOfTriangle.Length, Is.EqualTo(4));
+
+			var islandA = analysis.FindIslandAt(new Vector2(0.2f, 0.2f));
+			var islandB = analysis.FindIslandAt(new Vector2(0.7f, 0.2f));
+			Assert.That(analysis.IslandOfTriangle[0], Is.SameAs(islandA));
+			Assert.That(analysis.IslandOfTriangle[1], Is.SameAs(islandA));
+			Assert.That(analysis.IslandOfTriangle[2], Is.SameAs(islandB));
+			Assert.That(analysis.IslandOfTriangle[3], Is.SameAs(islandB));
+		}
+
+		[Test]
+		public void Analyze_SeparatesOverlappingSubMeshIslands()
+		{
+			_source = CreateOverlappingSubMeshMesh();
+			var analysis = UVIslandAnalysis.Analyze(_source);
+
+			// UV が完全に重なっていてもサブメッシュ単位で別の島になる
+			Assert.That(analysis.Islands.Count, Is.EqualTo(2));
+			Assert.That(analysis.SubMeshCount, Is.EqualTo(2));
+
+			var island0 = analysis.FindIslandAt(new Vector2(0.2f, 0.2f), 0);
+			var island1 = analysis.FindIslandAt(new Vector2(0.2f, 0.2f), 1);
+			Assert.That(island0, Is.Not.Null);
+			Assert.That(island1, Is.Not.Null);
+			Assert.That(island0.SubMesh, Is.EqualTo(0));
+			Assert.That(island1.SubMesh, Is.EqualTo(1));
+			Assert.That(island0.Vertices, Is.EquivalentTo(new[] { 0, 1, 2, 3 }));
+			Assert.That(island1.Vertices, Is.EquivalentTo(new[] { 4, 5, 6, 7 }));
 		}
 
 		// ---- ベイク統合 ----
@@ -121,12 +192,12 @@ namespace MeshModifier.NDMFDeform.Tests
 		[Test]
 		public void Bake_SelectedIslandIsRestored()
 		{
-			var (stack, translate, mask) = CreateSetup();
+			var (stack, translate, mask) = CreateSetup(CreateTwoIslandMesh());
 			stack.AddDeformer(translate);
 			stack.AddDeformer(mask);
 
 			// 島 A を選択(頂点 0-3 の変形が打ち消される)
-			mask.IslandSeeds.Add(new Vector2(0.2f, 0.2f));
+			mask.SelectedIslands.Add(new IslandSeed(new Vector2(0.2f, 0.2f), 0));
 			mask.Factor = 1f;
 			mask.Falloff = 0f;
 
@@ -144,11 +215,11 @@ namespace MeshModifier.NDMFDeform.Tests
 		[Test]
 		public void Bake_InvertKeepsDeformOnlyOnSelectedIsland()
 		{
-			var (stack, translate, mask) = CreateSetup();
+			var (stack, translate, mask) = CreateSetup(CreateTwoIslandMesh());
 			stack.AddDeformer(translate);
 			stack.AddDeformer(mask);
 
-			mask.IslandSeeds.Add(new Vector2(0.2f, 0.2f));
+			mask.SelectedIslands.Add(new IslandSeed(new Vector2(0.2f, 0.2f), 0));
 			mask.Factor = 1f;
 			mask.Falloff = 0f;
 			mask.Invert = true;
@@ -166,11 +237,11 @@ namespace MeshModifier.NDMFDeform.Tests
 		[Test]
 		public void Bake_FalloffBlendsOutsideVertices()
 		{
-			var (stack, translate, mask) = CreateSetup();
+			var (stack, translate, mask) = CreateSetup(CreateTwoIslandMesh());
 			stack.AddDeformer(translate);
 			stack.AddDeformer(mask);
 
-			mask.IslandSeeds.Add(new Vector2(0.2f, 0.2f));
+			mask.SelectedIslands.Add(new IslandSeed(new Vector2(0.2f, 0.2f), 0));
 			mask.Factor = 1f;
 			mask.Falloff = 0.4f;
 
@@ -191,9 +262,55 @@ namespace MeshModifier.NDMFDeform.Tests
 		}
 
 		[Test]
+		public void Bake_FalloffAfterZeroFalloffBakeStillBlends()
+		{
+			// 距離キャッシュが falloff=0 の内外フラグのみで止まったまま
+			// falloff>0 のベイクに再利用されないことを確認する
+			var (stack, translate, mask) = CreateSetup(CreateTwoIslandMesh());
+			stack.AddDeformer(translate);
+			stack.AddDeformer(mask);
+
+			mask.SelectedIslands.Add(new IslandSeed(new Vector2(0.2f, 0.2f), 0));
+			mask.Factor = 1f;
+			mask.Falloff = 0f;
+
+			_baked = DeformBakeCore.Bake(stack, _source, _root.transform);
+			Object.DestroyImmediate(_baked);
+
+			mask.Falloff = 0.4f;
+			_baked = DeformBakeCore.Bake(stack, _source, _root.transform);
+
+			var v = _baked.vertices;
+			var original = _source.vertices;
+			Assert.That(v[4].y - original[4].y, Is.EqualTo(0.75f).Within(1e-4f));
+		}
+
+		[Test]
+		public void Bake_SubMeshSeedMasksOnlyItsIsland()
+		{
+			var (stack, translate, mask) = CreateSetup(CreateOverlappingSubMeshMesh());
+			stack.AddDeformer(translate);
+			stack.AddDeformer(mask);
+
+			// UV が重なっていてもサブメッシュ 1 の島だけが打ち消される
+			mask.SelectedIslands.Add(new IslandSeed(new Vector2(0.2f, 0.2f), 1));
+			mask.Factor = 1f;
+			mask.Falloff = 0f;
+
+			_baked = DeformBakeCore.Bake(stack, _source, _root.transform);
+
+			var v = _baked.vertices;
+			var original = _source.vertices;
+			for (var i = 0; i < 4; i++)
+				Assert.That(Vector3.Distance(v[i], original[i] + Vector3.up), Is.LessThan(1e-4f), $"vertex {i}");
+			for (var i = 4; i < 8; i++)
+				Assert.That(Vector3.Distance(v[i], original[i]), Is.LessThan(1e-4f), $"vertex {i}");
+		}
+
+		[Test]
 		public void Bake_NoSelectionLeavesDeformUntouched()
 		{
-			var (stack, translate, mask) = CreateSetup();
+			var (stack, translate, mask) = CreateSetup(CreateTwoIslandMesh());
 			stack.AddDeformer(translate);
 			stack.AddDeformer(mask);
 			mask.Factor = 1f;
@@ -209,12 +326,12 @@ namespace MeshModifier.NDMFDeform.Tests
 		[Test]
 		public void Bake_MaskBeforeDeformerHasNoEffect()
 		{
-			var (stack, translate, mask) = CreateSetup();
+			var (stack, translate, mask) = CreateSetup(CreateTwoIslandMesh());
 			// マスクが先 → スナップショットと同一の頂点をブレンドするだけで変形は残る
 			stack.AddDeformer(mask);
 			stack.AddDeformer(translate);
 
-			mask.IslandSeeds.Add(new Vector2(0.2f, 0.2f));
+			mask.SelectedIslands.Add(new IslandSeed(new Vector2(0.2f, 0.2f), 0));
 			mask.Factor = 1f;
 
 			_baked = DeformBakeCore.Bake(stack, _source, _root.transform);
@@ -222,6 +339,37 @@ namespace MeshModifier.NDMFDeform.Tests
 			var v = _baked.vertices;
 			var original = _source.vertices;
 			for (var i = 0; i < v.Length; i++)
+				Assert.That(Vector3.Distance(v[i], original[i] + Vector3.up), Is.LessThan(1e-4f), $"vertex {i}");
+		}
+
+		[Test]
+		public void LegacySeeds_MigrateOnValidateAndStillMask()
+		{
+			var (stack, translate, mask) = CreateSetup(CreateTwoIslandMesh());
+			stack.AddDeformer(translate);
+			stack.AddDeformer(mask);
+			mask.Factor = 1f;
+
+			// 旧形式(Vector2 リスト)をリフレクションで注入し、OnValidate で移行させる
+			var legacyField = typeof(UVIslandMaskDeformer).GetField(
+				"islandSeeds", BindingFlags.Instance | BindingFlags.NonPublic);
+			Assert.That(legacyField, Is.Not.Null);
+			legacyField.SetValue(mask,
+				new System.Collections.Generic.List<Vector2> { new Vector2(0.2f, 0.2f) });
+			typeof(UVIslandMaskDeformer)
+				.GetMethod("OnValidate", BindingFlags.Instance | BindingFlags.NonPublic)
+				.Invoke(mask, null);
+
+			Assert.That(mask.SelectedIslands.Count, Is.EqualTo(1));
+			Assert.That(mask.SelectedIslands[0].subMesh, Is.EqualTo(-1));
+
+			_baked = DeformBakeCore.Bake(stack, _source, _root.transform);
+
+			var v = _baked.vertices;
+			var original = _source.vertices;
+			for (var i = 0; i < 4; i++)
+				Assert.That(Vector3.Distance(v[i], original[i]), Is.LessThan(1e-4f), $"vertex {i}");
+			for (var i = 4; i < 8; i++)
 				Assert.That(Vector3.Distance(v[i], original[i] + Vector3.up), Is.LessThan(1e-4f), $"vertex {i}");
 		}
 

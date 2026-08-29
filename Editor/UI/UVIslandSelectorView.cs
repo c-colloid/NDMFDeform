@@ -10,22 +10,46 @@ namespace MeshModifier.NDMFDeform.Editor
 {
 	/// <summary>
 	/// UV マッププレビュー上で UV 島をクリック選択するビュー。
-	/// 対象メッシュは親の DeformStack が付いたレンダラーから解決する。
-	/// 選択は UVIslandMaskDeformer.IslandSeeds(代表 UV)として保存される。
+	/// ホイールでズーム、中ボタン(または Alt+左)ドラッグでパンできる。
+	/// サブメッシュのドロップダウンで表示・クリック対象を絞り込める。
+	/// ホバー中の島は黄色の輪郭で表示され、シーンビュー側にも同じ島の輪郭が出る。
+	/// 選択は UVIslandMaskDeformer.SelectedIslands(代表 UV + サブメッシュ)として保存される。
 	/// </summary>
 	public class UVIslandSelectorView : VisualElement
 	{
 		private const int TextureSize = 512;
 		private const int DisplaySize = 300;
 
+		/// <summary>ズーム・パン中の再レンダリング間隔(秒)。約 30Hz</summary>
+		private const double RenderInterval = 0.033;
+
 		private readonly UVIslandMaskDeformer _deformer;
 		private readonly VisualElement _map;
+		private readonly VisualElement _hoverOverlay;
+		private readonly DropdownField _subMeshDropdown;
 		private readonly Label _status;
 		private readonly HelpBox _noMeshHelp;
 
 		private Mesh _mesh;
 		private UVIslandAnalysis _analysis;
 		private Texture2D _texture;
+		private Color[] _pixels;
+
+		// 表示ウィンドウ(UV 空間): _viewCenter を中心に一辺 _viewSize の正方形
+		private Vector2 _viewCenter = new Vector2(0.5f, 0.5f);
+		private float _viewSize = 1.1f;
+		private bool _viewInitialized;
+
+		private int _subMeshFilter = -1;
+		private UVIslandAnalysis.Island _hoverIsland;
+
+		private bool _panning;
+		private int _panPointerId = -1;
+		private Vector2 _pressPosition;
+		private bool _pressed;
+
+		private double _lastRenderTime;
+		private bool _renderQueued;
 
 		public UVIslandSelectorView(UVIslandMaskDeformer deformer)
 		{
@@ -40,6 +64,15 @@ namespace MeshModifier.NDMFDeform.Editor
 				"対象メッシュが見つかりません。DeformStack の付いたレンダラーの配下に置いてください。",
 				HelpBoxMessageType.Warning);
 			Add(_noMeshHelp);
+
+			_subMeshDropdown = new DropdownField("サブメッシュ");
+			_subMeshDropdown.RegisterValueChangedCallback(_ =>
+			{
+				_subMeshFilter = _subMeshDropdown.index - 1;
+				SetHover(null);
+				RenderNow();
+			});
+			Add(_subMeshDropdown);
 
 			_map = new VisualElement();
 			_map.style.width = DisplaySize;
@@ -56,25 +89,54 @@ namespace MeshModifier.NDMFDeform.Editor
 			_map.style.borderBottomColor = borderColor;
 			_map.style.borderLeftColor = borderColor;
 			_map.style.borderRightColor = borderColor;
-			_map.RegisterCallback<ClickEvent>(OnMapClick);
 			Add(_map);
+
+			// ホバー島の輪郭はテクスチャを再生成せずベクタ描画で重ねる
+			_hoverOverlay = new VisualElement();
+			_hoverOverlay.style.position = Position.Absolute;
+			_hoverOverlay.style.left = 0;
+			_hoverOverlay.style.top = 0;
+			_hoverOverlay.style.right = 0;
+			_hoverOverlay.style.bottom = 0;
+			_hoverOverlay.pickingMode = PickingMode.Ignore;
+			_hoverOverlay.generateVisualContent += DrawHoverOverlay;
+			_map.Add(_hoverOverlay);
+
+			_map.RegisterCallback<WheelEvent>(OnWheel);
+			_map.RegisterCallback<PointerDownEvent>(OnPointerDown);
+			_map.RegisterCallback<PointerMoveEvent>(OnPointerMove);
+			_map.RegisterCallback<PointerUpEvent>(OnPointerUp);
+			_map.RegisterCallback<PointerLeaveEvent>(_ => SetHover(null));
 
 			_status = new Label();
 			_status.style.opacity = 0.7f;
 			_status.style.whiteSpace = WhiteSpace.Normal;
 			Add(_status);
 
+			var hint = new Label("ホイール: ズーム / 中ボタン or Alt+ドラッグ: パン / シーンビューの面クリックでも選択できます");
+			hint.style.opacity = 0.5f;
+			hint.style.fontSize = 10;
+			hint.style.whiteSpace = WhiteSpace.Normal;
+			Add(hint);
+
 			var buttons = new VisualElement();
 			buttons.style.flexDirection = FlexDirection.Row;
 			buttons.style.marginTop = 2;
-			buttons.Add(new Button(ClearSelection) { text = "選択解除" });
+			buttons.Add(new Button(() => UVIslandSelection.ClearSelection(_deformer)) { text = "選択解除" });
+			buttons.Add(new Button(ResetView) { text = "全体表示" });
 			buttons.Add(new Button(ReanalyzeMesh) { text = "再解析" });
 			Add(buttons);
 
-			RegisterCallback<AttachToPanelEvent>(_ => Undo.undoRedoPerformed += Refresh);
+			RegisterCallback<AttachToPanelEvent>(_ =>
+			{
+				Undo.undoRedoPerformed += Refresh;
+				UVIslandSelection.Changed += Refresh;
+			});
 			RegisterCallback<DetachFromPanelEvent>(_ =>
 			{
 				Undo.undoRedoPerformed -= Refresh;
+				UVIslandSelection.Changed -= Refresh;
+				UVIslandSelection.ClearHover(_deformer);
 				DestroyTexture();
 			});
 
@@ -87,91 +149,192 @@ namespace MeshModifier.NDMFDeform.Editor
 			if (_deformer == null)
 				return;
 
-			_mesh = FindSourceMesh();
+			Renderer renderer = null;
+			_mesh = _deformer.TryGetSourceMesh(out var mesh, out _, out renderer) ? mesh : null;
 			_analysis = _deformer.GetOrCreateAnalysis(_mesh);
 
-			var hasMesh = _mesh != null && _analysis != null && _analysis.Islands.Count > 0;
+			var hasIslands = _mesh != null && _analysis != null && _analysis.Islands.Count > 0;
 			_noMeshHelp.style.display = _mesh == null ? DisplayStyle.Flex : DisplayStyle.None;
-			_map.style.display = hasMesh ? DisplayStyle.Flex : DisplayStyle.None;
+			_map.style.display = hasIslands ? DisplayStyle.Flex : DisplayStyle.None;
+			_subMeshDropdown.style.display =
+				hasIslands && _analysis.SubMeshCount > 1 ? DisplayStyle.Flex : DisplayStyle.None;
 
-			if (!hasMesh)
+			if (!hasIslands)
 			{
+				_subMeshFilter = -1;
 				_status.text = _mesh != null
 					? $"メッシュ: {_mesh.name} — UV 島が見つかりません(UV0 が必要です)"
 					: string.Empty;
 				return;
 			}
 
-			var selected = ResolveSelectedIslands();
-			RegenerateTexture(selected);
-			_status.text = $"メッシュ: {_mesh.name} / 島: {_analysis.Islands.Count} / 選択: {selected.Count}";
-		}
-
-		private Mesh FindSourceMesh()
-		{
-			var stack = _deformer.GetComponentInParent<DeformStack>();
-			if (stack == null)
-				return null;
-
-			if (stack.TryGetComponent<SkinnedMeshRenderer>(out var smr))
-				return smr.sharedMesh;
-			if (stack.TryGetComponent<MeshFilter>(out var mf))
-				return mf.sharedMesh;
-			return null;
-		}
-
-		private HashSet<UVIslandAnalysis.Island> ResolveSelectedIslands()
-		{
-			var selected = new HashSet<UVIslandAnalysis.Island>();
-			foreach (var seed in _deformer.IslandSeeds)
+			if (!_viewInitialized)
 			{
-				var island = _analysis.FindIslandAt(seed);
-				if (island != null)
-					selected.Add(island);
+				ResetViewWindow();
+				_viewInitialized = true;
 			}
-			return selected;
+
+			UpdateSubMeshDropdown(renderer);
+			RenderNow();
 		}
 
-		private void OnMapClick(ClickEvent evt)
-		{
-			if (_analysis == null || _analysis.Islands.Count == 0)
-				return;
+		// ---- 表示ウィンドウ(ズーム・パン) ----
 
+		private Vector2 WindowMin => _viewCenter - Vector2.one * (_viewSize * 0.5f);
+
+		private void ResetViewWindow()
+		{
+			// [0,1] と実際の UV 範囲の合併に 5% の余白を付けて全体表示
+			var min = Vector2.Min(Vector2.zero, _analysis.UvBoundsMin);
+			var max = Vector2.Max(Vector2.one, _analysis.UvBoundsMax);
+			_viewCenter = (min + max) * 0.5f;
+			_viewSize = Mathf.Max(max.x - min.x, max.y - min.y) * 1.05f;
+		}
+
+		private void ResetView()
+		{
+			if (_analysis == null)
+				return;
+			ResetViewWindow();
+			RenderNow();
+		}
+
+		private Vector2 LocalToUv(Vector2 local)
+		{
 			var rect = _map.contentRect;
 			if (rect.width <= 0f || rect.height <= 0f)
-				return;
-
-			var uv = new Vector2(
-				evt.localPosition.x / rect.width,
-				1f - evt.localPosition.y / rect.height);
-
-			var island = _analysis.FindIslandAt(uv);
-			if (island == null)
-				return;
-
-			Undo.RecordObject(_deformer, "Toggle UV Island");
-
-			// この島に解決される既存シードを取り除く。無ければ追加(= トグル)
-			var seeds = _deformer.IslandSeeds;
-			var removed = seeds.RemoveAll(s => _analysis.FindIslandAt(s) == island) > 0;
-			if (!removed)
-				seeds.Add(island.Seed);
-
-			PrefabUtility.RecordPrefabInstancePropertyModifications(_deformer);
-			EditorUtility.SetDirty(_deformer);
-			Refresh();
+				return Vector2.zero;
+			var min = WindowMin;
+			return new Vector2(
+				min.x + local.x / rect.width * _viewSize,
+				min.y + (1f - local.y / rect.height) * _viewSize);
 		}
 
-		private void ClearSelection()
+		private Vector2 UvToLocal(Vector2 uv)
 		{
-			if (_deformer.IslandSeeds.Count == 0)
+			var rect = _map.contentRect;
+			var min = WindowMin;
+			return new Vector2(
+				(uv.x - min.x) / _viewSize * rect.width,
+				(1f - (uv.y - min.y) / _viewSize) * rect.height);
+		}
+
+		private void OnWheel(WheelEvent evt)
+		{
+			if (_analysis == null)
 				return;
 
-			Undo.RecordObject(_deformer, "Clear UV Island Selection");
-			_deformer.IslandSeeds.Clear();
-			PrefabUtility.RecordPrefabInstancePropertyModifications(_deformer);
-			EditorUtility.SetDirty(_deformer);
-			Refresh();
+			var uvAtCursor = LocalToUv(evt.localMousePosition);
+			var factor = Mathf.Pow(1.15f, evt.delta.y > 0f ? 1f : -1f);
+			var newSize = Mathf.Clamp(_viewSize * factor, 0.02f, 8f);
+
+			// カーソル位置の UV を固定したままスケールする
+			_viewCenter = uvAtCursor + (_viewCenter - uvAtCursor) * (newSize / _viewSize);
+			_viewSize = newSize;
+			ClampWindow();
+
+			RequestRender();
+			evt.StopPropagation();
+		}
+
+		private void ClampWindow()
+		{
+			var min = Vector2.Min(Vector2.zero, _analysis.UvBoundsMin);
+			var max = Vector2.Max(Vector2.one, _analysis.UvBoundsMax);
+			_viewCenter.x = Mathf.Clamp(_viewCenter.x, min.x - _viewSize, max.x + _viewSize);
+			_viewCenter.y = Mathf.Clamp(_viewCenter.y, min.y - _viewSize, max.y + _viewSize);
+		}
+
+		private void OnPointerDown(PointerDownEvent evt)
+		{
+			if (_analysis == null)
+				return;
+
+			// 中ボタン or Alt+左 でパン開始
+			if (evt.button == 2 || (evt.button == 0 && evt.altKey))
+			{
+				_panning = true;
+				_panPointerId = evt.pointerId;
+				_map.CapturePointer(evt.pointerId);
+				evt.StopPropagation();
+				return;
+			}
+
+			if (evt.button == 0)
+			{
+				_pressed = true;
+				_pressPosition = evt.localPosition;
+			}
+		}
+
+		private void OnPointerMove(PointerMoveEvent evt)
+		{
+			if (_panning && evt.pointerId == _panPointerId)
+			{
+				var rect = _map.contentRect;
+				if (rect.width > 0f)
+				{
+					var delta = (Vector2)evt.deltaPosition;
+					_viewCenter.x -= delta.x / rect.width * _viewSize;
+					_viewCenter.y += delta.y / rect.height * _viewSize;
+					ClampWindow();
+					RequestRender();
+				}
+				return;
+			}
+
+			SetHover(_analysis?.FindIslandAt(LocalToUv(evt.localPosition), _subMeshFilter));
+		}
+
+		private void OnPointerUp(PointerUpEvent evt)
+		{
+			if (_panning && evt.pointerId == _panPointerId)
+			{
+				_panning = false;
+				_panPointerId = -1;
+				_map.ReleasePointer(evt.pointerId);
+				evt.StopPropagation();
+				return;
+			}
+
+			// パンでないほぼ動かないクリックのみ選択トグルとして扱う
+			if (_pressed && evt.button == 0 && !evt.altKey &&
+			    ((Vector2)evt.localPosition - _pressPosition).sqrMagnitude < 16f)
+			{
+				var island = _analysis?.FindIslandAt(LocalToUv(evt.localPosition), _subMeshFilter);
+				if (island != null)
+					UVIslandSelection.Toggle(_deformer, _analysis, island);
+			}
+			_pressed = false;
+		}
+
+		private void SetHover(UVIslandAnalysis.Island island)
+		{
+			if (_hoverIsland == island)
+				return;
+			_hoverIsland = island;
+			UVIslandSelection.SetHover(_deformer, island);
+			_hoverOverlay.MarkDirtyRepaint();
+		}
+
+		// ---- サブメッシュフィルタ ----
+
+		private void UpdateSubMeshDropdown(Renderer renderer)
+		{
+			var materials = renderer != null ? renderer.sharedMaterials : null;
+			var choices = new List<string> { "全て" };
+			for (var s = 0; s < _analysis.SubMeshCount; s++)
+			{
+				var materialName = materials != null && s < materials.Length && materials[s] != null
+					? materials[s].name
+					: null;
+				choices.Add(materialName != null ? $"{s}: {materialName}" : s.ToString());
+			}
+			_subMeshDropdown.choices = choices;
+
+			if (_subMeshFilter >= _analysis.SubMeshCount)
+				_subMeshFilter = -1;
+			_subMeshDropdown.SetValueWithoutNotify(choices[_subMeshFilter + 1]);
 		}
 
 		private void ReanalyzeMesh()
@@ -182,6 +345,47 @@ namespace MeshModifier.NDMFDeform.Editor
 
 		// ---- UV マップテクスチャ描画 ----
 
+		private void RequestRender()
+		{
+			var now = EditorApplication.timeSinceStartup;
+			if (now - _lastRenderTime >= RenderInterval)
+			{
+				RenderNow();
+				return;
+			}
+			if (_renderQueued)
+				return;
+			_renderQueued = true;
+			var delay = Mathf.Max(1, (int)((RenderInterval - (now - _lastRenderTime)) * 1000));
+			schedule.Execute(() =>
+			{
+				_renderQueued = false;
+				RenderNow();
+			}).ExecuteLater(delay);
+		}
+
+		private void RenderNow()
+		{
+			if (_analysis == null || _analysis.Islands.Count == 0)
+				return;
+
+			_lastRenderTime = EditorApplication.timeSinceStartup;
+
+			var selected = new HashSet<UVIslandAnalysis.Island>(_deformer.ResolveSelectedIslands(_analysis));
+			RegenerateTexture(selected);
+			_hoverOverlay.MarkDirtyRepaint();
+
+			var visibleIslands = 0;
+			foreach (var island in _analysis.Islands)
+			{
+				if (_subMeshFilter < 0 || island.SubMesh == _subMeshFilter)
+					visibleIslands++;
+			}
+			_status.text = _subMeshFilter < 0
+				? $"メッシュ: {_mesh.name} / 島: {_analysis.Islands.Count} / 選択: {selected.Count}"
+				: $"メッシュ: {_mesh.name} / 島: {visibleIslands} (全 {_analysis.Islands.Count}) / 選択: {selected.Count}";
+		}
+
 		private void RegenerateTexture(HashSet<UVIslandAnalysis.Island> selected)
 		{
 			if (_texture == null)
@@ -191,31 +395,36 @@ namespace MeshModifier.NDMFDeform.Editor
 					hideFlags = HideFlags.HideAndDontSave,
 				};
 			}
+			if (_pixels == null)
+				_pixels = new Color[TextureSize * TextureSize];
 
-			var pixels = new Color[TextureSize * TextureSize];
 			var background = new Color(0.15f, 0.15f, 0.15f, 1f);
-			for (var i = 0; i < pixels.Length; i++)
-				pixels[i] = background;
+			for (var i = 0; i < _pixels.Length; i++)
+				_pixels[i] = background;
 
-			DrawGrid(pixels);
+			DrawGrid(_pixels);
 
 			foreach (var island in _analysis.Islands)
 			{
+				if (_subMeshFilter >= 0 && island.SubMesh != _subMeshFilter)
+					continue;
 				var fill = selected.Contains(island)
 					? IslandColor(island.Id)
 					: new Color(0.45f, 0.45f, 0.45f, 0.6f);
-				DrawIslandFill(island, pixels, fill);
+				DrawIslandFill(island, _pixels, fill);
 			}
 
 			foreach (var island in _analysis.Islands)
 			{
+				if (_subMeshFilter >= 0 && island.SubMesh != _subMeshFilter)
+					continue;
 				var wire = selected.Contains(island)
 					? Color.white
 					: new Color(0.7f, 0.7f, 0.7f, 1f);
-				DrawIslandWireframe(island, pixels, wire);
+				DrawIslandWireframe(island, _pixels, wire);
 			}
 
-			_texture.SetPixels(pixels);
+			_texture.SetPixels(_pixels);
 			_texture.Apply(false);
 			_map.style.backgroundImage = _texture;
 		}
@@ -227,39 +436,81 @@ namespace MeshModifier.NDMFDeform.Editor
 			return Color.HSVToRGB(hue, 0.7f, 0.9f);
 		}
 
-		private static void DrawGrid(Color[] pixels)
+		private Vector2 UvToPixel(Vector2 uv)
 		{
+			var min = WindowMin;
+			return new Vector2(
+				(uv.x - min.x) / _viewSize * TextureSize,
+				(uv.y - min.y) / _viewSize * TextureSize);
+		}
+
+		private void DrawGrid(Color[] pixels)
+		{
+			// ズームに応じてグリッド刻みを切替える
+			var step = _viewSize > 2f ? 0.5f : _viewSize > 0.6f ? 0.1f : _viewSize > 0.12f ? 0.05f : 0.01f;
 			var gridColor = new Color(0.25f, 0.25f, 0.25f, 1f);
-			var step = TextureSize / 10;
-			for (var x = 0; x < TextureSize; x += step)
+			var boundsColor = new Color(0.42f, 0.42f, 0.42f, 1f);
+
+			var min = WindowMin;
+			var max = min + Vector2.one * _viewSize;
+
+			for (var u = Mathf.Ceil(min.x / step) * step; u <= max.x; u += step)
+			{
+				var x = Mathf.RoundToInt((u - min.x) / _viewSize * TextureSize);
+				if (x < 0 || x >= TextureSize)
+					continue;
+				var color = Mathf.Abs(u) < step * 0.5f || Mathf.Abs(u - 1f) < step * 0.5f
+					? boundsColor : gridColor;
 				for (var y = 0; y < TextureSize; y++)
-					pixels[y * TextureSize + x] = gridColor;
-			for (var y = 0; y < TextureSize; y += step)
+					pixels[y * TextureSize + x] = color;
+			}
+
+			for (var v = Mathf.Ceil(min.y / step) * step; v <= max.y; v += step)
+			{
+				var y = Mathf.RoundToInt((v - min.y) / _viewSize * TextureSize);
+				if (y < 0 || y >= TextureSize)
+					continue;
+				var color = Mathf.Abs(v) < step * 0.5f || Mathf.Abs(v - 1f) < step * 0.5f
+					? boundsColor : gridColor;
 				for (var x = 0; x < TextureSize; x++)
-					pixels[y * TextureSize + x] = gridColor;
+					pixels[y * TextureSize + x] = color;
+			}
 		}
 
 		private void DrawIslandFill(UVIslandAnalysis.Island island, Color[] pixels, Color color)
 		{
+			// ウィンドウ外の島はスキップ
+			var min = WindowMin;
+			var max = min + Vector2.one * _viewSize;
+			if (island.UvMax.x < min.x || island.UvMin.x > max.x ||
+			    island.UvMax.y < min.y || island.UvMin.y > max.y)
+				return;
+
 			var uvs = _analysis.Uvs;
 			var triangles = island.Triangles;
 			for (var i = 0; i + 2 < triangles.Count; i += 3)
-				FillTriangle(uvs[triangles[i]], uvs[triangles[i + 1]], uvs[triangles[i + 2]], pixels, color);
+			{
+				FillTriangle(
+					UvToPixel(uvs[triangles[i]]),
+					UvToPixel(uvs[triangles[i + 1]]),
+					UvToPixel(uvs[triangles[i + 2]]),
+					pixels, color);
+			}
 		}
 
-		private static void FillTriangle(Vector2 uv0, Vector2 uv1, Vector2 uv2, Color[] pixels, Color color)
+		private static void FillTriangle(Vector2 p0, Vector2 p1, Vector2 p2, Color[] pixels, Color color)
 		{
-			var minX = Mathf.Max(0, Mathf.FloorToInt(Mathf.Min(uv0.x, Mathf.Min(uv1.x, uv2.x)) * TextureSize));
-			var maxX = Mathf.Min(TextureSize - 1, Mathf.CeilToInt(Mathf.Max(uv0.x, Mathf.Max(uv1.x, uv2.x)) * TextureSize));
-			var minY = Mathf.Max(0, Mathf.FloorToInt(Mathf.Min(uv0.y, Mathf.Min(uv1.y, uv2.y)) * TextureSize));
-			var maxY = Mathf.Min(TextureSize - 1, Mathf.CeilToInt(Mathf.Max(uv0.y, Mathf.Max(uv1.y, uv2.y)) * TextureSize));
+			var minX = Mathf.Max(0, Mathf.FloorToInt(Mathf.Min(p0.x, Mathf.Min(p1.x, p2.x))));
+			var maxX = Mathf.Min(TextureSize - 1, Mathf.CeilToInt(Mathf.Max(p0.x, Mathf.Max(p1.x, p2.x))));
+			var minY = Mathf.Max(0, Mathf.FloorToInt(Mathf.Min(p0.y, Mathf.Min(p1.y, p2.y))));
+			var maxY = Mathf.Min(TextureSize - 1, Mathf.CeilToInt(Mathf.Max(p0.y, Mathf.Max(p1.y, p2.y))));
 
 			for (var y = minY; y <= maxY; y++)
 			{
 				for (var x = minX; x <= maxX; x++)
 				{
-					var point = new Vector2((x + 0.5f) / TextureSize, (y + 0.5f) / TextureSize);
-					if (UVIslandAnalysis.IsPointInTriangle(point, uv0, uv1, uv2))
+					var point = new Vector2(x + 0.5f, y + 0.5f);
+					if (UVIslandAnalysis.IsPointInTriangle(point, p0, p1, p2))
 					{
 						var index = y * TextureSize + x;
 						pixels[index] = Color.Lerp(pixels[index], color, 0.6f);
@@ -270,23 +521,35 @@ namespace MeshModifier.NDMFDeform.Editor
 
 		private void DrawIslandWireframe(UVIslandAnalysis.Island island, Color[] pixels, Color color)
 		{
+			var min = WindowMin;
+			var max = min + Vector2.one * _viewSize;
+			if (island.UvMax.x < min.x || island.UvMin.x > max.x ||
+			    island.UvMax.y < min.y || island.UvMin.y > max.y)
+				return;
+
 			var uvs = _analysis.Uvs;
 			var triangles = island.Triangles;
 			for (var i = 0; i + 2 < triangles.Count; i += 3)
 			{
-				DrawLine(uvs[triangles[i]], uvs[triangles[i + 1]], pixels, color);
-				DrawLine(uvs[triangles[i + 1]], uvs[triangles[i + 2]], pixels, color);
-				DrawLine(uvs[triangles[i + 2]], uvs[triangles[i]], pixels, color);
+				var p0 = UvToPixel(uvs[triangles[i]]);
+				var p1 = UvToPixel(uvs[triangles[i + 1]]);
+				var p2 = UvToPixel(uvs[triangles[i + 2]]);
+				DrawLine(p0, p1, pixels, color);
+				DrawLine(p1, p2, pixels, color);
+				DrawLine(p2, p0, pixels, color);
 			}
 		}
 
-		/// <summary>UV 空間の線分を Bresenham で描画(テクスチャは下原点なので Y 反転しない)</summary>
+		/// <summary>ピクセル空間の線分をテクスチャ範囲へクリップしてから Bresenham で描画</summary>
 		private static void DrawLine(Vector2 start, Vector2 end, Color[] pixels, Color color)
 		{
-			var x0 = Mathf.RoundToInt(start.x * TextureSize);
-			var y0 = Mathf.RoundToInt(start.y * TextureSize);
-			var x1 = Mathf.RoundToInt(end.x * TextureSize);
-			var y1 = Mathf.RoundToInt(end.y * TextureSize);
+			if (!ClipLine(ref start, ref end))
+				return;
+
+			var x0 = Mathf.RoundToInt(start.x);
+			var y0 = Mathf.RoundToInt(start.y);
+			var x1 = Mathf.RoundToInt(end.x);
+			var y1 = Mathf.RoundToInt(end.y);
 
 			var dx = Mathf.Abs(x1 - x0);
 			var dy = Mathf.Abs(y1 - y0);
@@ -319,6 +582,59 @@ namespace MeshModifier.NDMFDeform.Editor
 			}
 		}
 
+		/// <summary>Liang–Barsky によるテクスチャ範囲への線分クリップ(ズーム時の遠距離座標対策)</summary>
+		private static bool ClipLine(ref Vector2 a, ref Vector2 b)
+		{
+			var d = b - a;
+			float t0 = 0f, t1 = 1f;
+			if (!ClipT(-d.x, a.x, ref t0, ref t1)) return false;
+			if (!ClipT(d.x, TextureSize - 1 - a.x, ref t0, ref t1)) return false;
+			if (!ClipT(-d.y, a.y, ref t0, ref t1)) return false;
+			if (!ClipT(d.y, TextureSize - 1 - a.y, ref t0, ref t1)) return false;
+
+			var start = a;
+			b = start + d * t1;
+			a = start + d * t0;
+			return true;
+		}
+
+		private static bool ClipT(float p, float q, ref float t0, ref float t1)
+		{
+			if (Mathf.Approximately(p, 0f))
+				return q >= 0f;
+			var r = q / p;
+			if (p < 0f)
+			{
+				if (r > t1) return false;
+				if (r > t0) t0 = r;
+			}
+			else
+			{
+				if (r < t0) return false;
+				if (r < t1) t1 = r;
+			}
+			return true;
+		}
+
+		// ---- ホバー輪郭(ベクタ描画) ----
+
+		private void DrawHoverOverlay(MeshGenerationContext ctx)
+		{
+			if (_hoverIsland == null || _analysis == null)
+				return;
+
+			var painter = ctx.painter2D;
+			painter.strokeColor = new Color(1f, 0.9f, 0.2f, 0.95f);
+			painter.lineWidth = 2f;
+			painter.BeginPath();
+			foreach (var edge in _hoverIsland.BorderEdges)
+			{
+				painter.MoveTo(UvToLocal(new Vector2(edge.x, edge.y)));
+				painter.LineTo(UvToLocal(new Vector2(edge.z, edge.w)));
+			}
+			painter.Stroke();
+		}
+
 		private void DestroyTexture()
 		{
 			if (_texture != null)
@@ -326,6 +642,7 @@ namespace MeshModifier.NDMFDeform.Editor
 				Object.DestroyImmediate(_texture);
 				_texture = null;
 			}
+			_pixels = null;
 		}
 	}
 }
