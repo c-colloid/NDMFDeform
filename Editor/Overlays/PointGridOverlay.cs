@@ -2,6 +2,7 @@ using MeshModifier.NDMFDeform.Core;
 using UnityEditor;
 using UnityEditor.Overlays;
 using UnityEditor.UIElements;
+using UnityEngine;
 using UnityEngine.UIElements;
 
 namespace MeshModifier.NDMFDeform.Editor
