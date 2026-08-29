@@ -22,7 +22,7 @@ namespace MeshModifier.NDMFDeform.NDMF
 			var groups = new List<RenderGroup>();
 			foreach (var stack in context.GetComponentsByType<DeformStack>())
 			{
-				if (stack.GetComponent<Renderer>() is Renderer renderer)
+				if (stack.TryGetComponent<Renderer>(out var renderer))
 					groups.Add(RenderGroup.For(renderer));
 			}
 			return groups.ToImmutableList();
@@ -80,7 +80,7 @@ namespace MeshModifier.NDMFDeform.NDMF
 				{
 					proxySmr.sharedMesh = _baked;
 				}
-				else if (proxy is MeshRenderer && proxy.GetComponent<MeshFilter>() is MeshFilter proxyFilter)
+				else if (proxy is MeshRenderer && proxy.TryGetComponent<MeshFilter>(out var proxyFilter))
 				{
 					proxyFilter.sharedMesh = _baked;
 				}

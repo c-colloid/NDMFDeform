@@ -76,9 +76,9 @@ namespace MeshModifier.NDMFDeform.Core
 			if (stack == null) return;
 
 			Mesh mesh = null;
-			if (stack.GetComponent<SkinnedMeshRenderer>() is SkinnedMeshRenderer smr)
+			if (stack.TryGetComponent<SkinnedMeshRenderer>(out var smr))
 				mesh = smr.sharedMesh;
-			else if (stack.GetComponent<MeshFilter>() is MeshFilter mf)
+			else if (stack.TryGetComponent<MeshFilter>(out var mf))
 				mesh = mf.sharedMesh;
 			if (mesh == null) return;
 
