@@ -52,12 +52,23 @@ namespace MeshModifier.NDMFDeform.Editor
 
 			var sliceLabel = new Label("スライス位置");
 			sliceLabel.style.minWidth = 80;
+			sliceLabel.style.flexShrink = 0;
 			var minus = new Button { text = "−" };
+			minus.style.width = 22;
+			minus.style.flexShrink = 0;
 			var indexField = new IntegerField { value = PointGridViewState.SliceIndex };
-			indexField.style.minWidth = 36;
+			// IntegerField は既定で flex-grow するため、幅を固定しないと
+			// 行の残り幅を占有して + ボタンと上限表示が押し出される
+			indexField.style.flexGrow = 0;
+			indexField.style.flexShrink = 0;
+			indexField.style.width = 44;
 			var plus = new Button { text = "+" };
+			plus.style.width = 22;
+			plus.style.flexShrink = 0;
 			var rangeLabel = new Label($"/ {SliceMaxIndex()}");
 			rangeLabel.style.opacity = 0.7f;
+			rangeLabel.style.marginLeft = 4;
+			rangeLabel.style.flexShrink = 0;
 
 			void SetSliceIndex(int value)
 			{
