@@ -2,7 +2,7 @@
   "name": "jp.colloid.nemfdeform",
   "author": "ｺﾛｲﾄﾞ",
   "displayName": "NDMFDeform",
-  "version": "0.9.0",
+  "version": "0.1.0",
   "unity": "2022.3",
   "description": "Plug-in to run Deform nondestructively.",
   "category": "Unity",
@@ -22,5 +22,8 @@
   "vpmDependencies": {
     "nadena.dev.ndmf": ">=1.5.0",
     "jp.colloid.uitk-font-fix": ">=0.1.0"
+  },
+  "legacyFolders": {
+    "Assets\\NDMFDeform": ""
   }
 }

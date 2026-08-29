@@ -431,14 +431,21 @@ EditMode テスト(golden mesh: 入力メッシュ + パラメータ → 期待�
 | M3 | Lattice + PointGrid(選択・矩形・ミラー) | 0.3.0 |
 | M4 | UVIslandMask(マスク段 + UVIslandSelectorView) | 0.4.0 |
 | M5 | ブレンドシェイプ再ベイク + タンジェント + 法線保持オプション + golden mesh テスト整備 | 0.5.0 |
-| M6 | 移行ツール → フォーク削除 → パッケージング整備(vpmDependencies、タグ、VPM リスティング、THIRD-PARTY-NOTICES)。UITK Font Fix(jp.colloid.uitk-font-fix)も同じ VPM リスティングへ登録し、vpmDependencies による自動取得を成立させる。将来的には OpenUPM への登録も併用し、UPM 経路でも依存自動解決を可能にする(スコープドレジストリ追加が前提) | 1.0.0 |
-| M7(候補) | **Bake as BlendShape**: デフォーマ効果をブレンドシェイプとして焼き込み、Animator / Udon から駆動(§2.1 の橋渡し機能) | 1.1.0 |
+| M6 | 移行ツール → フォーク削除 → パッケージング整備(vpmDependencies、タグ、VPM リスティング、THIRD-PARTY-NOTICES)。UITK Font Fix(jp.colloid.uitk-font-fix)も同じ VPM リスティングへ登録し、vpmDependencies による自動取得を成立させる。将来的には OpenUPM への登録も併用し、UPM 経路でも依存自動解決を可能にする(スコープドレジストリ追加が前提) | 0.1.0 / 0.2.0 |
+| M7(候補) | **Bake as BlendShape**: デフォーマ効果をブレンドシェイプとして焼き込み、Animator / Udon から駆動(§2.1 の橋渡し機能) | 0.x |
 
-リリース経路(2026-08-29 決定): 旧パッケージと同名(`jp.colloid.nemfdeform`)のため、
-フォーク削除版へ直接更新すると旧コンポーネントが Missing Script になり移行不能になる。そこで
-**0.9.0 = フォーク同梱 + v2 + 移行ツールの「移行リリース」**を先に配布し、既存ユーザーは
-そこで移行してから **1.0.0(フォーク削除後)** へ更新する 2 段構えとする。
-VPM リスティングは新規リポジトリ(c-colloid)を作成して配信し、NDMFDeform と
+リリース経路(2026-08-29 決定、同日 0.x 管理へ改訂): 旧パッケージと同名(`jp.colloid.nemfdeform`)の
+ため、フォーク削除版へ直接更新すると旧コンポーネントが Missing Script になり移行不能になる。そこで
+
+- **0.1.0(移行リリース)** = フォーク同梱 + v2 + 移行ツール。既存ユーザーはここで移行する
+- **0.2.0** = フォーク削除後の本体。1.0.0 は安定後まで先送りし、当面 0.x で管理する
+
+配布は VPM で `Packages/` へ展開し、`package.json` の **`legacyFolders`**(`Assets\NDMFDeform`)
+により旧 Assets 展開のフォルダを VCC/ALCOM が自動削除する。フォークの .meta GUID は
+リポジトリ由来で新旧同一のため、旧フォルダ削除 → パッケージ内フォークへの参照差し替えは
+GUID 一致でシーン参照が維持され、その状態で移行ツールを実行できる。
+上表 M1〜M5 の出荷物列は当初計画の番号であり、実際には 0.1.0 に一括で含まれる。
+VPM リスティングは新規リポジトリ(c-colloid/vpm-repos)から配信し、NDMFDeform と
 UITK Font Fix の両方を登録する。
 
 現行 main(v0.0.x 系)への Phase 0 的なバグ修正(GameObject 誤削除・SMR キャスト等)は、
