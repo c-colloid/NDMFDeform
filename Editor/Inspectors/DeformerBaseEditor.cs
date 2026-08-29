@@ -22,6 +22,8 @@ namespace MeshModifier.NDMFDeform.Editor
 
 		private double _lastApplyTime;
 		private bool _hasPendingChanges;
+		private readonly System.Collections.Generic.Dictionary<string, PointGridController> _pointGrids =
+			new System.Collections.Generic.Dictionary<string, PointGridController>();
 
 		public override VisualElement CreateInspectorGUI()
 		{
@@ -64,7 +66,7 @@ namespace MeshModifier.NDMFDeform.Editor
 			if (!_hasPendingChanges)
 				serializedObject.UpdateIfRequiredOrScript();
 
-			var builder = new SceneHandleBuilder(serializedObject);
+			var builder = new SceneHandleBuilder(serializedObject, _pointGrids);
 			using (new Handles.DrawingScope(Matrix4x4.TRS(axis.position, axis.rotation, axis.lossyScale)))
 			{
 				deformer.DescribeHandles(builder);

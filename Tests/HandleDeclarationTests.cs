@@ -44,6 +44,13 @@ namespace MeshModifier.NDMFDeform.Tests
 			public void Position(string property) => Check(property);
 
 			public void Line(Vector3 from, Vector3 to, HandleLineStyle style) { }
+
+			public void PointGrid(string pointsProperty, Vector3Int resolution, string mirrorAxisProperty)
+			{
+				Check(pointsProperty);
+				if (mirrorAxisProperty != null)
+					Check(mirrorAxisProperty);
+			}
 		}
 
 		[Test]

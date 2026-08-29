@@ -41,6 +41,17 @@ namespace MeshModifier.NDMFDeform.Core
 
 		/// <summary>表示専用の線分(軸空間)</summary>
 		void Line(Vector3 from, Vector3 to, HandleLineStyle style = HandleLineStyle.Solid);
+
+		/// <summary>
+		/// 格子制御点編集(Lattice 等)。
+		/// pointsProperty は float3[] のシリアライズフィールド(軸空間 [-0.5,0.5] の位置)、
+		/// resolution はその格子分割数。
+		/// mirrorAxisProperty(任意)は MirrorAxis のシリアライズフィールドで、
+		/// 編集時の対称マッピング(選択・移動の対称側反映)に使う。
+		/// クリック / Shift 追加 / 矩形 / Ctrl ループ選択 / Ctrl+Shift シート選択、
+		/// 奥点フェード・スライス表示はフレームワーク側が提供する。
+		/// </summary>
+		void PointGrid(string pointsProperty, Vector3Int resolution, string mirrorAxisProperty = null);
 	}
 }
 #endif

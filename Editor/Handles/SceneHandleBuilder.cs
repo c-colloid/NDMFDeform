@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using MeshModifier.NDMFDeform.Core;
 using UnityEditor;
 using UnityEngine;
@@ -15,12 +16,27 @@ namespace MeshModifier.NDMFDeform.Editor
 		private static readonly Color DottedTint = new Color(1f, 1f, 1f, 0.4f);
 
 		private readonly SerializedObject _serializedObject;
+		private readonly Dictionary<string, PointGridController> _pointGrids;
 
 		public bool Changed { get; private set; }
 
-		public SceneHandleBuilder(SerializedObject serializedObject)
+		public SceneHandleBuilder(SerializedObject serializedObject,
+			Dictionary<string, PointGridController> pointGrids = null)
 		{
 			_serializedObject = serializedObject;
+			_pointGrids = pointGrids;
+		}
+
+		public void PointGrid(string pointsProperty, Vector3Int resolution, string mirrorAxisProperty = null)
+		{
+			if (_pointGrids == null) return;
+			if (!_pointGrids.TryGetValue(pointsProperty, out var controller))
+			{
+				controller = new PointGridController();
+				_pointGrids[pointsProperty] = controller;
+			}
+			if (controller.OnSceneGUI(_serializedObject, pointsProperty, resolution, mirrorAxisProperty))
+				Changed = true;
 		}
 
 		public void AxisSlider(string property, HandleAxis along, HandleLineStyle style = HandleLineStyle.Solid)
