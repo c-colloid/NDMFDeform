@@ -114,7 +114,11 @@ namespace MeshModifier.NDMFDeform.Editor
 						}
 						else
 						{
-							report.UnsupportedDeformers.Add($"{go.name}: {component.GetType().Name}");
+							// Missing Script は型が素の MonoBehaviour として現れる
+							var label = component.GetType() == typeof(MonoBehaviour)
+								? "Missing Script(参照切れ)"
+								: component.GetType().Name;
+							report.UnsupportedDeformers.Add($"{go.name}: {label}");
 							fullyMigrated = false;
 						}
 					}
