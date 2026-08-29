@@ -27,5 +27,11 @@ namespace MeshModifier.NDMFDeform.Core
 		[SerializeField] private List<DeformerEntry> deformers = new List<DeformerEntry>();
 
 		public IReadOnlyList<DeformerEntry> Deformers => deformers;
+
+		/// <summary>スタック末尾にデフォーマを追加する(テスト・移行ツール用 API)</summary>
+		public void AddDeformer(DeformerBase deformer, bool enabled = true)
+		{
+			deformers.Add(new DeformerEntry { deformer = deformer, enabled = enabled });
+		}
 	}
 }
