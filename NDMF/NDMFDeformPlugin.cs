@@ -16,7 +16,9 @@ namespace MeshModifier.NDMFDeform.NDMF
 
 		protected override void Configure()
 		{
-			// M1: InPhase(BuildPhase.Transforming) — DeformStack のベイクパスをここに実装する
+			InPhase(BuildPhase.Transforming)
+				.Run("Bake Deform Stacks", ctx => BakeDeformStacksPass.Run(ctx))
+				.PreviewingWith(new DeformStackPreview());
 		}
 	}
 }

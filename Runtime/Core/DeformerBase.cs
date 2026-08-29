@@ -18,6 +18,13 @@ namespace MeshModifier.NDMFDeform.Core
 		public abstract DeformDataFlags DataFlags { get; }
 
 		/// <summary>
+		/// 変形の基準となる軸 Transform。既定は自身の Transform
+		/// (デフォーマは軸として使う GameObject に付ける)。
+		/// ベイクコアはこの Transform から DeformSpace を計算する。
+		/// </summary>
+		public virtual Transform Axis => transform;
+
+		/// <summary>
 		/// 変形ジョブをスケジュールする。
 		/// バッファへのインプレース変形のみ許可(頂点数・順序は変更不可)。
 		/// </summary>
