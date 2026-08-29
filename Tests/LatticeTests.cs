@@ -144,7 +144,7 @@ namespace MeshModifier.NDMFDeform.Tests
 			var ring = PointGridUtility.RingIndices(res, HandleAxis.Y, new Vector3Int(1, 1, 1));
 
 			Assert.That(ring.Count, Is.EqualTo(8));
-			Assert.That(ring, Does.Not.Contain(PointGridUtility.GetIndex(res, 1, 1, 1)));
+			Assert.That(ring, Has.No.Member(PointGridUtility.GetIndex(res, 1, 1, 1)));
 			foreach (var i in ring)
 				Assert.That(PointGridUtility.GetCoord(res, i).y, Is.EqualTo(1));
 		}
