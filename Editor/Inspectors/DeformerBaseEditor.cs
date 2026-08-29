@@ -64,6 +64,7 @@ namespace MeshModifier.NDMFDeform.Editor
 		public override VisualElement CreateInspectorGUI()
 		{
 			var root = new VisualElement();
+			NdmfDeformFonts.ApplyEditorUiFont(root);
 
 			var meta = (DeformerMetaAttribute)System.Attribute.GetCustomAttribute(
 				target.GetType(), typeof(DeformerMetaAttribute));

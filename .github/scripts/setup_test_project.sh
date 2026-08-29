@@ -34,6 +34,15 @@ if [ -d "$NDMF/Dependencies~" ]; then
     mv "$NDMF/Dependencies~" "$NDMF/Dependencies"
 fi
 
+# UITK Font Fix(ソフト依存): 併存させて UITK_FONT_FIX 経路もコンパイル検証する
+FONTFIX="$PROJ/Packages/jp.colloid.uitk-font-fix"
+if [ ! -d "$FONTFIX" ]; then
+    FONTFIX_TMP="$PROJ/Packages/.uitkfontfix-tmp"
+    git clone --depth 1 https://github.com/c-colloid/UITKFontFix.git "$FONTFIX_TMP"
+    mv "$FONTFIX_TMP/jp.colloid.uitk-font-fix" "$FONTFIX"
+    rm -rf "$FONTFIX_TMP"
+fi
+
 cat > "$PROJ/Packages/manifest.json" <<'MANIFEST'
 {
   "dependencies": {

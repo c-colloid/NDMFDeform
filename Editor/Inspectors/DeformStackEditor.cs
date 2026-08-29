@@ -16,6 +16,7 @@ namespace MeshModifier.NDMFDeform.Editor
 		public override VisualElement CreateInspectorGUI()
 		{
 			var root = new VisualElement();
+			NdmfDeformFonts.ApplyEditorUiFont(root);
 			root.Add(new PropertyField(serializedObject.FindProperty("deformers")));
 			return root;
 		}

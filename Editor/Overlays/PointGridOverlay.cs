@@ -20,6 +20,7 @@ namespace MeshModifier.NDMFDeform.Editor
 		public override VisualElement CreatePanelContent()
 		{
 			var root = new VisualElement();
+			NdmfDeformFonts.ApplyEditorUiFont(root);
 			root.style.minWidth = 200;
 
 			// 奥点の表示モード
