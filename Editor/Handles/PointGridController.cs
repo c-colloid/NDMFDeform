@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Reflection;
 using MeshModifier.NDMFDeform.Core;
 using Unity.Mathematics;
 using UnityEditor;
@@ -47,17 +48,15 @@ namespace MeshModifier.NDMFDeform.Editor
 	/// 格子制御点編集の対話コア。DeformerBaseEditor が保持し、
 	/// 軸空間の Handles.DrawingScope 内で毎フレーム呼ばれる。
 	///
-	/// 座標系: 制御点の位置変換のみ軸行列を通し、キャップの描画・操作は
-	/// ワールド空間(恒等行列)で行う。軸 Transform が非一様スケールでも
-	/// ギズモ(点・移動矢印)が潰れないようにするため。
-	/// 選択はエディタセッション状態(非シリアライズ)、
-	/// 制御点の編集は SerializedProperty 経由(Undo は Unity 任せ)。
+	/// パフォーマンス設計: SerializedProperty の読み取りは要素毎に遅く
+	/// アロケーションも発生するため、読み取りはリフレクションで実フィールドの
+	/// float3[] を直接参照し、イベント毎に 1 回だけ位置キャッシュを構築する
+	/// (ドラッグ中の未適用編集がありうる選択点と鏡像相手のみプロパティから上書き)。
+	/// 書き込み(Undo 対象)のみ SerializedProperty 経由で行う。
+	/// ワイヤーフレームは Handles.DrawLines による一括描画。
 	///
-	/// ミラー規則(フォーク版ベイク時ミラーのバグを踏まえた設計):
-	/// - ミラー面は格子中心(対象成分 = 0)に固定。中心 Transform の変換は行わない
-	/// - 相手側の点には「主点の新しい位置の鏡像」を書き込む(対称性を強制)
-	/// - 相手が自分自身(奇数解像度の中心面上)の場合は制約しない
-	/// - 主点と相手の両方が選択中の場合は素のデルタのみ適用(二重適用防止)
+	/// 座標系: 位置変換のみ軸行列を通し、キャップの描画・操作はワールド空間。
+	/// ミラー規則: 面は格子中心固定 / 中心面上の点は制約しない / 両側選択時は素のデルタのみ。
 	/// </summary>
 	internal class PointGridController
 	{
@@ -65,6 +64,9 @@ namespace MeshModifier.NDMFDeform.Editor
 		private static readonly Color SelectedColor = new Color(1f, 0.65f, 0.1f, 1f);
 		private static readonly Color OccludedTint = new Color(1f, 1f, 1f, 0.25f);
 		private static readonly Color WireColor = new Color(1f, 1f, 1f, 0.25f);
+
+		private static readonly Dictionary<(System.Type, string), FieldInfo> FieldCache =
+			new Dictionary<(System.Type, string), FieldInfo>();
 
 		private readonly HashSet<int> _selection = new HashSet<int>();
 		private Vector3Int _lastResolution;
@@ -76,6 +78,15 @@ namespace MeshModifier.NDMFDeform.Editor
 		private Matrix4x4 _axisMatrix = Matrix4x4.identity;
 		private Matrix4x4 _axisInverse = Matrix4x4.identity;
 
+		// イベント毎に構築する位置キャッシュ
+		private float3[] _localCache = System.Array.Empty<float3>();
+		private Vector3[] _worldCache = System.Array.Empty<Vector3>();
+
+		// ワイヤーフレームの線分バッファ(構成が変わった時のみ組み直す)
+		private Vector3[] _wireSegments = System.Array.Empty<Vector3>();
+		private int[] _wireIndexPairs = System.Array.Empty<int>();
+		private (Vector3Int res, bool slice, HandleAxis axis, int index) _wireConfig;
+
 		/// <summary>true を返したらプロパティが変更された(呼び出し側が Apply する)</summary>
 		public bool OnSceneGUI(SerializedObject serializedObject, string pointsProperty,
 			Vector3Int resolution, string mirrorAxisProperty)
@@ -85,7 +96,6 @@ namespace MeshModifier.NDMFDeform.Editor
 			if (points == null || !points.isArray || points.arraySize != count || count == 0)
 				return false;
 
-			// 位置変換用に軸行列を控え、描画・操作はワールド空間で行う
 			_axisMatrix = Handles.matrix;
 			if (Mathf.Abs(_axisMatrix.determinant) < 1e-12f)
 				return false;
@@ -105,6 +115,7 @@ namespace MeshModifier.NDMFDeform.Editor
 			}
 
 			ConsumePendingCommand(count);
+			RefreshCaches(serializedObject, points, count, resolution, mirror);
 
 			var sliceOnly = PointGridViewState.SliceEnabled;
 			var sliceAxis = PointGridViewState.SliceAxis;
@@ -113,37 +124,93 @@ namespace MeshModifier.NDMFDeform.Editor
 			var changed = false;
 			using (new Handles.DrawingScope(Matrix4x4.identity))
 			{
-				DrawWireframe(points, resolution, sliceOnly, sliceAxis, sliceIndex);
-				DrawPointsAndPick(points, resolution, sliceOnly, sliceAxis, sliceIndex);
-				HandleMarquee(points, resolution, sliceOnly, sliceAxis, sliceIndex);
+				DrawWireframe(resolution, sliceOnly, sliceAxis, sliceIndex);
+				DrawPointsAndPick(resolution, sliceOnly, sliceAxis, sliceIndex);
+				HandleMarquee(resolution, sliceOnly, sliceAxis, sliceIndex);
 				changed = MoveSelection(points, resolution, mirror);
 			}
 
 			return changed;
 		}
 
-		private Vector3 ToWorld(SerializedProperty points, int index)
+		/// <summary>
+		/// 位置キャッシュを構築する。読み取りは実フィールドの float3[] 直接参照
+		/// (未適用の編集がありうる選択点・鏡像相手のみ SerializedProperty から上書き)。
+		/// </summary>
+		private void RefreshCaches(SerializedObject serializedObject, SerializedProperty points,
+			int count, Vector3Int resolution, MirrorAxis mirror)
 		{
-			return _axisMatrix.MultiplyPoint3x4((Vector3)GetPoint(points, index));
+			if (_localCache.Length != count)
+			{
+				_localCache = new float3[count];
+				_worldCache = new Vector3[count];
+			}
+
+			var fast = TryGetFieldArray(serializedObject.targetObject, points.name);
+			if (fast != null && fast.Length == count)
+			{
+				System.Array.Copy(fast, _localCache, count);
+			}
+			else
+			{
+				for (var i = 0; i < count; i++)
+					_localCache[i] = GetPoint(points, i);
+			}
+
+			foreach (var i in _selection)
+			{
+				_localCache[i] = GetPoint(points, i);
+				if (mirror != MirrorAxis.None)
+				{
+					var partner = PointGridUtility.MirrorIndex(resolution, i, mirror);
+					if (partner != i)
+						_localCache[partner] = GetPoint(points, partner);
+				}
+			}
+
+			for (var i = 0; i < count; i++)
+				_worldCache[i] = _axisMatrix.MultiplyPoint3x4((Vector3)_localCache[i]);
 		}
 
-		private void DrawPointsAndPick(SerializedProperty points, Vector3Int resolution,
+		private static float3[] TryGetFieldArray(Object target, string fieldName)
+		{
+			if (target == null) return null;
+			var key = (target.GetType(), fieldName);
+			if (!FieldCache.TryGetValue(key, out var field))
+			{
+				for (var type = target.GetType(); type != null && field == null; type = type.BaseType)
+				{
+					field = type.GetField(fieldName,
+						BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic |
+						BindingFlags.DeclaredOnly);
+				}
+				FieldCache[key] = field;
+			}
+			return field?.GetValue(target) as float3[];
+		}
+
+		private void DrawPointsAndPick(Vector3Int resolution,
 			bool sliceOnly, HandleAxis sliceAxis, int sliceIndex)
 		{
 			var evt = Event.current;
-			var count = points.arraySize;
-			for (var i = 0; i < count; i++)
+			var isRepaint = evt.type == EventType.Repaint;
+			var fade = PointGridViewState.OcclusionMode == PointGridOcclusionMode.Fade;
+			var frontZTest = PointGridViewState.OcclusionMode == PointGridOcclusionMode.ShowAll
+				? CompareFunction.Always
+				: CompareFunction.LessEqual;
+
+			for (var i = 0; i < _worldCache.Length; i++)
 			{
-				var coord = PointGridUtility.GetCoord(resolution, i);
-				if (sliceOnly && AxisCoord(coord, sliceAxis) != sliceIndex)
+				if (sliceOnly && AxisCoord(PointGridUtility.GetCoord(resolution, i), sliceAxis) != sliceIndex)
 					continue;
 
-				var world = ToWorld(points, i);
-				var size = HandleUtility.GetHandleSize(world) * 0.06f * (_selection.Contains(i) ? 1.25f : 1f);
-				var color = _selection.Contains(i) ? SelectedColor : UnselectedColor;
+				var world = _worldCache[i];
+				var selected = _selection.Contains(i);
+				var size = HandleUtility.GetHandleSize(world) * 0.06f * (selected ? 1.25f : 1f);
+				var color = selected ? SelectedColor : UnselectedColor;
 
 				// 奥側(遮蔽)パス: フェード表示
-				if (PointGridViewState.OcclusionMode == PointGridOcclusionMode.Fade && evt.type == EventType.Repaint)
+				if (fade && isRepaint)
 				{
 					Handles.zTest = CompareFunction.Greater;
 					Handles.color = color * OccludedTint;
@@ -151,16 +218,14 @@ namespace MeshModifier.NDMFDeform.Editor
 				}
 
 				// 手前パス + クリック判定
-				Handles.zTest = PointGridViewState.OcclusionMode == PointGridOcclusionMode.ShowAll
-					? CompareFunction.Always
-					: CompareFunction.LessEqual;
+				Handles.zTest = frontZTest;
 				Handles.color = color;
 				if (Handles.Button(world, Quaternion.identity, size, size * 1.4f, Handles.DotHandleCap))
 				{
-					ApplyClickSelection(i, coord, resolution, evt.modifiers);
+					ApplyClickSelection(i, PointGridUtility.GetCoord(resolution, i), resolution, evt.modifiers);
 				}
-				Handles.zTest = CompareFunction.Always;
 			}
+			Handles.zTest = CompareFunction.Always;
 		}
 
 		private bool MoveSelection(SerializedProperty points, Vector3Int resolution, MirrorAxis mirror)
@@ -170,7 +235,7 @@ namespace MeshModifier.NDMFDeform.Editor
 
 			var pivot = Vector3.zero;
 			foreach (var i in _selection)
-				pivot += ToWorld(points, i);
+				pivot += _worldCache[i];
 			pivot /= _selection.Count;
 
 			EditorGUI.BeginChangeCheck();
@@ -182,14 +247,21 @@ namespace MeshModifier.NDMFDeform.Editor
 			var localDelta = (float3)_axisInverse.MultiplyVector(newPivot - pivot);
 			foreach (var i in _selection)
 			{
-				var newPos = GetPoint(points, i) + localDelta;
+				var newPos = _localCache[i] + localDelta;
 				SetPoint(points, i, newPos);
+				_localCache[i] = newPos;
+				_worldCache[i] = _axisMatrix.MultiplyPoint3x4((Vector3)newPos);
 
 				if (mirror != MirrorAxis.None)
 				{
 					var partner = PointGridUtility.MirrorIndex(resolution, i, mirror);
 					if (partner != i && !_selection.Contains(partner))
-						SetPoint(points, partner, PointGridUtility.MirrorPosition(newPos, mirror));
+					{
+						var mirrored = PointGridUtility.MirrorPosition(newPos, mirror);
+						SetPoint(points, partner, mirrored);
+						_localCache[partner] = mirrored;
+						_worldCache[partner] = _axisMatrix.MultiplyPoint3x4((Vector3)mirrored);
+					}
 				}
 			}
 			return true;
@@ -231,7 +303,7 @@ namespace MeshModifier.NDMFDeform.Editor
 				_selection.Add(i);
 		}
 
-		private void HandleMarquee(SerializedProperty points, Vector3Int resolution,
+		private void HandleMarquee(Vector3Int resolution,
 			bool sliceOnly, HandleAxis sliceAxis, int sliceIndex)
 		{
 			var evt = Event.current;
@@ -268,13 +340,12 @@ namespace MeshModifier.NDMFDeform.Editor
 							_selection.Clear();
 						if (!isClick)
 						{
-							var count = points.arraySize;
-							for (var i = 0; i < count; i++)
+							for (var i = 0; i < _worldCache.Length; i++)
 							{
-								var coord = PointGridUtility.GetCoord(resolution, i);
-								if (sliceOnly && AxisCoord(coord, sliceAxis) != sliceIndex)
+								if (sliceOnly &&
+								    AxisCoord(PointGridUtility.GetCoord(resolution, i), sliceAxis) != sliceIndex)
 									continue;
-								var gui = HandleUtility.WorldToGUIPoint(ToWorld(points, i));
+								var gui = HandleUtility.WorldToGUIPoint(_worldCache[i]);
 								if (rect.Contains(gui))
 									_selection.Add(i);
 							}
@@ -322,13 +393,28 @@ namespace MeshModifier.NDMFDeform.Editor
 			SceneView.RepaintAll();
 		}
 
-		private void DrawWireframe(SerializedProperty points, Vector3Int res,
-			bool sliceOnly, HandleAxis sliceAxis, int sliceIndex)
+		private void DrawWireframe(Vector3Int res, bool sliceOnly, HandleAxis sliceAxis, int sliceIndex)
 		{
 			if (Event.current.type != EventType.Repaint) return;
 
+			var config = (res, sliceOnly, sliceAxis, sliceIndex);
+			if (_wireConfig != config || _wireIndexPairs.Length == 0)
+			{
+				RebuildWireIndexPairs(res, sliceOnly, sliceAxis, sliceIndex);
+				_wireConfig = config;
+			}
+
+			for (var s = 0; s < _wireIndexPairs.Length; s++)
+				_wireSegments[s] = _worldCache[_wireIndexPairs[s]];
+
 			Handles.zTest = CompareFunction.Always;
 			Handles.color = WireColor;
+			Handles.DrawLines(_wireSegments);
+		}
+
+		private void RebuildWireIndexPairs(Vector3Int res, bool sliceOnly, HandleAxis sliceAxis, int sliceIndex)
+		{
+			var pairs = new List<int>();
 			for (var z = 0; z < res.z; z++)
 			for (var y = 0; y < res.y; y++)
 			for (var x = 0; x < res.x; x++)
@@ -337,14 +423,25 @@ namespace MeshModifier.NDMFDeform.Editor
 				if (sliceOnly && AxisCoord(c, sliceAxis) != sliceIndex)
 					continue;
 
-				var from = ToWorld(points, PointGridUtility.GetIndex(res, x, y, z));
+				var from = PointGridUtility.GetIndex(res, x, y, z);
 				if (x + 1 < res.x && (!sliceOnly || sliceAxis != HandleAxis.X))
-					Handles.DrawLine(from, ToWorld(points, PointGridUtility.GetIndex(res, x + 1, y, z)));
+				{
+					pairs.Add(from);
+					pairs.Add(PointGridUtility.GetIndex(res, x + 1, y, z));
+				}
 				if (y + 1 < res.y && (!sliceOnly || sliceAxis != HandleAxis.Y))
-					Handles.DrawLine(from, ToWorld(points, PointGridUtility.GetIndex(res, x, y + 1, z)));
+				{
+					pairs.Add(from);
+					pairs.Add(PointGridUtility.GetIndex(res, x, y + 1, z));
+				}
 				if (z + 1 < res.z && (!sliceOnly || sliceAxis != HandleAxis.Z))
-					Handles.DrawLine(from, ToWorld(points, PointGridUtility.GetIndex(res, x, y, z + 1)));
+				{
+					pairs.Add(from);
+					pairs.Add(PointGridUtility.GetIndex(res, x, y, z + 1));
+				}
 			}
+			_wireIndexPairs = pairs.ToArray();
+			_wireSegments = new Vector3[_wireIndexPairs.Length];
 		}
 
 		private static Rect RectFromPoints(Vector2 a, Vector2 b)
