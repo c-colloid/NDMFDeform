@@ -46,19 +46,22 @@ namespace MeshModifier.NDMFDeform.Editor
 			SliderInternal(property, along, sign: 1f, style);
 		}
 
-		public void RadiusSlider(string property, HandleAxis along, HandleLineStyle style = HandleLineStyle.Solid)
+		public void RadiusSlider(string property, HandleAxis along, HandleLineStyle style = HandleLineStyle.Solid,
+			float scale = 1f)
 		{
-			SliderInternal(property, along, sign: -1f, style);
+			SliderInternal(property, along, sign: -1f, style, scale);
 		}
 
-		private void SliderInternal(string property, HandleAxis along, float sign, HandleLineStyle style)
+		private void SliderInternal(string property, HandleAxis along, float sign, HandleLineStyle style,
+			float scale = 1f)
 		{
 			var p = Find(property);
 			if (p == null) return;
+			if (Mathf.Abs(scale) < 1e-6f) return;
 
 			var m = Handles.matrix;
 			var dir = AxisVector(along);
-			var world = m.MultiplyPoint3x4(sign * dir * p.floatValue);
+			var world = m.MultiplyPoint3x4(sign * dir * (p.floatValue * scale));
 			var worldDir = m.MultiplyVector(dir);
 			if (worldDir.sqrMagnitude < 1e-12f) return;
 			worldDir.Normalize();
@@ -70,7 +73,7 @@ namespace MeshModifier.NDMFDeform.Editor
 				if (EditorGUI.EndChangeCheck())
 				{
 					var newLocal = m.inverse.MultiplyPoint3x4(newWorld);
-					p.floatValue = sign * Vector3.Dot(newLocal, dir);
+					p.floatValue = sign * Vector3.Dot(newLocal, dir) / scale;
 					Changed = true;
 				}
 			}
@@ -87,6 +90,83 @@ namespace MeshModifier.NDMFDeform.Editor
 			using (ApplyStyle(style))
 			{
 				Handles.DrawWireDisc(n * op.floatValue, n, rp.floatValue);
+			}
+		}
+
+		public void Circle(HandleAxis normal, float offset, string radiusProperty,
+			HandleLineStyle style = HandleLineStyle.Solid, float scale = 1f)
+		{
+			var rp = Find(radiusProperty);
+			if (rp == null) return;
+
+			var n = AxisVector(normal);
+			using (ApplyStyle(style))
+			{
+				Handles.DrawWireDisc(n * offset, n, rp.floatValue * scale);
+			}
+		}
+
+		public void Circle(HandleAxis normal, float offset, float radius, HandleLineStyle style = HandleLineStyle.Solid)
+		{
+			var n = AxisVector(normal);
+			using (ApplyStyle(style))
+			{
+				Handles.DrawWireDisc(n * offset, n, radius);
+			}
+		}
+
+		public void Box(string boundsProperty, HandleLineStyle style = HandleLineStyle.Solid)
+		{
+			var p = Find(boundsProperty);
+			if (p == null) return;
+
+			var b = p.boundsValue;
+			using (ApplyStyle(style))
+			{
+				Handles.DrawWireCube(b.center, b.size);
+			}
+
+			// 面ハンドルはワールド空間で描く(非一様スケールでキャップが潰れないようにするため)
+			var m = Handles.matrix;
+			var min = b.min;
+			var max = b.max;
+			var boundsChanged = false;
+			for (var axis = 0; axis < 3; axis++)
+			{
+				for (var sign = -1; sign <= 1; sign += 2)
+				{
+					var dir = Vector3.zero;
+					dir[axis] = sign;
+					var faceLocal = b.center + Vector3.Scale(dir, b.extents);
+					var world = m.MultiplyPoint3x4(faceLocal);
+					var worldDir = m.MultiplyVector(dir);
+					if (worldDir.sqrMagnitude < 1e-12f) continue;
+					worldDir.Normalize();
+
+					using (new Handles.DrawingScope(StyleColor(style), Matrix4x4.identity))
+					{
+						EditorGUI.BeginChangeCheck();
+						var size = HandleUtility.GetHandleSize(world) * 0.03f;
+						var newWorld = Handles.Slider(world, worldDir, size, Handles.DotHandleCap, -1f);
+						if (EditorGUI.EndChangeCheck())
+						{
+							var newFace = m.inverse.MultiplyPoint3x4(newWorld)[axis];
+							if (sign > 0)
+								max[axis] = Mathf.Max(newFace, min[axis]);
+							else
+								min[axis] = Mathf.Min(newFace, max[axis]);
+							boundsChanged = true;
+						}
+					}
+				}
+			}
+
+			if (boundsChanged)
+			{
+				var updated = new Bounds();
+				updated.SetMinMax(min, max);
+				p.boundsValue = updated;
+				Changed = true;
 			}
 		}
 

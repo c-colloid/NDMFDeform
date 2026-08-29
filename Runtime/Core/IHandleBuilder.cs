@@ -30,11 +30,28 @@ namespace MeshModifier.NDMFDeform.Core
 		/// <summary>float プロパティ: along 軸上の符号付き距離として編集するスライダー</summary>
 		void AxisSlider(string property, HandleAxis along, HandleLineStyle style = HandleLineStyle.Solid);
 
-		/// <summary>float プロパティ: along 軸の負方向・距離 value の位置に置くスライダー(円柱半径編集用)</summary>
-		void RadiusSlider(string property, HandleAxis along, HandleLineStyle style = HandleLineStyle.Solid);
+		/// <summary>
+		/// float プロパティ: along 軸の負方向・距離 value×scale の位置に置くスライダー(半径編集用)。
+		/// scale は「シリアライズ値と実効距離の比」(例: SphereMask は実効半径が値の 0.5 倍)。
+		/// </summary>
+		void RadiusSlider(string property, HandleAxis along, HandleLineStyle style = HandleLineStyle.Solid,
+			float scale = 1f);
 
 		/// <summary>表示専用の円: normal 軸まわり、offsetProperty の位置に radiusProperty の半径で描く</summary>
 		void Circle(HandleAxis normal, string offsetProperty, string radiusProperty, HandleLineStyle style = HandleLineStyle.Solid);
+
+		/// <summary>表示専用の円: normal 軸まわり、固定オフセット位置に radiusProperty×scale の半径で描く</summary>
+		void Circle(HandleAxis normal, float offset, string radiusProperty,
+			HandleLineStyle style = HandleLineStyle.Solid, float scale = 1f);
+
+		/// <summary>表示専用の円: normal 軸まわり、固定オフセット・固定半径(プロパティ非バインド)</summary>
+		void Circle(HandleAxis normal, float offset, float radius, HandleLineStyle style = HandleLineStyle.Solid);
+
+		/// <summary>
+		/// Bounds プロパティ: ワイヤーキューブ表示 + 6 面のドラッグハンドルで編集する
+		/// (BoxCollider 相当。バウンズは軸空間で解釈される)。
+		/// </summary>
+		void Box(string boundsProperty, HandleLineStyle style = HandleLineStyle.Solid);
 
 		/// <summary>Vector3 プロパティ: 位置ハンドル</summary>
 		void Position(string property);

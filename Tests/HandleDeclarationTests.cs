@@ -33,13 +33,22 @@ namespace MeshModifier.NDMFDeform.Tests
 			}
 
 			public void AxisSlider(string property, HandleAxis along, HandleLineStyle style) => Check(property);
-			public void RadiusSlider(string property, HandleAxis along, HandleLineStyle style) => Check(property);
+
+			public void RadiusSlider(string property, HandleAxis along, HandleLineStyle style, float scale) =>
+				Check(property);
 
 			public void Circle(HandleAxis normal, string offsetProperty, string radiusProperty, HandleLineStyle style)
 			{
 				Check(offsetProperty);
 				Check(radiusProperty);
 			}
+
+			public void Circle(HandleAxis normal, float offset, string radiusProperty, HandleLineStyle style,
+				float scale) => Check(radiusProperty);
+
+			public void Circle(HandleAxis normal, float offset, float radius, HandleLineStyle style) { }
+
+			public void Box(string boundsProperty, HandleLineStyle style) => Check(boundsProperty);
 
 			public void Position(string property) => Check(property);
 

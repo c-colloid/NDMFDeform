@@ -31,6 +31,22 @@ namespace MeshModifier.NDMFDeform.Core
 		public override DeformDataFlags DataFlags =>
 			DeformDataFlags.Vertices | DeformDataFlags.OriginalVertices;
 
+#if UNITY_EDITOR
+		public override void DescribeHandles(IHandleBuilder h)
+		{
+			// falloff<=0 では t が減衰しない(全域打ち消し)ため距離の目安を描けない
+			if (falloff <= 0f) return;
+
+			// t = exp(-falloff·z): 打ち消し 50% になる距離と 10% まで減衰する距離をリングで示す
+			var zHalf = Mathf.Log(2f) / falloff;
+			var zTail = Mathf.Log(10f) / falloff;
+			h.Line(Vector3.zero, Vector3.forward * (zTail * 1.2f));
+			h.Circle(HandleAxis.Z, 0f, 0.5f);
+			h.Circle(HandleAxis.Z, zHalf, 0.5f, HandleLineStyle.Dotted);
+			h.Circle(HandleAxis.Z, zTail, 0.5f, HandleLineStyle.Dotted);
+		}
+#endif
+
 		public override JobHandle Schedule(in MeshBuffers buffers, in DeformSpace space, JobHandle dependency)
 		{
 			if (factor <= 0f)

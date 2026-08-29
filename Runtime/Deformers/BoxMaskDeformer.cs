@@ -34,6 +34,14 @@ namespace MeshModifier.NDMFDeform.Core
 		public override DeformDataFlags DataFlags =>
 			DeformDataFlags.Vertices | DeformDataFlags.OriginalVertices;
 
+#if UNITY_EDITOR
+		public override void DescribeHandles(IHandleBuilder h)
+		{
+			h.Box(nameof(innerBounds));
+			h.Box(nameof(outerBounds), HandleLineStyle.Dotted);
+		}
+#endif
+
 		public override JobHandle Schedule(in MeshBuffers buffers, in DeformSpace space, JobHandle dependency)
 		{
 			if (factor <= 0f)
