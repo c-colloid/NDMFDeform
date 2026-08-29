@@ -1,0 +1,20 @@
+{
+    "name": "NDMFDeform.Editor",
+    "rootNamespace": "MeshModifier.NDMFDeform",
+    "references": [
+        "NDMFDeform.Runtime",
+        "Unity.Burst",
+        "Unity.Mathematics"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
