@@ -87,10 +87,32 @@ NDMFDeform (jp.colloid.nemfdeform v0.0.8)
 
 ### 非目標(v2 初期)
 
-- ランタイム(プレイモード/実機)での変形 — VRChat アバターでは成立しない(コンポーネントはアップロード時に剥がれる)
+- ランタイム(プレイモード/実機)での変形 — VRChat アバターでは成立しない(コンポーネントはアップロード時に剥がれる)。ワールド利用の扱いは下記 2.1 で別系統として整理
 - Deform 全 45 種デフォーマの再現 — 必要になったものからジョブ流用で追加
 - ボーン/バインドポーズ補正 — 体型変更系で骨格・IK・PhysBone が視覚とずれる問題は**既知の制約として文書化**し、警告を出す(将来課題)
 - Elastic 等の時間駆動デフォーマ — 静的ベイクと両立しない
+
+### 2.1 ワールド利用(リアルタイム / Udon)の扱い
+
+「VRChat ワールドでのリアルタイム変形」は v2 コアとは**別系統として分離**する
+(本体の目標/非目標は変更しない)。
+
+理由:
+
+- ワールドで実行できるのは Udon(UdonSharp)であり、任意の MonoBehaviour は動かない。
+  Udon は Jobs / Burst / NativeArray を使えず、頂点単位の CPU 処理には性能的にも不適で、
+  本設計のジョブ層をそのままワールドへ流用する道は技術的に存在しない
+- 成立する実現手段は別技術になる:
+  - **(a) ブレンドシェイプとしてベイク** — デフォーマの効果(パラメータ 0 → 指定値)を
+    ブレンドシェイプとして焼き込み、再生側は標準機能で駆動する。
+    アバターなら Animator、ワールドなら Udon の `SetBlendShapeWeight`(API 露出は実装時確認)。
+    ランタイムコンポーネント不要で両環境に効く、最も費用対効果の高い橋渡し
+  - **(b) 頂点シェーダ化** — デフォーマ数式をシェーダへ移植しマテリアルパラメータで駆動。
+    別モジュールとして将来検討
+- コアのジョブ層が純関数である限り (a)(b) どちらも後から追加できる。
+  v2 で担保するのはこの分離(数式がコンポーネント/エディタに依存しないこと)のみ
+
+(a) Bake as BlendShape はロードマップ候補として §10 に記載する。
 
 ## 3. 全体アーキテクチャ
 
@@ -134,10 +156,45 @@ public abstract class DeformerBase : MonoBehaviour, VRC.SDKBase.IEditorOnly
 (ExDeform `IExDeformer` の DeformerName/Category/Description の後継。`CompatibleDeformVersion` はコア自前化により不要):
 
 ```csharp
-[DeformerMeta(Name = "Cylindrical Scale", Category = DeformerCategory.VRChat,
+[DeformerMeta(Name = "Cylindrical Scale", Category = DeformerCategory.Shape,
               Description = "円柱コントローラで範囲スケール")]
 public class CylindricalScaleDeformer : DeformerBase { ... }
 ```
+
+#### カテゴリ設計
+
+旧構成の `VRChat` カテゴリは「本家 Deform と自作を区別する」ための**出自ベース**の分類だった。
+v2 では全デフォーマが第一級(自作、または明示的に取り込んだもの)になり出自の区別が不要になるため、
+カテゴリは**機能ベース**に再整理する:
+
+| カテゴリ | 意味 | 例 |
+|---|---|---|
+| `Shape` | 頂点位置を変形する | Lattice、CylindricalScale、CylindricalVertexTransform、(将来: Bend / Twist) |
+| `Mask` | 適用範囲・重みを制御する | UVIslandMask、(将来: RegionMask) |
+| `Utility` | 補助機能 | 必要になるまで空 |
+| `Experimental` | 実験的機能 | — |
+
+- カテゴリは「デフォーマ追加」メニューの階層と、スタック UI 上のバッジ表示に使う
+- 流用元(Deform 由来か自作か)の区別は THIRD-PARTY-NOTICES とコードヘッダで管理し、
+  ユーザー向け UI には出さない
+
+#### 命名について(Deformable → DeformStack)
+
+型名を旧 `Deformable` から変える理由:
+
+1. **型名衝突の回避(必須要件)**: 移行期間中は旧フォークの `Deform.Deformable` と
+   新コンポーネントがプロジェクト内に併存する。同名型が Add Component 検索に 2 つ並ぶと
+   誤追加・混乱の原因になる
+2. **責務の違いの明示**: 新コンポーネントは「自身では何もしないデフォーマの順序付きリスト」であり、
+   ExecuteAlways で自己更新していた旧 Deformable とは挙動が異なる。名前で区別が付くようにする
+
+既存利用者への導線(改名の負担をここで吸収する):
+
+- `AddComponentMenu` を「NDMF Deform/Deform Stack (旧 Deformable)」とし、検索語に旧名を併記
+- 旧 `Deformable` 選択時のインスペクタに「新コンポーネントへ変換」ボタンを表示(移行ツールへの入口)
+- README に新旧コンポーネント対応表を掲載
+- 表示名は型名と独立に決められるため、ユーザー向け表示を「Deformable」に寄せる選択も可能。
+  最終的な表示名は M1 実装時に確定する
 
 ### 3.3 データフロー
 
@@ -270,8 +327,31 @@ public override void DescribeHandles(HandleBuilder h)
   `Undo.RecordObject` の手書き(dev ブランチのエディタで 1 デフォーマ約190行 × ボイラープレート)を全廃
 - 初期プリミティブは実需から確定したセットに限定する:
   `Position` / `AxisSlider` / `RadiusSlider` / `RangeSlider` / `Circle` / `Line` / `AngleDial` /
-  `PointGrid`(選択・矩形選択・複数点移動・**対称マッピング** — Lattice ミラーの一般化)
+  `PointGrid`(要件は下記)
 - 逃げ道として `h.Custom(Action<CustomHandleContext>)` を 1 つだけ用意(生 Handles 描画へのエスケープハッチ)
+
+#### PointGrid(格子ハンドル)の要件
+
+Lattice 編集の実用性はここで決まるため、「点の集合の表示と移動」ではなく以下を初期要件とする:
+
+選択:
+
+- クリック / Shift 追加 / 矩形(マーキー)選択
+- **ループ選択**: 格子の行・列・シート(面)単位の一括選択。
+  修飾キー + クリックで、クリックした制御点を含む軸方向の並びへ伝播させる(Blender の Alt+クリック相当)
+- 全選択 / 反転 / 選択の隣接シートへの拡張
+- 対称マッピング(ミラー編集): 選択と移動を対称側の制御点へ反映
+
+可視性(重なった内側の点を選びやすくするための表示マスク):
+
+- **奥点マスク**: デプステストにより、メッシュや手前の制御点に遮蔽された点を
+  フェード表示または非表示にする切替(既定: フェード)
+- **スライス表示**: 指定軸の 1 シートのみを表示し、格子内部の点を直接編集するモード
+- 選択中の行/列/シートの強調表示と、非選択点の減光
+- 距離に応じたハンドルサイズ補正(`HandleUtility.GetHandleSize`)
+
+これらのモード切替(ループ選択軸・奥点マスク・スライス・ミラー・スナップ)は
+EditorTool の UITK Overlay に集約する。
 - 描画は共有の `EditorTool` 1 個の中で `Handles` API により行う。UITK Overlay がツール設定
   (ミラー ON/OFF・スナップ等)を出す。SceneView ハンドルが IMGUI ベースであることは API の背後に閉じる
 - `DescribeHandles` が参照したプロパティ集合を記録し、NDMF プレビューの Observe 対象を自動導出する
@@ -344,6 +424,7 @@ EditMode テスト(golden mesh: 入力メッシュ + パラメータ → 期待�
 | M4 | UVIslandMask(マスク段 + UVIslandSelectorView) | 0.4.0 |
 | M5 | ブレンドシェイプ再ベイク + タンジェント + 法線保持オプション + golden mesh テスト整備 | 0.5.0 |
 | M6 | 移行ツール → フォーク削除 → パッケージング整備(vpmDependencies、タグ、VPM リスティング、THIRD-PARTY-NOTICES) | 1.0.0 |
+| M7(候補) | **Bake as BlendShape**: デフォーマ効果をブレンドシェイプとして焼き込み、Animator / Udon から駆動(§2.1 の橋渡し機能) | 1.1.0 |
 
 現行 main(v0.0.x 系)への Phase 0 的なバグ修正(GameObject 誤削除・SMR キャスト等)は、
 v2 完成まで既存ユーザーが v0.0.x を使い続ける場合にのみ適用を検討する(別作業)。
