@@ -16,6 +16,11 @@
     "plug-in"
   ],
   "dependencies": {
-    "com.unity.burst": "1.4.8"
+    "com.unity.burst": "1.8.13",
+    "com.unity.mathematics": "1.2.6"
+  },
+  "vpmDependencies": {
+    "nadena.dev.ndmf": ">=1.5.0",
+    "jp.colloid.uitk-font-fix": ">=0.1.0"
   }
 }
