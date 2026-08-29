@@ -35,6 +35,15 @@ namespace MeshModifier.NDMFDeform.Editor
 		private UVIslandAnalysis.Island _hoverSegmentsIsland;
 		private Vector3[] _hoverSegments = System.Array.Empty<Vector3>();
 
+		// OnSceneGUI 内では Editor.targets を参照できない(Unity が警告する)ため、
+		// 複数選択かどうかは OnEnable で確定させておく
+		private bool _isMultiEdit;
+
+		private void OnEnable()
+		{
+			_isMultiEdit = targets.Length > 1;
+		}
+
 		protected override void OnDisable()
 		{
 			base.OnDisable();
@@ -81,7 +90,9 @@ namespace MeshModifier.NDMFDeform.Editor
 		{
 			base.OnSceneGUI();
 
-			if (targets.Length > 1)
+			// 複数選択中は同一メッシュへ複数エディタが同時にレイキャスト・トグル
+			// してしまうため、シーン側の島選択 UI は単一選択時のみ有効にする
+			if (_isMultiEdit)
 				return;
 			var mask = target as UVIslandMaskDeformer;
 			if (mask == null)
