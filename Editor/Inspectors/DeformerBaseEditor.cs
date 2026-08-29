@@ -54,7 +54,9 @@ namespace MeshModifier.NDMFDeform.Editor
 			return root;
 		}
 
-		private void OnSceneGUI()
+		// 注意: private にすると派生エディタ(LatticeDeformerEditor 等)経由で
+		// Unity のコールバック探索から見えなくなり、シーンハンドルが描画されない
+		protected virtual void OnSceneGUI()
 		{
 			var deformer = target as DeformerBase;
 			if (deformer == null) return;

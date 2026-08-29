@@ -14,6 +14,9 @@ namespace MeshModifier.NDMFDeform.Editor
 	[CanEditMultipleObjects]
 	public class LatticeDeformerEditor : DeformerBaseEditor
 	{
+		// Unity の OnSceneGUI 探索が宣言型のみを走査する場合に備えた明示オーバーライド
+		protected override void OnSceneGUI() => base.OnSceneGUI();
+
 		public override VisualElement CreateInspectorGUI()
 		{
 			var root = base.CreateInspectorGUI();
