@@ -39,39 +39,38 @@ namespace MeshModifier.NDMFDeform.Editor
 				Changed = true;
 		}
 
+		// スライダー・位置ハンドルはワールド空間で描く(位置の変換のみ軸行列を通す)。
+		// 軸 Transform が非一様スケールでも矢印キャップが潰れないようにするため。
 		public void AxisSlider(string property, HandleAxis along, HandleLineStyle style = HandleLineStyle.Solid)
 		{
-			var p = Find(property);
-			if (p == null) return;
-
-			var dir = AxisVector(along);
-			var pos = dir * p.floatValue;
-			using (ApplyStyle(style))
-			{
-				EditorGUI.BeginChangeCheck();
-				var newPos = Handles.Slider(pos, dir);
-				if (EditorGUI.EndChangeCheck())
-				{
-					p.floatValue = Vector3.Dot(newPos, dir);
-					Changed = true;
-				}
-			}
+			SliderInternal(property, along, sign: 1f, style);
 		}
 
 		public void RadiusSlider(string property, HandleAxis along, HandleLineStyle style = HandleLineStyle.Solid)
 		{
+			SliderInternal(property, along, sign: -1f, style);
+		}
+
+		private void SliderInternal(string property, HandleAxis along, float sign, HandleLineStyle style)
+		{
 			var p = Find(property);
 			if (p == null) return;
 
+			var m = Handles.matrix;
 			var dir = AxisVector(along);
-			var pos = -dir * p.floatValue;
-			using (ApplyStyle(style))
+			var world = m.MultiplyPoint3x4(sign * dir * p.floatValue);
+			var worldDir = m.MultiplyVector(dir);
+			if (worldDir.sqrMagnitude < 1e-12f) return;
+			worldDir.Normalize();
+
+			using (new Handles.DrawingScope(StyleColor(style), Matrix4x4.identity))
 			{
 				EditorGUI.BeginChangeCheck();
-				var newPos = Handles.Slider(pos, dir);
+				var newWorld = Handles.Slider(world, worldDir);
 				if (EditorGUI.EndChangeCheck())
 				{
-					p.floatValue = -Vector3.Dot(newPos, dir);
+					var newLocal = m.inverse.MultiplyPoint3x4(newWorld);
+					p.floatValue = sign * Vector3.Dot(newLocal, dir);
 					Changed = true;
 				}
 			}
@@ -96,12 +95,17 @@ namespace MeshModifier.NDMFDeform.Editor
 			var p = Find(property);
 			if (p == null) return;
 
-			EditorGUI.BeginChangeCheck();
-			var newValue = Handles.PositionHandle(p.vector3Value, Quaternion.identity);
-			if (EditorGUI.EndChangeCheck())
+			var m = Handles.matrix;
+			var world = m.MultiplyPoint3x4(p.vector3Value);
+			using (new Handles.DrawingScope(Handles.color, Matrix4x4.identity))
 			{
-				p.vector3Value = newValue;
-				Changed = true;
+				EditorGUI.BeginChangeCheck();
+				var newWorld = Handles.PositionHandle(world, Quaternion.identity);
+				if (EditorGUI.EndChangeCheck())
+				{
+					p.vector3Value = m.inverse.MultiplyPoint3x4(newWorld);
+					Changed = true;
+				}
 			}
 		}
 
@@ -136,10 +140,15 @@ namespace MeshModifier.NDMFDeform.Editor
 
 		private static Handles.DrawingScope ApplyStyle(HandleLineStyle style)
 		{
+			return new Handles.DrawingScope(StyleColor(style));
+		}
+
+		private static Color StyleColor(HandleLineStyle style)
+		{
 			var color = Handles.color;
 			if (style == HandleLineStyle.Dotted)
 				color *= DottedTint;
-			return new Handles.DrawingScope(color);
+			return color;
 		}
 	}
 }

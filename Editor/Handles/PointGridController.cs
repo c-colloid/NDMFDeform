@@ -46,6 +46,10 @@ namespace MeshModifier.NDMFDeform.Editor
 	/// <summary>
 	/// 格子制御点編集の対話コア。DeformerBaseEditor が保持し、
 	/// 軸空間の Handles.DrawingScope 内で毎フレーム呼ばれる。
+	///
+	/// 座標系: 制御点の位置変換のみ軸行列を通し、キャップの描画・操作は
+	/// ワールド空間(恒等行列)で行う。軸 Transform が非一様スケールでも
+	/// ギズモ(点・移動矢印)が潰れないようにするため。
 	/// 選択はエディタセッション状態(非シリアライズ)、
 	/// 制御点の編集は SerializedProperty 経由(Undo は Unity 任せ)。
 	///
@@ -69,6 +73,9 @@ namespace MeshModifier.NDMFDeform.Editor
 		private Vector2 _marqueeStart;
 		private Vector2 _marqueeEnd;
 
+		private Matrix4x4 _axisMatrix = Matrix4x4.identity;
+		private Matrix4x4 _axisInverse = Matrix4x4.identity;
+
 		/// <summary>true を返したらプロパティが変更された(呼び出し側が Apply する)</summary>
 		public bool OnSceneGUI(SerializedObject serializedObject, string pointsProperty,
 			Vector3Int resolution, string mirrorAxisProperty)
@@ -78,14 +85,17 @@ namespace MeshModifier.NDMFDeform.Editor
 			if (points == null || !points.isArray || points.arraySize != count || count == 0)
 				return false;
 
+			// 位置変換用に軸行列を控え、描画・操作はワールド空間で行う
+			_axisMatrix = Handles.matrix;
+			if (Mathf.Abs(_axisMatrix.determinant) < 1e-12f)
+				return false;
+			_axisInverse = _axisMatrix.inverse;
+
 			if (_lastResolution != resolution)
 			{
 				_selection.Clear();
 				_lastResolution = resolution;
 			}
-
-			// マーキーの GUI 座標計算用に軸空間行列を控える
-			_cachedMatrix = Handles.matrix;
 
 			var mirror = MirrorAxis.None;
 			if (mirrorAxisProperty != null)
@@ -100,20 +110,36 @@ namespace MeshModifier.NDMFDeform.Editor
 			var sliceAxis = PointGridViewState.SliceAxis;
 			var sliceIndex = Mathf.Clamp(PointGridViewState.SliceIndex, 0, AxisRes(resolution, sliceAxis) - 1);
 
-			DrawWireframe(points, resolution, sliceOnly, sliceAxis, sliceIndex);
-
 			var changed = false;
-			var evt = Event.current;
+			using (new Handles.DrawingScope(Matrix4x4.identity))
+			{
+				DrawWireframe(points, resolution, sliceOnly, sliceAxis, sliceIndex);
+				DrawPointsAndPick(points, resolution, sliceOnly, sliceAxis, sliceIndex);
+				HandleMarquee(points, resolution, sliceOnly, sliceAxis, sliceIndex);
+				changed = MoveSelection(points, resolution, mirror);
+			}
 
-			// 点の描画とクリック選択
+			return changed;
+		}
+
+		private Vector3 ToWorld(SerializedProperty points, int index)
+		{
+			return _axisMatrix.MultiplyPoint3x4((Vector3)GetPoint(points, index));
+		}
+
+		private void DrawPointsAndPick(SerializedProperty points, Vector3Int resolution,
+			bool sliceOnly, HandleAxis sliceAxis, int sliceIndex)
+		{
+			var evt = Event.current;
+			var count = points.arraySize;
 			for (var i = 0; i < count; i++)
 			{
 				var coord = PointGridUtility.GetCoord(resolution, i);
 				if (sliceOnly && AxisCoord(coord, sliceAxis) != sliceIndex)
 					continue;
 
-				var pos = (Vector3)GetPoint(points, i);
-				var size = HandleSizeInMatrixSpace(pos) * (_selection.Contains(i) ? 1.25f : 1f);
+				var world = ToWorld(points, i);
+				var size = HandleUtility.GetHandleSize(world) * 0.06f * (_selection.Contains(i) ? 1.25f : 1f);
 				var color = _selection.Contains(i) ? SelectedColor : UnselectedColor;
 
 				// 奥側(遮蔽)パス: フェード表示
@@ -121,7 +147,7 @@ namespace MeshModifier.NDMFDeform.Editor
 				{
 					Handles.zTest = CompareFunction.Greater;
 					Handles.color = color * OccludedTint;
-					Handles.DotHandleCap(0, pos, Quaternion.identity, size, EventType.Repaint);
+					Handles.DotHandleCap(0, world, Quaternion.identity, size, EventType.Repaint);
 				}
 
 				// 手前パス + クリック判定
@@ -129,46 +155,44 @@ namespace MeshModifier.NDMFDeform.Editor
 					? CompareFunction.Always
 					: CompareFunction.LessEqual;
 				Handles.color = color;
-				if (Handles.Button(pos, Quaternion.identity, size, size * 1.4f, Handles.DotHandleCap))
+				if (Handles.Button(world, Quaternion.identity, size, size * 1.4f, Handles.DotHandleCap))
 				{
 					ApplyClickSelection(i, coord, resolution, evt.modifiers);
 				}
 				Handles.zTest = CompareFunction.Always;
 			}
+		}
 
-			// 矩形(マーキー)選択
-			HandleMarquee(points, resolution, sliceOnly, sliceAxis, sliceIndex);
+		private bool MoveSelection(SerializedProperty points, Vector3Int resolution, MirrorAxis mirror)
+		{
+			if (_selection.Count == 0)
+				return false;
 
-			// 選択点の移動
-			if (_selection.Count > 0)
+			var pivot = Vector3.zero;
+			foreach (var i in _selection)
+				pivot += ToWorld(points, i);
+			pivot /= _selection.Count;
+
+			EditorGUI.BeginChangeCheck();
+			var newPivot = Handles.PositionHandle(pivot, Quaternion.identity);
+			if (!EditorGUI.EndChangeCheck())
+				return false;
+
+			// ワールドのデルタを軸空間へ変換して各点に適用する
+			var localDelta = (float3)_axisInverse.MultiplyVector(newPivot - pivot);
+			foreach (var i in _selection)
 			{
-				var pivot = Vector3.zero;
-				foreach (var i in _selection)
-					pivot += (Vector3)GetPoint(points, i);
-				pivot /= _selection.Count;
+				var newPos = GetPoint(points, i) + localDelta;
+				SetPoint(points, i, newPos);
 
-				EditorGUI.BeginChangeCheck();
-				var newPivot = Handles.PositionHandle(pivot, Quaternion.identity);
-				if (EditorGUI.EndChangeCheck())
+				if (mirror != MirrorAxis.None)
 				{
-					var delta = (float3)(newPivot - pivot);
-					foreach (var i in _selection)
-					{
-						var newPos = GetPoint(points, i) + delta;
-						SetPoint(points, i, newPos);
-
-						if (mirror != MirrorAxis.None)
-						{
-							var partner = PointGridUtility.MirrorIndex(resolution, i, mirror);
-							if (partner != i && !_selection.Contains(partner))
-								SetPoint(points, partner, PointGridUtility.MirrorPosition(newPos, mirror));
-						}
-					}
-					changed = true;
+					var partner = PointGridUtility.MirrorIndex(resolution, i, mirror);
+					if (partner != i && !_selection.Contains(partner))
+						SetPoint(points, partner, PointGridUtility.MirrorPosition(newPos, mirror));
 				}
 			}
-
-			return changed;
+			return true;
 		}
 
 		private void ApplyClickSelection(int index, Vector3Int coord, Vector3Int resolution, EventModifiers modifiers)
@@ -180,12 +204,12 @@ namespace MeshModifier.NDMFDeform.Editor
 			{
 				// シート選択: LoopAxis に垂直な面
 				var axis = PointGridViewState.LoopAxis;
-				ReplaceOrAdd(PointGridUtility.SheetIndices(resolution, axis, AxisCoord(coord, axis)), add: false);
+				ReplaceSelection(PointGridUtility.SheetIndices(resolution, axis, AxisCoord(coord, axis)));
 			}
 			else if (ctrl)
 			{
 				// ループ(行)選択: LoopAxis 沿い
-				ReplaceOrAdd(PointGridUtility.LineIndices(resolution, coord, PointGridViewState.LoopAxis), add: false);
+				ReplaceSelection(PointGridUtility.LineIndices(resolution, coord, PointGridViewState.LoopAxis));
 			}
 			else if (shift)
 			{
@@ -200,9 +224,9 @@ namespace MeshModifier.NDMFDeform.Editor
 			SceneView.RepaintAll();
 		}
 
-		private void ReplaceOrAdd(List<int> indices, bool add)
+		private void ReplaceSelection(List<int> indices)
 		{
-			if (!add) _selection.Clear();
+			_selection.Clear();
 			foreach (var i in indices)
 				_selection.Add(i);
 		}
@@ -245,18 +269,14 @@ namespace MeshModifier.NDMFDeform.Editor
 						if (!isClick)
 						{
 							var count = points.arraySize;
-							using (new Handles.DrawingScope(Matrix4x4.identity))
+							for (var i = 0; i < count; i++)
 							{
-								for (var i = 0; i < count; i++)
-								{
-									var coord = PointGridUtility.GetCoord(resolution, i);
-									if (sliceOnly && AxisCoord(coord, sliceAxis) != sliceIndex)
-										continue;
-									var world = _cachedMatrix.MultiplyPoint3x4((Vector3)GetPoint(points, i));
-									var gui = HandleUtility.WorldToGUIPoint(world);
-									if (rect.Contains(gui))
-										_selection.Add(i);
-								}
+								var coord = PointGridUtility.GetCoord(resolution, i);
+								if (sliceOnly && AxisCoord(coord, sliceAxis) != sliceIndex)
+									continue;
+								var gui = HandleUtility.WorldToGUIPoint(ToWorld(points, i));
+								if (rect.Contains(gui))
+									_selection.Add(i);
 							}
 						}
 						_marqueeActive = false;
@@ -269,15 +289,12 @@ namespace MeshModifier.NDMFDeform.Editor
 					if (_marqueeActive && GUIUtility.hotControl == control)
 					{
 						Handles.BeginGUI();
-						var rect = RectFromPoints(_marqueeStart, _marqueeEnd);
-						GUI.Box(rect, GUIContent.none, "SelectionRect");
+						GUI.Box(RectFromPoints(_marqueeStart, _marqueeEnd), GUIContent.none, "SelectionRect");
 						Handles.EndGUI();
 					}
 					break;
 			}
 		}
-
-		private Matrix4x4 _cachedMatrix = Matrix4x4.identity;
 
 		private void ConsumePendingCommand(int count)
 		{
@@ -320,25 +337,14 @@ namespace MeshModifier.NDMFDeform.Editor
 				if (sliceOnly && AxisCoord(c, sliceAxis) != sliceIndex)
 					continue;
 
-				var from = (Vector3)GetPoint(points, PointGridUtility.GetIndex(res, x, y, z));
+				var from = ToWorld(points, PointGridUtility.GetIndex(res, x, y, z));
 				if (x + 1 < res.x && (!sliceOnly || sliceAxis != HandleAxis.X))
-					Handles.DrawLine(from, (Vector3)GetPoint(points, PointGridUtility.GetIndex(res, x + 1, y, z)));
+					Handles.DrawLine(from, ToWorld(points, PointGridUtility.GetIndex(res, x + 1, y, z)));
 				if (y + 1 < res.y && (!sliceOnly || sliceAxis != HandleAxis.Y))
-					Handles.DrawLine(from, (Vector3)GetPoint(points, PointGridUtility.GetIndex(res, x, y + 1, z)));
+					Handles.DrawLine(from, ToWorld(points, PointGridUtility.GetIndex(res, x, y + 1, z)));
 				if (z + 1 < res.z && (!sliceOnly || sliceAxis != HandleAxis.Z))
-					Handles.DrawLine(from, (Vector3)GetPoint(points, PointGridUtility.GetIndex(res, x, y, z + 1)));
+					Handles.DrawLine(from, ToWorld(points, PointGridUtility.GetIndex(res, x, y, z + 1)));
 			}
-		}
-
-		private static float HandleSizeInMatrixSpace(Vector3 positionInMatrixSpace)
-		{
-			var m = Handles.matrix;
-			var world = m.MultiplyPoint3x4(positionInMatrixSpace);
-			var worldSize = HandleUtility.GetHandleSize(world) * 0.06f;
-			var scale = (((Vector3)m.GetColumn(0)).magnitude
-			             + ((Vector3)m.GetColumn(1)).magnitude
-			             + ((Vector3)m.GetColumn(2)).magnitude) / 3f;
-			return worldSize / Mathf.Max(scale, 1e-6f);
 		}
 
 		private static Rect RectFromPoints(Vector2 a, Vector2 b)
