@@ -22,6 +22,9 @@ namespace MeshModifier.NDMFDeform.Core
 		/// <summary>スタック適用前の頂点スナップショット(読み取り専用)。マスク系が使用する</summary>
 		OriginalVertices = 1 << 4,
 
+		/// <summary>頂点カラー(読み取り専用)</summary>
+		Colors = 1 << 5,
+
 		/// <summary>書き戻し対象の全チャンネル(読み取り専用チャンネルは含まない)</summary>
 		All = Vertices | Normals | Tangents,
 	}

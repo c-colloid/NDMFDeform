@@ -33,6 +33,7 @@ namespace MeshModifier.NDMFDeform.Editor
 			public int VertexCount;
 			public NativeArray<float3> SourceVertices;
 			public NativeArray<float2> Uvs;
+			public NativeArray<float4> Colors;
 			public NativeArray<float3> Work;
 			public int ShapeStateHash;
 			public bool ShapesStale;
@@ -50,6 +51,7 @@ namespace MeshModifier.NDMFDeform.Editor
 				Baked = null;
 				if (SourceVertices.IsCreated) SourceVertices.Dispose();
 				if (Uvs.IsCreated) Uvs.Dispose();
+				if (Colors.IsCreated) Colors.Dispose();
 				if (Work.IsCreated) Work.Dispose();
 			}
 		}
@@ -112,6 +114,12 @@ namespace MeshModifier.NDMFDeform.Editor
 				EnsureUvs(entry, source);
 				if (entry.Uvs.IsCreated)
 					buffers.UVs = entry.Uvs;
+			}
+			if ((flags & DeformDataFlags.Colors) != 0)
+			{
+				EnsureColors(entry, source);
+				if (entry.Colors.IsCreated)
+					buffers.Colors = entry.Colors;
 			}
 
 			var handle = default(JobHandle);
@@ -181,6 +189,7 @@ namespace MeshModifier.NDMFDeform.Editor
 			{
 				if (entry.SourceVertices.IsCreated) entry.SourceVertices.Dispose();
 				if (entry.Uvs.IsCreated) entry.Uvs.Dispose();
+				if (entry.Colors.IsCreated) entry.Colors.Dispose();
 				if (entry.Work.IsCreated) entry.Work.Dispose();
 
 				var vertices = source.vertices;
@@ -201,6 +210,22 @@ namespace MeshModifier.NDMFDeform.Editor
 			entry.RendererTransform = rendererTransform;
 			entry.ActiveShapes = activeShapes;
 			return entry;
+		}
+
+		private static void EnsureColors(Entry entry, Mesh source)
+		{
+			if (entry.Colors.IsCreated)
+				return;
+			var colors = source.colors;
+			if (colors.Length != entry.VertexCount)
+				return;
+			entry.Colors = new NativeArray<float4>(colors.Length, Allocator.Persistent,
+				NativeArrayOptions.UninitializedMemory);
+			for (var i = 0; i < colors.Length; i++)
+			{
+				var c = colors[i];
+				entry.Colors[i] = new float4(c.r, c.g, c.b, c.a);
+			}
 		}
 
 		private static void EnsureUvs(Entry entry, Mesh source)

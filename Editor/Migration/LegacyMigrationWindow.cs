@@ -96,7 +96,7 @@ namespace MeshModifier.NDMFDeform.Editor
 			var lines = new List<string>
 			{
 				$"移行完了: DeformStack {report.StacksCreated} 件 / Lattice {report.LatticesMigrated} 件" +
-				$" / Transform・Scale {report.SimpleDeformersMigrated} 件",
+				$" / Transform・Scale {report.SimpleDeformersMigrated} 件 / マスク {report.MasksMigrated} 件",
 			};
 			if (report.UnsupportedDeformers.Count > 0)
 			{

@@ -88,6 +88,8 @@ namespace MeshModifier.NDMFDeform.Editor
 				channels.Tangents = source.tangents;
 			if ((flags & DeformDataFlags.UVs) != 0)
 				channels.Uvs = source.uv;
+			if ((flags & DeformDataFlags.Colors) != 0)
+				channels.Colors = source.colors;
 
 			var result = Object.Instantiate(source);
 			result.name = source.name + " (NDMFDeform)";
@@ -149,6 +151,7 @@ namespace MeshModifier.NDMFDeform.Editor
 			public Vector3[] Normals;
 			public Vector4[] Tangents;
 			public Vector2[] Uvs;
+			public Color[] Colors;
 		}
 
 		/// <summary>
@@ -361,6 +364,17 @@ namespace MeshModifier.NDMFDeform.Editor
 					NativeArrayOptions.UninitializedMemory);
 				for (var i = 0; i < channels.Uvs.Length; i++)
 					buffers.UVs[i] = channels.Uvs[i];
+			}
+
+			if (channels.Colors != null && channels.Colors.Length == buffers.Length)
+			{
+				buffers.Colors = new NativeArray<float4>(channels.Colors.Length, Allocator.TempJob,
+					NativeArrayOptions.UninitializedMemory);
+				for (var i = 0; i < channels.Colors.Length; i++)
+				{
+					var c = channels.Colors[i];
+					buffers.Colors[i] = new float4(c.r, c.g, c.b, c.a);
+				}
 			}
 
 			if ((flags & DeformDataFlags.OriginalVertices) != 0)

@@ -18,12 +18,17 @@ namespace MeshModifier.NDMFDeform.Editor
 		public const string LatticeTypeName = "Deform.LatticeDeformer";
 		public const string ScaleTypeName = "Deform.ScaleDeformer";
 		public const string TransformTypeName = "Deform.TransformDeformer";
+		public const string SphereMaskTypeName = "Deform.Masking.SphereMask";
+		public const string BoxMaskTypeName = "Deform.Masking.BoxMask";
+		public const string VerticalGradientMaskTypeName = "Deform.Masking.VerticalGradientMask";
+		public const string VertexColorMaskTypeName = "Deform.Masking.VertexColorMask";
 
 		public sealed class Report
 		{
 			public int StacksCreated;
 			public int LatticesMigrated;
 			public int SimpleDeformersMigrated;
+			public int MasksMigrated;
 
 			/// <summary>移行できなかった旧デフォーマ("オブジェクト名: 型名")</summary>
 			public readonly List<string> UnsupportedDeformers = new List<string>();
@@ -143,6 +148,30 @@ namespace MeshModifier.NDMFDeform.Editor
 							migratedComponents.Add(component);
 							report.SimpleDeformersMigrated++;
 						}
+						else if (TypeNameMatches(component, SphereMaskTypeName))
+						{
+							stack.AddDeformer(MigrateSphereMask(component), active);
+							migratedComponents.Add(component);
+							report.MasksMigrated++;
+						}
+						else if (TypeNameMatches(component, BoxMaskTypeName))
+						{
+							stack.AddDeformer(MigrateBoxMask(component), active);
+							migratedComponents.Add(component);
+							report.MasksMigrated++;
+						}
+						else if (TypeNameMatches(component, VerticalGradientMaskTypeName))
+						{
+							stack.AddDeformer(MigrateVerticalGradientMask(component), active);
+							migratedComponents.Add(component);
+							report.MasksMigrated++;
+						}
+						else if (TypeNameMatches(component, VertexColorMaskTypeName))
+						{
+							stack.AddDeformer(MigrateVertexColorMask(component), active);
+							migratedComponents.Add(component);
+							report.MasksMigrated++;
+						}
 						else
 						{
 							// Missing Script は型が素の MonoBehaviour として現れる
@@ -168,6 +197,99 @@ namespace MeshModifier.NDMFDeform.Editor
 			}
 
 			return report;
+		}
+
+		/// <summary>旧 SphereMask → v2 SphereMaskDeformer</summary>
+		public static SphereMaskDeformer MigrateSphereMask(Component legacy)
+		{
+			var mask = Undo.AddComponent<SphereMaskDeformer>(legacy.gameObject);
+			var from = new SerializedObject(legacy);
+			var to = new SerializedObject(mask);
+			CopyClamped01(from, to, "factor");
+			CopyFloat(from, to, "innerRadius");
+			CopyFloat(from, to, "outerRadius");
+			CopyBool(from, to, "invert");
+			CopyReference(from, to, "axis", "axisOverride");
+			to.ApplyModifiedPropertiesWithoutUndo();
+			return mask;
+		}
+
+		/// <summary>旧 BoxMask → v2 BoxMaskDeformer</summary>
+		public static BoxMaskDeformer MigrateBoxMask(Component legacy)
+		{
+			var mask = Undo.AddComponent<BoxMaskDeformer>(legacy.gameObject);
+			var from = new SerializedObject(legacy);
+			var to = new SerializedObject(mask);
+			CopyClamped01(from, to, "factor");
+			var inner = from.FindProperty("innerBounds");
+			if (inner != null)
+				to.FindProperty("innerBounds").boundsValue = inner.boundsValue;
+			var outer = from.FindProperty("outerBounds");
+			if (outer != null)
+				to.FindProperty("outerBounds").boundsValue = outer.boundsValue;
+			CopyBool(from, to, "invert");
+			CopyReference(from, to, "axis", "axisOverride");
+			to.ApplyModifiedPropertiesWithoutUndo();
+			return mask;
+		}
+
+		/// <summary>旧 VerticalGradientMask → v2 VerticalGradientMaskDeformer</summary>
+		public static VerticalGradientMaskDeformer MigrateVerticalGradientMask(Component legacy)
+		{
+			var mask = Undo.AddComponent<VerticalGradientMaskDeformer>(legacy.gameObject);
+			var from = new SerializedObject(legacy);
+			var to = new SerializedObject(mask);
+			CopyClamped01(from, to, "factor");
+			CopyFloat(from, to, "falloff");
+			CopyBool(from, to, "invert");
+			CopyReference(from, to, "axis", "axisOverride");
+			to.ApplyModifiedPropertiesWithoutUndo();
+			return mask;
+		}
+
+		/// <summary>旧 VertexColorMask → v2 VertexColorMaskDeformer</summary>
+		public static VertexColorMaskDeformer MigrateVertexColorMask(Component legacy)
+		{
+			var mask = Undo.AddComponent<VertexColorMaskDeformer>(legacy.gameObject);
+			var from = new SerializedObject(legacy);
+			var to = new SerializedObject(mask);
+			CopyClamped01(from, to, "factor");
+			CopyFloat(from, to, "falloff");
+			CopyBool(from, to, "invert");
+			var channel = from.FindProperty("channel");
+			if (channel != null)
+				to.FindProperty("channel").intValue = channel.intValue;
+			to.ApplyModifiedPropertiesWithoutUndo();
+			return mask;
+		}
+
+		private static void CopyFloat(SerializedObject from, SerializedObject to, string name)
+		{
+			var property = from.FindProperty(name);
+			if (property != null)
+				to.FindProperty(name).floatValue = property.floatValue;
+		}
+
+		private static void CopyClamped01(SerializedObject from, SerializedObject to, string name)
+		{
+			var property = from.FindProperty(name);
+			if (property != null)
+				to.FindProperty(name).floatValue = Mathf.Clamp01(property.floatValue);
+		}
+
+		private static void CopyBool(SerializedObject from, SerializedObject to, string name)
+		{
+			var property = from.FindProperty(name);
+			if (property != null)
+				to.FindProperty(name).boolValue = property.boolValue;
+		}
+
+		private static void CopyReference(SerializedObject from, SerializedObject to,
+			string fromName, string toName)
+		{
+			var property = from.FindProperty(fromName);
+			if (property != null)
+				to.FindProperty(toName).objectReferenceValue = property.objectReferenceValue;
 		}
 
 		/// <summary>旧 ScaleDeformer → v2 ScaleDeformer(パラメータは軸 Transform の localScale のまま)</summary>

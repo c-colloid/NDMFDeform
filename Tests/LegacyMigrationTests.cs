@@ -170,6 +170,57 @@ namespace MeshModifier.NDMFDeform.Tests
 			Assert.That(deformable == null, Is.True);
 		}
 
+		private class FakeLegacySphereMask : MonoBehaviour
+		{
+			public float factor = 0.8f;
+			public float innerRadius = 1.5f;
+			public float outerRadius = 3f;
+			public bool invert = true;
+			public Transform axis;
+		}
+
+		private class FakeLegacyBoxMask : MonoBehaviour
+		{
+			public float factor = 1f;
+			public Bounds innerBounds;
+			public Bounds outerBounds;
+			public bool invert;
+			public Transform axis;
+		}
+
+		[Test]
+		public void MigrateSphereMask_CopiesFields()
+		{
+			_root = new GameObject("LegacyRoot");
+			var axisGo = new GameObject("Axis");
+			axisGo.transform.SetParent(_root.transform, false);
+			var legacy = _root.AddComponent<FakeLegacySphereMask>();
+			legacy.axis = axisGo.transform;
+
+			var mask = LegacyDeformMigration.MigrateSphereMask(legacy);
+
+			Assert.That(mask.Factor, Is.EqualTo(0.8f).Within(1e-5f));
+			Assert.That(mask.InnerRadius, Is.EqualTo(1.5f).Within(1e-5f));
+			Assert.That(mask.OuterRadius, Is.EqualTo(3f).Within(1e-5f));
+			Assert.That(mask.Invert, Is.True);
+			Assert.That(mask.Axis, Is.SameAs(axisGo.transform));
+		}
+
+		[Test]
+		public void MigrateBoxMask_CopiesBounds()
+		{
+			_root = new GameObject("LegacyRoot");
+			var legacy = _root.AddComponent<FakeLegacyBoxMask>();
+			legacy.innerBounds = new Bounds(new Vector3(1f, 2f, 3f), new Vector3(2f, 2f, 2f));
+			legacy.outerBounds = new Bounds(new Vector3(1f, 2f, 3f), new Vector3(4f, 4f, 4f));
+
+			var mask = LegacyDeformMigration.MigrateBoxMask(legacy);
+
+			Assert.That(mask.InnerBounds.center, Is.EqualTo(new Vector3(1f, 2f, 3f)));
+			Assert.That(mask.InnerBounds.size, Is.EqualTo(new Vector3(2f, 2f, 2f)));
+			Assert.That(mask.OuterBounds.size, Is.EqualTo(new Vector3(4f, 4f, 4f)));
+		}
+
 		[Test]
 		public void Migrate_ReportsUnsupportedAndKeepsLegacy()
 		{

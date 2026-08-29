@@ -9,10 +9,10 @@ namespace MeshModifier.NDMFDeform.Core
 	/// ベイクコア(Editor 側)が構築し、各デフォーマのジョブが読み書きする。
 	/// 頂点数・順序は常に保存される(インプレース変形のみ)。
 	///
-	/// 契約: Vertices は常に生成される。Normals / Tangents / UVs は
+	/// 契約: Vertices は常に生成される。Normals / Tangents / UVs / Colors は
 	/// スタック内のいずれかのデフォーマが DataFlags で要求し、かつ
 	/// 元メッシュがそのチャンネルを持つ場合のみ生成される。
-	/// UVs と OriginalVertices は読み取り専用(メッシュへの書き戻しはされない)。
+	/// UVs・Colors・OriginalVertices は読み取り専用(メッシュへの書き戻しはされない)。
 	/// OriginalVertices はスタック適用前の頂点スナップショットで、
 	/// マスク系デフォーマのブレンド先として使う。
 	/// Vertices 以外を使うデフォーマは Schedule 内で IsCreated を確認すること。
@@ -24,6 +24,7 @@ namespace MeshModifier.NDMFDeform.Core
 		public NativeArray<float4> Tangents;
 		public NativeArray<float2> UVs;
 		public NativeArray<float3> OriginalVertices;
+		public NativeArray<float4> Colors;
 		public int Length;
 
 		public void Dispose()
@@ -33,6 +34,7 @@ namespace MeshModifier.NDMFDeform.Core
 			if (Tangents.IsCreated) Tangents.Dispose();
 			if (UVs.IsCreated) UVs.Dispose();
 			if (OriginalVertices.IsCreated) OriginalVertices.Dispose();
+			if (Colors.IsCreated) Colors.Dispose();
 			Length = 0;
 		}
 	}
