@@ -67,13 +67,10 @@ namespace MeshModifier.NDMFDeform.NDMF
 					(a, b) => a.SetEquals(b));
 			}
 
-			var options = new DeformBakeOptions
-			{
-				RebakeBlendShapes = true,
-				ShapesToRebake = activeShapes,
-			};
-			var baked = DeformBakeCore.Bake(stack, source, original.transform, options);
-			return Task.FromResult<IRenderFilterNode>(new Node(baked));
+			// キャッシュ経由のホットパス: パラメータ変更だけの再ベイクは
+			// メッシュ複製なしで頂点更新のみになる(キャッシュがメッシュを所有する)
+			var previewEntry = DeformPreviewBakeCache.Bake(stack, source, original.transform, activeShapes);
+			return Task.FromResult<IRenderFilterNode>(new Node(previewEntry));
 		}
 
 		private static HashSet<string> GetActiveShapeNames(SkinnedMeshRenderer smr)
@@ -93,37 +90,36 @@ namespace MeshModifier.NDMFDeform.NDMF
 
 		private class Node : IRenderFilterNode
 		{
-			private Mesh _baked;
+			private readonly DeformPreviewBakeCache.Entry _entry;
 
 			public RenderAspects WhatChanged => RenderAspects.Mesh;
 
-			public Node(Mesh baked)
+			public Node(DeformPreviewBakeCache.Entry entry)
 			{
-				_baked = baked;
+				_entry = entry;
 			}
 
 			public void OnFrame(Renderer original, Renderer proxy)
 			{
-				if (_baked == null)
+				// メッシュはキャッシュが所有・更新する(追いかけフルベイクで
+				// インスタンスが差し替わることがあるため毎フレーム参照する)
+				var baked = _entry?.Baked;
+				if (baked == null)
 					return;
 
 				if (proxy is SkinnedMeshRenderer proxySmr)
 				{
-					proxySmr.sharedMesh = _baked;
+					proxySmr.sharedMesh = baked;
 				}
 				else if (proxy is MeshRenderer && proxy.TryGetComponent<MeshFilter>(out var proxyFilter))
 				{
-					proxyFilter.sharedMesh = _baked;
+					proxyFilter.sharedMesh = baked;
 				}
 			}
 
 			public void Dispose()
 			{
-				if (_baked != null)
-				{
-					Object.DestroyImmediate(_baked);
-					_baked = null;
-				}
+				// メッシュはキャッシュ所有のため破棄しない
 			}
 		}
 	}
