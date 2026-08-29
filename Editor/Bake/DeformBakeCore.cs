@@ -7,6 +7,21 @@ using UnityEngine;
 
 namespace MeshModifier.NDMFDeform.Editor
 {
+	/// <summary>ベイクの範囲を制御するオプション(既定 = フルベイク)</summary>
+	public struct DeformBakeOptions
+	{
+		/// <summary>ブレンドシェイプを再ベイクするか(ビルドでは常に true)</summary>
+		public bool RebakeBlendShapes;
+
+		/// <summary>
+		/// 非 null の場合、この集合に含まれる名前のシェイプのみ再ベイクし、
+		/// 残りは元のデルタを維持する(プレビューでアクティブなシェイプだけ計算する高速化用)。
+		/// </summary>
+		public HashSet<string> ShapesToRebake;
+
+		public static DeformBakeOptions Full => new DeformBakeOptions { RebakeBlendShapes = true };
+	}
+
 	/// <summary>
 	/// ヘッドレスなベイクコア。
 	/// コンポーネントのライフサイクル副作用に依存せず、
@@ -16,15 +31,29 @@ namespace MeshModifier.NDMFDeform.Editor
 	/// ブレンドシェイプは各フレームについて
 	/// deformedDelta = Deform(base + delta) − Deform(base) で再ベイクする
 	/// (旧実装で変形後もデルタが元メッシュ基準のまま顔などが壊れていた問題の解消)。
+	/// 変形が非線形な区間を通るシェイプには中間フレームを自動挿入できる
+	/// (途中重みの直線補間による食い込み・行き過ぎの抑制)。
 	/// </summary>
 	public static class DeformBakeCore
 	{
+		/// <summary>
+		/// 非線形とみなす逸脱量のしきい値(バウンズ対角長に対する比)。
+		/// 中間点の真の変形位置が直線補間からこれ以上ずれるシェイプに中間フレームを挿入する。
+		/// </summary>
+		private const float NonlinearDeviationRatio = 0.002f;
+
+		public static Mesh Bake(DeformStack stack, Mesh source, Transform rendererTransform)
+		{
+			return Bake(stack, source, rendererTransform, DeformBakeOptions.Full);
+		}
+
 		/// <summary>
 		/// スタックを元メッシュへ適用した新しいメッシュインスタンスを返す。
 		/// 有効なデフォーマが 1 つも無い場合は null(呼び出し側は何もしない)。
 		/// 返されたメッシュの破棄・アセット登録は呼び出し側の責務。
 		/// </summary>
-		public static Mesh Bake(DeformStack stack, Mesh source, Transform rendererTransform)
+		public static Mesh Bake(DeformStack stack, Mesh source, Transform rendererTransform,
+			DeformBakeOptions options)
 		{
 			if (stack == null || source == null || rendererTransform == null)
 				return null;
@@ -66,7 +95,9 @@ namespace MeshModifier.NDMFDeform.Editor
 			var bakedBase = new Vector3[channels.VertexCount];
 			RunPipeline(deformers, spaces, in channels, flags, null, bakedBase, result);
 
-			RebakeBlendShapes(result, source, deformers, spaces, in channels, flags, bakedBase);
+			if (options.RebakeBlendShapes)
+				RebakeBlendShapes(result, source, stack, deformers, spaces, in channels, flags,
+					bakedBase, options.ShapesToRebake);
 
 			// 再計算モードの時のみ法線・タンジェントを変形後の形状から作り直す。
 			// 既定(PreserveAuthored)では作り込まれた法線・タンジェント
@@ -156,10 +187,15 @@ namespace MeshModifier.NDMFDeform.Editor
 		/// 各フレームの頂点デルタを Deform(base + delta) − Deform(base) で作り直す。
 		/// 法線・タンジェントデルタは元の値を引き継ぐ
 		/// (現行デフォーマは法線・タンジェントを変更しないため)。
+		/// - shapesToRebake が非 null の場合、含まれない名前のシェイプは元のデルタのまま
+		/// - KeepAuthoredShape 指定のシェイプは「デルタを持つ頂点のみ base+delta へ戻す」
+		/// - 非線形補正が有効な単一フレームシェイプは、中間点の真の変形位置が
+		///   直線補間から大きくずれる場合に 25/50/75% の中間フレームを挿入する
 		/// </summary>
-		private static void RebakeBlendShapes(Mesh result, Mesh source,
+		private static void RebakeBlendShapes(Mesh result, Mesh source, DeformStack stack,
 			List<DeformerBase> deformers, DeformSpace[] spaces,
-			in SourceChannels channels, DeformDataFlags flags, Vector3[] bakedBase)
+			in SourceChannels channels, DeformDataFlags flags, Vector3[] bakedBase,
+			HashSet<string> shapesToRebake)
 		{
 			var shapeCount = source.blendShapeCount;
 			if (shapeCount == 0)
@@ -169,29 +205,123 @@ namespace MeshModifier.NDMFDeform.Editor
 			var deltaVertices = new Vector3[n];
 			var deltaNormals = new Vector3[n];
 			var deltaTangents = new Vector3[n];
+			var scaledNormals = new Vector3[n];
+			var scaledTangents = new Vector3[n];
 			var frameInput = new Vector3[n];
-			var frameOutput = new Vector3[n];
+			var fullOutput = new Vector3[n];
+			var midOutput = new Vector3[n];
+			var scratchOutput = new Vector3[n];
+			var outputDelta = new Vector3[n];
+
+			var deviationThreshold = NonlinearDeviationRatio * source.bounds.size.magnitude;
 
 			result.ClearBlendShapes();
 			for (var s = 0; s < shapeCount; s++)
 			{
 				var name = source.GetBlendShapeName(s);
 				var frameCount = source.GetBlendShapeFrameCount(s);
+				var mode = stack.GetBlendShapeMode(name);
+				var rebake = shapesToRebake == null || shapesToRebake.Contains(name);
+
 				for (var f = 0; f < frameCount; f++)
 				{
 					source.GetBlendShapeFrameVertices(s, f, deltaVertices, deltaNormals, deltaTangents);
 					var weight = source.GetBlendShapeFrameWeight(s, f);
 
+					if (!rebake)
+					{
+						result.AddBlendShapeFrame(name, weight, deltaVertices, deltaNormals, deltaTangents);
+						continue;
+					}
+
+					if (mode == DeformStack.BlendShapeDeltaMode.KeepAuthoredShape)
+					{
+						// デルタを持つ頂点のみ、作者の作った形状(base+delta)へ戻す
+						for (var i = 0; i < n; i++)
+						{
+							outputDelta[i] = deltaVertices[i].sqrMagnitude > 1e-12f
+								? channels.Vertices[i] + deltaVertices[i] - bakedBase[i]
+								: Vector3.zero;
+						}
+						result.AddBlendShapeFrame(name, weight, outputDelta, deltaNormals, deltaTangents);
+						continue;
+					}
+
+					// 変形に追従(既定): Deform(base + delta) − Deform(base)
 					for (var i = 0; i < n; i++)
 						frameInput[i] = channels.Vertices[i] + deltaVertices[i];
+					RunPipeline(deformers, spaces, in channels, flags, frameInput, fullOutput, null);
 
-					RunPipeline(deformers, spaces, in channels, flags, frameInput, frameOutput, null);
+					// 中間点の真の変形位置が直線補間からどれだけずれるかで非線形を検出する。
+					// 複数フレーム持ちのシェイプは作者が中間を制御しているため対象外
+					var curved = false;
+					if (stack.NonlinearShapeCorrection && frameCount == 1)
+					{
+						for (var i = 0; i < n; i++)
+							frameInput[i] = channels.Vertices[i] + deltaVertices[i] * 0.5f;
+						RunPipeline(deformers, spaces, in channels, flags, frameInput, midOutput, null);
+
+						var thresholdSq = deviationThreshold * deviationThreshold;
+						for (var i = 0; i < n; i++)
+						{
+							var linear = (bakedBase[i] + fullOutput[i]) * 0.5f;
+							if ((midOutput[i] - linear).sqrMagnitude > thresholdSq)
+							{
+								curved = true;
+								break;
+							}
+						}
+					}
+
+					if (curved)
+					{
+						AddIntermediateFrame(result, name, weight, 0.25f, deformers, spaces,
+							in channels, flags, deltaVertices, deltaNormals, deltaTangents,
+							bakedBase, frameInput, scratchOutput, outputDelta, scaledNormals, scaledTangents);
+
+						for (var i = 0; i < n; i++)
+							outputDelta[i] = midOutput[i] - bakedBase[i];
+						ScaleDeltas(deltaNormals, deltaTangents, 0.5f, scaledNormals, scaledTangents, n);
+						result.AddBlendShapeFrame(name, weight * 0.5f, outputDelta, scaledNormals, scaledTangents);
+
+						AddIntermediateFrame(result, name, weight, 0.75f, deformers, spaces,
+							in channels, flags, deltaVertices, deltaNormals, deltaTangents,
+							bakedBase, frameInput, scratchOutput, outputDelta, scaledNormals, scaledTangents);
+					}
 
 					for (var i = 0; i < n; i++)
-						deltaVertices[i] = frameOutput[i] - bakedBase[i];
-
-					result.AddBlendShapeFrame(name, weight, deltaVertices, deltaNormals, deltaTangents);
+						outputDelta[i] = fullOutput[i] - bakedBase[i];
+					result.AddBlendShapeFrame(name, weight, outputDelta, deltaNormals, deltaTangents);
 				}
+			}
+		}
+
+		/// <summary>係数 t の中間フレームを 1 枚ベイクして追加する</summary>
+		private static void AddIntermediateFrame(Mesh result, string name, float weight, float t,
+			List<DeformerBase> deformers, DeformSpace[] spaces,
+			in SourceChannels channels, DeformDataFlags flags,
+			Vector3[] deltaVertices, Vector3[] deltaNormals, Vector3[] deltaTangents,
+			Vector3[] bakedBase, Vector3[] frameInput, Vector3[] frameOutput, Vector3[] outputDelta,
+			Vector3[] scaledNormals, Vector3[] scaledTangents)
+		{
+			var n = channels.VertexCount;
+			for (var i = 0; i < n; i++)
+				frameInput[i] = channels.Vertices[i] + deltaVertices[i] * t;
+			RunPipeline(deformers, spaces, in channels, flags, frameInput, frameOutput, null);
+
+			for (var i = 0; i < n; i++)
+				outputDelta[i] = frameOutput[i] - bakedBase[i];
+			ScaleDeltas(deltaNormals, deltaTangents, t, scaledNormals, scaledTangents, n);
+			result.AddBlendShapeFrame(name, weight * t, outputDelta, scaledNormals, scaledTangents);
+		}
+
+		private static void ScaleDeltas(Vector3[] normals, Vector3[] tangents, float t,
+			Vector3[] outNormals, Vector3[] outTangents, int count)
+		{
+			for (var i = 0; i < count; i++)
+			{
+				outNormals[i] = normals[i] * t;
+				outTangents[i] = tangents[i] * t;
 			}
 		}
 

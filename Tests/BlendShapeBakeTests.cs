@@ -73,16 +73,158 @@ namespace MeshModifier.NDMFDeform.Tests
 
 			Assert.That(_baked.blendShapeCount, Is.EqualTo(1));
 			Assert.That(_baked.GetBlendShapeName(0), Is.EqualTo("move"));
-			Assert.That(_baked.GetBlendShapeFrameWeight(0, 0), Is.EqualTo(100f));
+
+			// 非線形補正で中間フレームが挿入されうるため、最終フレームを検証する
+			var last = _baked.GetBlendShapeFrameCount(0) - 1;
+			Assert.That(_baked.GetBlendShapeFrameWeight(0, last), Is.EqualTo(100f));
 
 			var dv = new Vector3[4];
-			_baked.GetBlendShapeFrameVertices(0, 0, dv, null, null);
+			_baked.GetBlendShapeFrameVertices(0, last, dv, null, null);
 
 			// 頂点 2: 外→内へ入って 2 倍にスケールされるため、デルタが作り直される
 			Assert.That(Vector3.Distance(dv[2], new Vector3(-4f, 0f, 0f)), Is.LessThan(1e-4f));
 			// 動かない頂点のデルタは 0 のまま
 			Assert.That(dv[0].magnitude, Is.LessThan(1e-4f));
 			Assert.That(dv[3].magnitude, Is.LessThan(1e-4f));
+		}
+
+		/// <summary>
+		/// 円柱スケールの変形は scope 境界で区分的(非線形)なので、
+		/// 外→内へ横切るシェイプには 25/50/75% の中間フレームが挿入される。
+		/// 50% フレームのデルタは Deform(base + 0.5δ) − Deform(base) に一致する。
+		/// </summary>
+		[Test]
+		public void Bake_NonlinearShapeGetsIntermediateFrames()
+		{
+			var stack = CreateStack();
+			var deformer = AddDeformer<CylindricalScaleDeformer>(stack);
+			deformer.Factor = 1f;
+			deformer.Radius = 2f;
+			deformer.Scope = 1f;
+
+			_source = new Mesh
+			{
+				vertices = new[] { new Vector3(5f, 0f, 0f) },
+			};
+			_source.AddBlendShapeFrame("move", 100f, new[] { new Vector3(-4.5f, 0f, 0f) }, null, null);
+
+			_baked = DeformBakeCore.Bake(stack, _source, _root.transform);
+
+			Assert.That(_baked.GetBlendShapeFrameCount(0), Is.EqualTo(4));
+			Assert.That(_baked.GetBlendShapeFrameWeight(0, 0), Is.EqualTo(25f).Within(1e-3f));
+			Assert.That(_baked.GetBlendShapeFrameWeight(0, 1), Is.EqualTo(50f).Within(1e-3f));
+			Assert.That(_baked.GetBlendShapeFrameWeight(0, 2), Is.EqualTo(75f).Within(1e-3f));
+			Assert.That(_baked.GetBlendShapeFrameWeight(0, 3), Is.EqualTo(100f));
+
+			// 50%: (5,0,0) + 0.5*(-4.5,0,0) = (2.75,0,0) は scope 外 → 変形されず
+			// delta = (2.75,0,0) − Deform(base)=(5,0,0) = (−2.25,0,0)
+			var dv = new Vector3[1];
+			_baked.GetBlendShapeFrameVertices(0, 1, dv, null, null);
+			Assert.That(Vector3.Distance(dv[0], new Vector3(-2.25f, 0f, 0f)), Is.LessThan(1e-4f));
+		}
+
+		[Test]
+		public void Bake_CorrectionDisabledKeepsSingleFrame()
+		{
+			var stack = CreateStack();
+			var deformer = AddDeformer<CylindricalScaleDeformer>(stack);
+			deformer.Factor = 1f;
+			deformer.Radius = 2f;
+			deformer.Scope = 1f;
+			stack.NonlinearShapeCorrection = false;
+
+			_source = new Mesh { vertices = new[] { new Vector3(5f, 0f, 0f) } };
+			_source.AddBlendShapeFrame("move", 100f, new[] { new Vector3(-4.5f, 0f, 0f) }, null, null);
+
+			_baked = DeformBakeCore.Bake(stack, _source, _root.transform);
+
+			Assert.That(_baked.GetBlendShapeFrameCount(0), Is.EqualTo(1));
+			var dv = new Vector3[1];
+			_baked.GetBlendShapeFrameVertices(0, 0, dv, null, null);
+			Assert.That(Vector3.Distance(dv[0], new Vector3(-4f, 0f, 0f)), Is.LessThan(1e-4f));
+		}
+
+		/// <summary>線形な変形(平行移動)ではフレームは増えない</summary>
+		[Test]
+		public void Bake_LinearShapeKeepsSingleFrame()
+		{
+			var stack = CreateStack();
+			AddDeformer<TestTranslateDeformer>(stack);
+
+			_source = new Mesh { vertices = new[] { new Vector3(0f, 0f, 0f) } };
+			_source.AddBlendShapeFrame("move", 100f, new[] { new Vector3(0f, 0f, 2f) }, null, null);
+
+			_baked = DeformBakeCore.Bake(stack, _source, _root.transform);
+
+			Assert.That(_baked.GetBlendShapeFrameCount(0), Is.EqualTo(1));
+		}
+
+		/// <summary>
+		/// KeepAuthoredShape 指定のシェイプは 100% で作者の作った形状そのものになる
+		/// (デルタを持つ頂点のみ変形を打ち消す。デルタ 0 の頂点は変形されたまま)。
+		/// </summary>
+		[Test]
+		public void Bake_KeepAuthoredShapeReachesAuthoredTarget()
+		{
+			var stack = CreateStack();
+			var deformer = AddDeformer<CylindricalScaleDeformer>(stack);
+			deformer.Factor = 1f;
+			deformer.Radius = 2f;
+			deformer.Scope = 1f;
+
+			_source = new Mesh
+			{
+				vertices = new[]
+				{
+					new Vector3(0.5f, 0f, 0f),
+					new Vector3(0f, 0.5f, 0f),
+				},
+			};
+			// 頂点 0 を (0.1,0,0) へ細くするシェイプ(頂点 1 はデルタなし)
+			_source.AddBlendShapeFrame("thin", 100f,
+				new[] { new Vector3(-0.4f, 0f, 0f), Vector3.zero }, null, null);
+			stack.BlendShapeOverrides.Add(new DeformStack.BlendShapeOverride
+			{
+				shapeName = "thin",
+				mode = DeformStack.BlendShapeDeltaMode.KeepAuthoredShape,
+			});
+
+			_baked = DeformBakeCore.Bake(stack, _source, _root.transform);
+
+			Assert.That(_baked.GetBlendShapeFrameCount(0), Is.EqualTo(1));
+			var dv = new Vector3[2];
+			_baked.GetBlendShapeFrameVertices(0, 0, dv, null, null);
+
+			// 頂点 0: Deform(base)=(1,0,0) → 100% で作者のターゲット (0.1,0,0) に届く
+			Assert.That(Vector3.Distance(dv[0], new Vector3(-0.9f, 0f, 0f)), Is.LessThan(1e-4f));
+			// デルタ 0 の頂点は変形されたまま(デルタ 0 のまま)
+			Assert.That(dv[1].magnitude, Is.LessThan(1e-4f));
+		}
+
+		/// <summary>ShapesToRebake に含まれないシェイプは元のデルタを維持する(プレビュー高速化)</summary>
+		[Test]
+		public void Bake_ShapeFilterKeepsOriginalDeltas()
+		{
+			var stack = CreateStack();
+			var deformer = AddDeformer<CylindricalScaleDeformer>(stack);
+			deformer.Factor = 1f;
+			deformer.Radius = 2f;
+			deformer.Scope = 1f;
+
+			_source = new Mesh { vertices = new[] { new Vector3(5f, 0f, 0f) } };
+			_source.AddBlendShapeFrame("move", 100f, new[] { new Vector3(-4.5f, 0f, 0f) }, null, null);
+
+			var options = new DeformBakeOptions
+			{
+				RebakeBlendShapes = true,
+				ShapesToRebake = new System.Collections.Generic.HashSet<string>(),
+			};
+			_baked = DeformBakeCore.Bake(stack, _source, _root.transform, options);
+
+			Assert.That(_baked.GetBlendShapeFrameCount(0), Is.EqualTo(1));
+			var dv = new Vector3[1];
+			_baked.GetBlendShapeFrameVertices(0, 0, dv, null, null);
+			Assert.That(Vector3.Distance(dv[0], new Vector3(-4.5f, 0f, 0f)), Is.LessThan(1e-4f));
 		}
 
 		[Test]

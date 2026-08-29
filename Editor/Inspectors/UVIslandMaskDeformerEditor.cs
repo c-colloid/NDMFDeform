@@ -192,7 +192,11 @@ namespace MeshModifier.NDMFDeform.Editor
 			DestroyPreviewMesh();
 			Mesh baked = null;
 			if (stack != null)
-				baked = DeformBakeCore.Bake(stack, source, meshTransform);
+			{
+				// ハイライト用途は頂点位置だけあればよいのでシェイプ再ベイクは省く
+				baked = DeformBakeCore.Bake(stack, source, meshTransform,
+					new DeformBakeOptions { RebakeBlendShapes = false });
+			}
 			if (baked != null)
 			{
 				baked.hideFlags = HideFlags.HideAndDontSave;

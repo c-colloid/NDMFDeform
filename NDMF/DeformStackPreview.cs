@@ -56,8 +56,39 @@ namespace MeshModifier.NDMFDeform.NDMF
 			if (source == null)
 				return null;
 
-			var baked = DeformBakeCore.Bake(stack, source, original.transform);
+			// プレビューでは現在重みが非 0 のシェイプだけ再ベイクして編集中の再計算を軽くする。
+			// アクティブ集合(0 ↔ 非 0)の変化を監視するので、新たに動かしたシェイプも
+			// その時点で正しいデルタに再計算される。ビルドは常に全シェイプを再ベイクする
+			HashSet<string> activeShapes = null;
+			if (original is SkinnedMeshRenderer originalSmr)
+			{
+				activeShapes = context.Observe(originalSmr,
+					smr => GetActiveShapeNames(smr),
+					(a, b) => a.SetEquals(b));
+			}
+
+			var options = new DeformBakeOptions
+			{
+				RebakeBlendShapes = true,
+				ShapesToRebake = activeShapes,
+			};
+			var baked = DeformBakeCore.Bake(stack, source, original.transform, options);
 			return Task.FromResult<IRenderFilterNode>(new Node(baked));
+		}
+
+		private static HashSet<string> GetActiveShapeNames(SkinnedMeshRenderer smr)
+		{
+			var names = new HashSet<string>();
+			var mesh = smr.sharedMesh;
+			if (mesh == null)
+				return names;
+
+			for (var i = 0; i < mesh.blendShapeCount; i++)
+			{
+				if (!Mathf.Approximately(smr.GetBlendShapeWeight(i), 0f))
+					names.Add(mesh.GetBlendShapeName(i));
+			}
+			return names;
 		}
 
 		private class Node : IRenderFilterNode

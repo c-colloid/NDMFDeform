@@ -34,8 +34,35 @@ namespace MeshModifier.NDMFDeform.Core
 			Recalculate = 1,
 		}
 
+		/// <summary>ブレンドシェイプのデルタをベイク時にどう扱うか(シェイプ別に上書き可能)</summary>
+		public enum BlendShapeDeltaMode
+		{
+			/// <summary>変形に追従: deformedDelta = Deform(base+delta) − Deform(base)(既定)</summary>
+			FollowDeform = 0,
+
+			/// <summary>
+			/// 作った形を維持: シェイプ 100% で作者の作った形状(base+delta)そのものになる
+			/// (デルタを持つ頂点についてのみ変形を打ち消す)。
+			/// 「太さ 0」のような絶対的なターゲットを持つシェイプ向け。
+			/// デフォーマの影響範囲がシェイプの影響範囲からはみ出していると境界に段差が出うる。
+			/// </summary>
+			KeepAuthoredShape = 1,
+		}
+
+		[System.Serializable]
+		public struct BlendShapeOverride
+		{
+			public string shapeName;
+			public BlendShapeDeltaMode mode;
+		}
+
 		[SerializeField] private List<DeformerEntry> deformers = new List<DeformerEntry>();
 		[SerializeField] private NormalsMode normalsMode = NormalsMode.PreserveAuthored;
+
+		// 変形が非線形な区間を通るシェイプに中間フレームを自動挿入し、
+		// 途中重みでの直線補間による食い込み・行き過ぎを抑える
+		[SerializeField] private bool nonlinearShapeCorrection = true;
+		[SerializeField] private List<BlendShapeOverride> blendShapeOverrides = new List<BlendShapeOverride>();
 
 		public IReadOnlyList<DeformerEntry> Deformers => deformers;
 
@@ -43,6 +70,24 @@ namespace MeshModifier.NDMFDeform.Core
 		{
 			get => normalsMode;
 			set => normalsMode = value;
+		}
+
+		public bool NonlinearShapeCorrection
+		{
+			get => nonlinearShapeCorrection;
+			set => nonlinearShapeCorrection = value;
+		}
+
+		public List<BlendShapeOverride> BlendShapeOverrides => blendShapeOverrides;
+
+		public BlendShapeDeltaMode GetBlendShapeMode(string shapeName)
+		{
+			foreach (var entry in blendShapeOverrides)
+			{
+				if (entry.shapeName == shapeName)
+					return entry.mode;
+			}
+			return BlendShapeDeltaMode.FollowDeform;
 		}
 
 		/// <summary>スタック末尾にデフォーマを追加する(テスト・移行ツール用 API)</summary>
