@@ -119,7 +119,8 @@ namespace MeshModifier.NDMFDeform.Editor
 			{
 				foreach (var deformer in deformers)
 				{
-					var space = new DeformSpace(GetMeshToAxis(deformer.Axis, rendererTransform));
+					var space = new DeformSpace(
+						GetMeshToAxis(deformer.Axis, rendererTransform), rendererTransform);
 					handle = deformer.Schedule(in buffers, in space, handle);
 				}
 			}

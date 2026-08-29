@@ -1,4 +1,5 @@
 using Unity.Mathematics;
+using UnityEngine;
 
 namespace MeshModifier.NDMFDeform.Core
 {
@@ -12,10 +13,21 @@ namespace MeshModifier.NDMFDeform.Core
 		public readonly float4x4 MeshToAxis;
 		public readonly float4x4 AxisToMesh;
 
-		public DeformSpace(float4x4 meshToAxis)
+		/// <summary>
+		/// レンダラーの Transform(メインスレッド専用。ジョブへ渡さず、
+		/// Schedule 内で行列などへ変換して使うこと)。
+		/// TransformDeformer のように軸空間以外の情報が要るデフォーマが参照する。
+		/// 直接構築された場合など null のことがあるため、使用側は null を許容すること。
+		/// </summary>
+		public readonly Transform RendererTransform;
+
+		public DeformSpace(float4x4 meshToAxis) : this(meshToAxis, null) { }
+
+		public DeformSpace(float4x4 meshToAxis, Transform rendererTransform)
 		{
 			MeshToAxis = meshToAxis;
 			AxisToMesh = math.inverse(meshToAxis);
+			RendererTransform = rendererTransform;
 		}
 	}
 }

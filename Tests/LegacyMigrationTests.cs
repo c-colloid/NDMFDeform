@@ -48,6 +48,17 @@ namespace MeshModifier.NDMFDeform.Tests
 			public int normalsRecalculation; // 旧 enum: Auto = 0 / None = 1
 		}
 
+		private class FakeLegacyScale : MonoBehaviour
+		{
+			public Transform axis;
+		}
+
+		private class FakeLegacyTransform : MonoBehaviour
+		{
+			public Transform target;
+			public float factor = 1f;
+		}
+
 		private (FakeLegacyDeformable deformable, FakeLegacyLattice lattice) CreateLegacySetup()
 		{
 			_root = new GameObject("LegacyRoot");
@@ -107,6 +118,55 @@ namespace MeshModifier.NDMFDeform.Tests
 
 			// 旧コンポーネントは削除される
 			Assert.That(legacyLattice == null, Is.True);
+			Assert.That(deformable == null, Is.True);
+		}
+
+		[Test]
+		public void Migrate_ConvertsScaleAndTransformDeformers()
+		{
+			_root = new GameObject("LegacyRoot");
+			var deformable = _root.AddComponent<FakeLegacyDeformable>();
+
+			var scaleGo = new GameObject("LegacyScale");
+			scaleGo.transform.SetParent(_root.transform, false);
+			var legacyScale = scaleGo.AddComponent<FakeLegacyScale>();
+
+			var targetGo = new GameObject("Target");
+			targetGo.transform.SetParent(_root.transform, false);
+			var transformGo = new GameObject("LegacyTransform");
+			transformGo.transform.SetParent(_root.transform, false);
+			var legacyTransform = transformGo.AddComponent<FakeLegacyTransform>();
+			legacyTransform.target = targetGo.transform;
+			legacyTransform.factor = 0.5f;
+
+			deformable.deformerElements.Add(new FakeLegacyDeformable.Element { component = legacyScale });
+			deformable.deformerElements.Add(new FakeLegacyDeformable.Element { component = legacyTransform });
+
+			var report = LegacyDeformMigration.Migrate(
+				new Component[] { deformable }, removeLegacy: true,
+				isScale: c => c is FakeLegacyScale,
+				isTransform: c => c is FakeLegacyTransform);
+
+			Assert.That(report.SimpleDeformersMigrated, Is.EqualTo(2));
+			Assert.That(report.UnsupportedDeformers, Is.Empty);
+
+			Assert.That(_root.TryGetComponent<DeformStack>(out var stack), Is.True);
+			Assert.That(stack.Deformers.Count, Is.EqualTo(2));
+
+			var scale = stack.Deformers[0].deformer as ScaleDeformer;
+			Assert.That(scale, Is.Not.Null);
+			Assert.That(scale.gameObject, Is.SameAs(scaleGo));
+			Assert.That(scale.AxisOverride == null, Is.True);
+			Assert.That(scale.Axis, Is.SameAs(scaleGo.transform));
+
+			var transform = stack.Deformers[1].deformer as TransformDeformer;
+			Assert.That(transform, Is.Not.Null);
+			Assert.That(transform.Target, Is.SameAs(targetGo.transform));
+			Assert.That(transform.Factor, Is.EqualTo(0.5f).Within(1e-5f));
+
+			// 旧コンポーネントは削除される
+			Assert.That(legacyScale == null, Is.True);
+			Assert.That(legacyTransform == null, Is.True);
 			Assert.That(deformable == null, Is.True);
 		}
 

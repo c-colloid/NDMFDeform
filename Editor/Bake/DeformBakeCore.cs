@@ -73,7 +73,8 @@ namespace MeshModifier.NDMFDeform.Editor
 			// 軸空間はフレーム間で不変なので 1 回だけ計算する
 			var spaces = new DeformSpace[deformers.Count];
 			for (var i = 0; i < deformers.Count; i++)
-				spaces[i] = new DeformSpace(GetMeshToAxis(deformers[i].Axis, rendererTransform));
+				spaces[i] = new DeformSpace(
+					GetMeshToAxis(deformers[i].Axis, rendererTransform), rendererTransform);
 
 			// 各パスで共有するソースチャンネル(頂点以外はフレーム間で共通)
 			var channels = new SourceChannels

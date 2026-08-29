@@ -16,14 +16,20 @@ namespace MeshModifier.NDMFDeform.Editor
 	{
 		public const string DeformableTypeName = "Deform.Deformable";
 		public const string LatticeTypeName = "Deform.LatticeDeformer";
+		public const string ScaleTypeName = "Deform.ScaleDeformer";
+		public const string TransformTypeName = "Deform.TransformDeformer";
 
 		public sealed class Report
 		{
 			public int StacksCreated;
 			public int LatticesMigrated;
+			public int SimpleDeformersMigrated;
 
 			/// <summary>移行できなかった旧デフォーマ("オブジェクト名: 型名")</summary>
 			public readonly List<string> UnsupportedDeformers = new List<string>();
+
+			/// <summary>移行はしたが挙動が変わる点などの注意</summary>
+			public readonly List<string> Notes = new List<string>();
 		}
 
 		public static bool IsLegacyDeformable(Component component) =>
@@ -63,9 +69,13 @@ namespace MeshModifier.NDMFDeform.Editor
 		/// isLattice はテスト用の差し替えポイント。
 		/// </summary>
 		public static Report Migrate(IEnumerable<Component> legacyDeformables, bool removeLegacy,
-			Func<Component, bool> isLattice = null)
+			Func<Component, bool> isLattice = null,
+			Func<Component, bool> isScale = null,
+			Func<Component, bool> isTransform = null)
 		{
 			isLattice ??= IsLegacyLattice;
+			isScale ??= c => TypeNameMatches(c, ScaleTypeName);
+			isTransform ??= c => TypeNameMatches(c, TransformTypeName);
 			var report = new Report();
 
 			foreach (var legacy in legacyDeformables)
@@ -73,6 +83,15 @@ namespace MeshModifier.NDMFDeform.Editor
 				if (legacy == null)
 					continue;
 				var go = legacy.gameObject;
+
+				// ElasticDeformable など派生型のスタックも移行するが、
+				// 実行時挙動(揺れ等)はベイク対象外である旨を残す
+				if (TypeNameMatches(legacy, DeformableTypeName) &&
+				    legacy.GetType().FullName != DeformableTypeName)
+				{
+					report.Notes.Add(
+						$"{go.name}: {legacy.GetType().Name} の実行時挙動(揺れ等)は移行されません(ベイクは静的です)");
+				}
 
 				if (!go.TryGetComponent<DeformStack>(out var stack))
 				{
@@ -112,6 +131,18 @@ namespace MeshModifier.NDMFDeform.Editor
 							migratedComponents.Add(component);
 							report.LatticesMigrated++;
 						}
+						else if (isScale(component))
+						{
+							stack.AddDeformer(MigrateScale(component), active);
+							migratedComponents.Add(component);
+							report.SimpleDeformersMigrated++;
+						}
+						else if (isTransform(component))
+						{
+							stack.AddDeformer(MigrateTransform(component), active);
+							migratedComponents.Add(component);
+							report.SimpleDeformersMigrated++;
+						}
 						else
 						{
 							// Missing Script は型が素の MonoBehaviour として現れる
@@ -137,6 +168,36 @@ namespace MeshModifier.NDMFDeform.Editor
 			}
 
 			return report;
+		}
+
+		/// <summary>旧 ScaleDeformer → v2 ScaleDeformer(パラメータは軸 Transform の localScale のまま)</summary>
+		public static ScaleDeformer MigrateScale(Component legacyScale)
+		{
+			var scale = Undo.AddComponent<ScaleDeformer>(legacyScale.gameObject);
+			var legacySo = new SerializedObject(legacyScale);
+			var so = new SerializedObject(scale);
+
+			// 旧 axis(null = 自身の Transform)はそのまま axisOverride へ
+			var axis = legacySo.FindProperty("axis")?.objectReferenceValue;
+			so.FindProperty("axisOverride").objectReferenceValue = axis;
+			so.ApplyModifiedPropertiesWithoutUndo();
+			return scale;
+		}
+
+		/// <summary>旧 TransformDeformer → v2 TransformDeformer(target / factor を引き継ぐ)</summary>
+		public static TransformDeformer MigrateTransform(Component legacyTransform)
+		{
+			var deformer = Undo.AddComponent<TransformDeformer>(legacyTransform.gameObject);
+			var legacySo = new SerializedObject(legacyTransform);
+			var so = new SerializedObject(deformer);
+
+			var target = legacySo.FindProperty("target")?.objectReferenceValue;
+			so.FindProperty("target").objectReferenceValue = target;
+			var factor = legacySo.FindProperty("factor");
+			if (factor != null)
+				so.FindProperty("factor").floatValue = Mathf.Clamp01(factor.floatValue);
+			so.ApplyModifiedPropertiesWithoutUndo();
+			return deformer;
 		}
 
 		/// <summary>

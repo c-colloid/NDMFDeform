@@ -95,12 +95,19 @@ namespace MeshModifier.NDMFDeform.Editor
 
 			var lines = new List<string>
 			{
-				$"移行完了: DeformStack {report.StacksCreated} 件 / Lattice {report.LatticesMigrated} 件",
+				$"移行完了: DeformStack {report.StacksCreated} 件 / Lattice {report.LatticesMigrated} 件" +
+				$" / Transform・Scale {report.SimpleDeformersMigrated} 件",
 			};
 			if (report.UnsupportedDeformers.Count > 0)
 			{
 				lines.Add("未対応(手動で対応してください):");
 				foreach (var entry in report.UnsupportedDeformers)
+					lines.Add($"  {entry}");
+			}
+			if (report.Notes.Count > 0)
+			{
+				lines.Add("注意:");
+				foreach (var entry in report.Notes)
 					lines.Add($"  {entry}");
 			}
 			Refresh();
