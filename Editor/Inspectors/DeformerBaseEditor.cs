@@ -37,6 +37,12 @@ namespace MeshModifier.NDMFDeform.Editor
 			foreach (var so in _sceneSerializedObjects.Values)
 				so?.Dispose();
 			_sceneSerializedObjects.Clear();
+
+			// 点選択中に隠した標準 Transform ギズモを戻す
+			foreach (var grids in _pointGrids.Values)
+				foreach (var controller in grids.Values)
+					controller.ReleaseToolsHidden();
+			_pointGrids.Clear();
 		}
 
 		private SerializedObject GetSceneSerializedObject(DeformerBase deformer)

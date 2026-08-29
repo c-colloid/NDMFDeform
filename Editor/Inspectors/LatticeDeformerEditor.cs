@@ -76,6 +76,8 @@ namespace MeshModifier.NDMFDeform.Editor
 				"Ctrl+Shift+ドラッグ: スワイプ方向の軸のリング(ループ)選択\n" +
 				"クリックのみの場合は再クリックで軸循環、\n" +
 				"Ctrl+Shift+ダブルクリックでシート全体に拡張します。\n" +
+				"選択中は W/E/R(移動 / 回転 / スケール)ツールが\n" +
+				"選択点に適用されます。Esc または空クリックで選択解除。\n" +
 				"表示設定(奥点フェード・スライス)は SceneView の\n" +
 				"「NDMF Deform Lattice」オーバーレイから切替えられます。");
 			hint.style.opacity = 0.7f;

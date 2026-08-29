@@ -141,10 +141,11 @@ namespace MeshModifier.NDMFDeform.Editor
 			using (new Handles.DrawingScope(Matrix4x4.identity))
 			{
 				DrawWireframe(resolution);
+				HandleEscape();
 				HandleAxisGesture(resolution);
 				DrawPointsAndPick(resolution);
 				HandleMarquee(resolution);
-				MoveSelection(resolution, mirror);
+				TransformSelection(resolution, mirror);
 			}
 
 			return CommitIfNeeded(serializedObject, points);
@@ -240,27 +241,153 @@ namespace MeshModifier.NDMFDeform.Editor
 			Handles.zTest = CompareFunction.Always;
 		}
 
-		private void MoveSelection(Vector3Int resolution, MirrorAxis mirror)
+		// ==== 選択点の変形(Unity のツール W/E/R に追従) ====
+		// ドラッグ開始時に選択点の位置とピボットをスナップショットし、
+		// 毎フレーム「開始時からの合計変形」を開始位置に適用する
+		// (増分適用の誤差蓄積と、コミット間引きとの競合を避ける)。
+		// 点選択中は標準の Transform ギズモを隠し、W/E/R を点操作に割り当てる。
+
+		private bool _transformActive;
+		private Vector3 _transformPivot;
+		private Quaternion _transformStartRotation = Quaternion.identity;
+		private Vector3 _gizmoPosition;
+		private Quaternion _gizmoRotation = Quaternion.identity;
+		private Vector3 _gizmoScale = Vector3.one;
+		private readonly Dictionary<int, float3> _transformStartLocal = new Dictionary<int, float3>();
+
+		private static readonly HashSet<PointGridController> ToolHiders = new HashSet<PointGridController>();
+		private static bool _toolsHiddenByUs;
+
+		private void TransformSelection(Vector3Int resolution, MirrorAxis mirror)
 		{
+			UpdateToolsHidden();
+
 			if (_selection.Count == 0)
 				return;
 
-			var pivot = Vector3.zero;
-			foreach (var i in _selection)
-				pivot += _worldCache[i];
-			pivot /= _selection.Count;
+			if (_transformActive && GUIUtility.hotControl == 0)
+				EndTransform();
+
+			var tool = Tools.current;
+			if (tool == Tool.View)
+				return;
+
+			Vector3 pivot;
+			if (_transformActive)
+			{
+				pivot = _transformPivot;
+			}
+			else
+			{
+				pivot = Vector3.zero;
+				foreach (var i in _selection)
+					pivot += _worldCache[i];
+				pivot /= _selection.Count;
+			}
+
+			if (tool == Tool.Rotate)
+				RotateSelection(pivot, resolution, mirror);
+			else if (tool == Tool.Scale)
+				ScaleSelection(pivot, resolution, mirror);
+			else
+				MoveSelection(pivot, resolution, mirror);
+		}
+
+		private void MoveSelection(Vector3 pivot, Vector3Int resolution, MirrorAxis mirror)
+		{
+			if (!_transformActive)
+				_gizmoPosition = pivot;
 
 			EditorGUI.BeginChangeCheck();
-			var newPivot = Handles.PositionHandle(pivot, Quaternion.identity);
+			var newPosition = Handles.PositionHandle(_gizmoPosition, HandleOrientation());
 			if (!EditorGUI.EndChangeCheck())
 				return;
 
-			// ワールドのデルタを軸空間へ変換し、キャッシュにのみ適用する
-			// (フィールドへの反映は CommitIfNeeded がまとめて行う)
-			var localDelta = (float3)_axisInverse.MultiplyVector(newPivot - pivot);
+			if (!_transformActive)
+				BeginTransform(pivot, HandleOrientation());
+			_gizmoPosition = newPosition;
+
+			var delta = newPosition - _transformPivot;
+			ApplyToSelection(resolution, mirror, startWorld => startWorld + delta);
+		}
+
+		private void RotateSelection(Vector3 pivot, Vector3Int resolution, MirrorAxis mirror)
+		{
+			if (!_transformActive)
+				_gizmoRotation = HandleOrientation();
+
+			EditorGUI.BeginChangeCheck();
+			var newRotation = Handles.RotationHandle(_gizmoRotation, pivot);
+			if (!EditorGUI.EndChangeCheck())
+				return;
+
+			if (!_transformActive)
+				BeginTransform(pivot, _gizmoRotation);
+			_gizmoRotation = newRotation;
+
+			var delta = newRotation * Quaternion.Inverse(_transformStartRotation);
+			ApplyToSelection(resolution, mirror, startWorld => pivot + delta * (startWorld - pivot));
+		}
+
+		private void ScaleSelection(Vector3 pivot, Vector3Int resolution, MirrorAxis mirror)
+		{
+			var orientation = _transformActive ? _transformStartRotation : HandleOrientation();
+			if (!_transformActive)
+				_gizmoScale = Vector3.one;
+
+			EditorGUI.BeginChangeCheck();
+			var newScale = Handles.ScaleHandle(_gizmoScale, pivot, orientation,
+				HandleUtility.GetHandleSize(pivot));
+			if (!EditorGUI.EndChangeCheck())
+				return;
+
+			if (!_transformActive)
+				BeginTransform(pivot, orientation);
+			_gizmoScale = newScale;
+
+			var inverse = Quaternion.Inverse(_transformStartRotation);
+			ApplyToSelection(resolution, mirror, startWorld =>
+				pivot + _transformStartRotation * Vector3.Scale(inverse * (startWorld - pivot), newScale));
+		}
+
+		/// <summary>Global/Local(Tools.pivotRotation)に応じたハンドルの姿勢</summary>
+		private Quaternion HandleOrientation()
+		{
+			return Tools.pivotRotation == PivotRotation.Local ? _axisMatrix.rotation : Quaternion.identity;
+		}
+
+		private void BeginTransform(Vector3 pivot, Quaternion orientation)
+		{
+			_transformActive = true;
+			_transformPivot = pivot;
+			_transformStartRotation = orientation;
+			_transformStartLocal.Clear();
+			foreach (var i in _selection)
+				_transformStartLocal[i] = _localCache[i];
+		}
+
+		private void EndTransform()
+		{
+			_transformActive = false;
+			_transformStartLocal.Clear();
+			_gizmoRotation = Quaternion.identity;
+			_gizmoScale = Vector3.one;
+		}
+
+		/// <summary>
+		/// ドラッグ開始時の各選択点(ワールド)に transformWorld を適用し、
+		/// キャッシュにのみ反映する(フィールドへの反映は CommitIfNeeded がまとめて行う)。
+		/// </summary>
+		private void ApplyToSelection(Vector3Int resolution, MirrorAxis mirror,
+			System.Func<Vector3, Vector3> transformWorld)
+		{
 			foreach (var i in _selection)
 			{
-				var newPos = _localCache[i] + localDelta;
+				if (!_transformStartLocal.TryGetValue(i, out var startLocal))
+					continue;
+
+				var startWorld = _axisMatrix.MultiplyPoint3x4((Vector3)startLocal);
+				var newPos = (float3)_axisInverse.MultiplyPoint3x4(transformWorld(startWorld));
 				_localCache[i] = newPos;
 				_worldCache[i] = _axisMatrix.MultiplyPoint3x4((Vector3)newPos);
 				_dirtyIndices.Add(i);
@@ -278,6 +405,48 @@ namespace MeshModifier.NDMFDeform.Editor
 				}
 			}
 			_cacheDirty = true;
+		}
+
+		/// <summary>Esc で選択解除(標準ギズモが戻る)</summary>
+		private void HandleEscape()
+		{
+			var evt = Event.current;
+			if (evt.type == EventType.KeyDown && evt.keyCode == KeyCode.Escape &&
+			    _selection.Count > 0 && GUIUtility.hotControl == 0)
+			{
+				_selection.Clear();
+				evt.Use();
+				SceneView.RepaintAll();
+			}
+		}
+
+		/// <summary>
+		/// 点選択中は標準の Transform ギズモを隠す(W/E/R を点操作に割り当てるため)。
+		/// Tools.hidden はグローバルなので、自分たちが隠した場合のみ状態遷移で戻す。
+		/// </summary>
+		private void UpdateToolsHidden()
+		{
+			if (_selection.Count > 0)
+				ToolHiders.Add(this);
+			else
+				ToolHiders.Remove(this);
+			SyncToolsHidden();
+		}
+
+		/// <summary>エディタ破棄時に呼ぶ。標準ギズモの非表示を解除する</summary>
+		public void ReleaseToolsHidden()
+		{
+			ToolHiders.Remove(this);
+			SyncToolsHidden();
+		}
+
+		private static void SyncToolsHidden()
+		{
+			var want = ToolHiders.Count > 0;
+			if (want == _toolsHiddenByUs)
+				return;
+			_toolsHiddenByUs = want;
+			Tools.hidden = want;
 		}
 
 		/// <summary>
@@ -302,7 +471,7 @@ namespace MeshModifier.NDMFDeform.Editor
 			var fast = TryGetFieldArray(target, points.name);
 			if (fast != null && fast.Length == _localCache.Length)
 			{
-				Undo.RecordObject(target, "Move Lattice Points");
+				Undo.RecordObject(target, "Edit Lattice Points");
 				foreach (var i in _dirtyIndices)
 					fast[i] = _localCache[i];
 				PrefabUtility.RecordPrefabInstancePropertyModifications(target);
