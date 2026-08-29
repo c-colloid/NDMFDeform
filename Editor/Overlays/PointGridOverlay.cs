@@ -8,39 +8,50 @@ using UnityEngine.UIElements;
 namespace MeshModifier.NDMFDeform.Editor
 {
 	/// <summary>
-	/// PointGrid(格子ハンドル)の表示・選択操作を集約した SceneView オーバーレイ。
-	/// 「表示」「スライス」「選択」の 3 セクションで構成する。
+	/// PointGrid(格子ハンドル)の表示・選択操作のコンパクトな SceneView オーバーレイ。
+	/// 操作方法の説明はインスペクタ側の「操作ガイド」にある。
 	/// </summary>
 	[Overlay(typeof(SceneView), "NDMF Deform Lattice", true)]
 	public class PointGridOverlay : Overlay
 	{
 		private static readonly Color StripOnColor = new Color(0.2f, 0.42f, 0.68f);
+		private const float LabelWidth = 58;
 
 		public override VisualElement CreatePanelContent()
 		{
 			var root = new VisualElement();
-			root.style.minWidth = 210;
+			root.style.minWidth = 200;
 
-			// --- 表示 ---
-			var displaySection = AddSection(root, "表示");
-
-			var occlusion = new EnumField("奥点の表示", PointGridViewState.OcclusionMode);
+			// 奥点の表示モード
+			var occlusion = new EnumField("奥点", PointGridViewState.OcclusionMode);
+			occlusion.labelElement.style.minWidth = LabelWidth;
 			occlusion.RegisterValueChangedCallback(e =>
 			{
 				PointGridViewState.OcclusionMode = (PointGridOcclusionMode)e.newValue;
 				SceneView.RepaintAll();
 			});
-			displaySection.Add(occlusion);
+			root.Add(occlusion);
 
-			// --- スライス ---
-			var sliceSection = AddSection(root, "スライス");
+			// スライス: トグル + 軸を 1 行に、番号ボタンは有効時のみ表示
+			var sliceRow = new VisualElement();
+			sliceRow.style.flexDirection = FlexDirection.Row;
+			sliceRow.style.alignItems = Align.Center;
 
-			var sliceToggle = new Toggle("スライス表示") { value = PointGridViewState.SliceEnabled };
-			var sliceAxis = new EnumField("スライス軸", PointGridViewState.SliceAxis);
+			var sliceToggle = new Toggle("スライス") { value = PointGridViewState.SliceEnabled };
+			sliceToggle.labelElement.style.minWidth = LabelWidth;
+			var sliceAxis = new EnumField(PointGridViewState.SliceAxis);
+			sliceAxis.style.width = 46;
+			sliceAxis.style.flexShrink = 0;
+			sliceRow.Add(sliceToggle);
+			sliceRow.Add(sliceAxis);
+			root.Add(sliceRow);
+
 			var strip = new VisualElement();
 			strip.style.flexDirection = FlexDirection.Row;
 			strip.style.flexWrap = Wrap.Wrap;
-			strip.style.marginTop = 2;
+			strip.style.marginLeft = LabelWidth + 4;
+			strip.style.marginBottom = 2;
+			root.Add(strip);
 
 			void RebuildStrip()
 			{
@@ -67,10 +78,15 @@ namespace MeshModifier.NDMFDeform.Editor
 				}
 			}
 
+			void UpdateStripVisibility()
+			{
+				strip.style.display = PointGridViewState.SliceEnabled ? DisplayStyle.Flex : DisplayStyle.None;
+			}
+
 			sliceToggle.RegisterValueChangedCallback(e =>
 			{
 				PointGridViewState.SliceEnabled = e.newValue;
-				strip.SetEnabled(e.newValue);
+				UpdateStripVisibility();
 				SceneView.RepaintAll();
 			});
 			sliceAxis.RegisterValueChangedCallback(e =>
@@ -82,10 +98,7 @@ namespace MeshModifier.NDMFDeform.Editor
 			});
 
 			RebuildStrip();
-			strip.SetEnabled(PointGridViewState.SliceEnabled);
-			sliceSection.Add(sliceToggle);
-			sliceSection.Add(sliceAxis);
-			sliceSection.Add(strip);
+			UpdateStripVisibility();
 
 			// 選択や解像度の変化に番号ボタンを追従させる
 			var lastMax = SliceMaxIndex();
@@ -99,43 +112,19 @@ namespace MeshModifier.NDMFDeform.Editor
 				}
 			}).Every(500);
 
-			// --- 選択 ---
-			var selectionSection = AddSection(root, "選択");
-
-			var hint = new Label(
-				"Ctrl+ドラッグ: スワイプ方向の軸で行選択\n" +
-				"Ctrl+Shift+ドラッグ: スワイプ方向の軸のリング選択\n" +
-				"クリックのみ: 再クリックで軸循環 / ダブルクリック: シート全体");
-			hint.style.opacity = 0.6f;
-			hint.style.fontSize = 10;
-			hint.style.whiteSpace = WhiteSpace.Normal;
-			hint.style.marginBottom = 2;
-			selectionSection.Add(hint);
-
-			var buttons = new VisualElement();
-			buttons.style.flexDirection = FlexDirection.Row;
-			buttons.Add(MakeCommandButton("全選択", PointGridCommand.SelectAll));
-			buttons.Add(MakeCommandButton("解除", PointGridCommand.ClearSelection));
-			buttons.Add(MakeCommandButton("反転", PointGridCommand.InvertSelection));
-			selectionSection.Add(buttons);
+			// 選択コマンド
+			var selectionRow = new VisualElement();
+			selectionRow.style.flexDirection = FlexDirection.Row;
+			selectionRow.style.alignItems = Align.Center;
+			var selectionLabel = new Label("選択");
+			selectionLabel.style.minWidth = LabelWidth;
+			selectionRow.Add(selectionLabel);
+			selectionRow.Add(MakeCommandButton("全", PointGridCommand.SelectAll));
+			selectionRow.Add(MakeCommandButton("解除", PointGridCommand.ClearSelection));
+			selectionRow.Add(MakeCommandButton("反転", PointGridCommand.InvertSelection));
+			root.Add(selectionRow);
 
 			return root;
-		}
-
-		/// <summary>見出し付きセクションを追加し、内容用コンテナを返す</summary>
-		private static VisualElement AddSection(VisualElement root, string title)
-		{
-			var header = new Label(title);
-			header.style.unityFontStyleAndWeight = FontStyle.Bold;
-			header.style.fontSize = 11;
-			header.style.opacity = 0.75f;
-			header.style.marginTop = root.childCount == 0 ? 0 : 8;
-			root.Add(header);
-
-			var content = new VisualElement();
-			content.style.marginLeft = 6;
-			root.Add(content);
-			return content;
 		}
 
 		private static void StyleStripButton(Button button, bool on)

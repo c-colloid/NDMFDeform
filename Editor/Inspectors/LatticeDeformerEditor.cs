@@ -67,8 +67,10 @@ namespace MeshModifier.NDMFDeform.Editor
 			buttons.Add(fitBounds);
 			root.Add(buttons);
 
+			var guide = new Foldout { text = "操作ガイド", value = false };
+			guide.style.marginTop = 4;
 			var hint = new Label(
-				"制御点はシーンビューで編集します:\n" +
+				"制御点はシーンビューで編集します。\n" +
 				"クリック選択 / Shift 追加 / ドラッグで矩形選択\n" +
 				"Ctrl+ドラッグ: 点から軸ガイドが出て、スワイプ方向の軸で行選択\n" +
 				"Ctrl+Shift+ドラッグ: スワイプ方向の軸のリング(ループ)選択\n" +
@@ -76,10 +78,10 @@ namespace MeshModifier.NDMFDeform.Editor
 				"Ctrl+Shift+ダブルクリックでシート全体に拡張します。\n" +
 				"表示設定(奥点フェード・スライス)は SceneView の\n" +
 				"「NDMF Deform Lattice」オーバーレイから切替えられます。");
-			hint.style.opacity = 0.6f;
+			hint.style.opacity = 0.7f;
 			hint.style.whiteSpace = WhiteSpace.Normal;
-			hint.style.marginTop = 4;
-			root.Add(hint);
+			guide.Add(hint);
+			root.Add(guide);
 
 			return root;
 		}
