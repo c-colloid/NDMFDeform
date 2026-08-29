@@ -34,9 +34,9 @@ namespace MeshModifier.NDMFDeform.Editor
 				flags |= d.DataFlags;
 
 			var buffers = CreateBuffers(source, flags);
+			var handle = default(JobHandle);
 			try
 			{
-				var handle = default(JobHandle);
 				foreach (var deformer in deformers)
 				{
 					var space = new DeformSpace(GetMeshToAxis(deformer.Axis, rendererTransform));
@@ -52,6 +52,9 @@ namespace MeshModifier.NDMFDeform.Editor
 			}
 			finally
 			{
+				// 例外時もスケジュール済みジョブを完了させてから破棄する
+				// (未完了ジョブが参照する NativeArray の Dispose は安全性エラーになる)
+				handle.Complete();
 				buffers.Dispose();
 			}
 		}

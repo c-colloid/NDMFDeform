@@ -27,6 +27,8 @@ namespace MeshModifier.NDMFDeform.Core
 		/// <summary>
 		/// 変形ジョブをスケジュールする。
 		/// バッファへのインプレース変形のみ許可(頂点数・順序は変更不可)。
+		/// buffers.Vertices 以外のチャンネルは元メッシュに存在しない場合
+		/// 未生成のことがあるため、使用前に IsCreated を確認すること。
 		/// </summary>
 		public abstract JobHandle Schedule(in MeshBuffers buffers, in DeformSpace space, JobHandle dependency);
 	}

@@ -13,8 +13,7 @@ namespace MeshModifier.NDMFDeform.Core
 		Vertices = 1 << 0,
 		Normals  = 1 << 1,
 		Tangents = 1 << 2,
-		UVs      = 1 << 3,
-		Colors   = 1 << 4,
-		All      = Vertices | Normals | Tangents | UVs | Colors,
+		// UV・カラーは MeshBuffers に対応バッファを実装した時点で追加する
+		All      = Vertices | Normals | Tangents,
 	}
 }

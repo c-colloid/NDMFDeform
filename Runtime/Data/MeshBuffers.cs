@@ -8,6 +8,11 @@ namespace MeshModifier.NDMFDeform.Core
 	/// 変形対象のメッシュチャンネルを NativeArray として保持するバッファ。
 	/// ベイクコア(Editor 側)が構築し、各デフォーマのジョブが読み書きする。
 	/// 頂点数・順序は常に保存される(インプレース変形のみ)。
+	///
+	/// 契約: Vertices は常に生成される。Normals / Tangents は
+	/// スタック内のいずれかのデフォーマが DataFlags で要求し、かつ
+	/// 元メッシュがそのチャンネルを持つ場合のみ生成される。
+	/// Vertices 以外を使うデフォーマは Schedule 内で IsCreated を確認すること。
 	/// </summary>
 	public struct MeshBuffers : IDisposable
 	{
