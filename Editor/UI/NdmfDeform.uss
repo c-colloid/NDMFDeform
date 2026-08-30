@@ -1,0 +1,211 @@
+/* NDMFDeform エディタ UI の共有スタイル。
+   構成は各 .uxml、動作バインドは C# 側(NdmfDeformUI 経由でロード)。 */
+
+/* ---- 共通 ---- */
+
+.ndmf-section-title {
+    -unity-font-style: bold;
+    margin-top: 2px;
+}
+
+.ndmf-description {
+    opacity: 0.7;
+    white-space: normal;
+}
+
+.ndmf-hint {
+    opacity: 0.5;
+    font-size: 10px;
+    white-space: normal;
+}
+
+.ndmf-row {
+    flex-direction: row;
+    align-items: center;
+}
+
+.ndmf-guide {
+    margin-top: 4px;
+}
+
+.ndmf-guide-text {
+    opacity: 0.7;
+    white-space: normal;
+}
+
+/* ---- デフォーマ共通インスペクタ(DeformerBaseEditor) ---- */
+
+.ndmf-deformer-description {
+    margin-bottom: 4px;
+}
+
+/* ---- DeformStack インスペクタ ---- */
+
+.ndmf-stack-header {
+    -unity-font-style: bold;
+    margin-top: 2px;
+    margin-bottom: 2px;
+}
+
+/* 空リストでもドロップ先として見えるように最低高さを確保する */
+.ndmf-deformer-list {
+    min-height: 28px;
+}
+
+.ndmf-deformer-row {
+    flex-direction: row;
+    align-items: center;
+    height: 24px;
+}
+
+.ndmf-row-eye-toggle {
+    margin-left: 2px;
+    margin-right: 2px;
+    flex-shrink: 0;
+}
+
+/* チェックボックスの枠を消して目のアイコン(C# 側で設定)だけを見せる */
+.ndmf-row-eye-toggle #unity-checkmark {
+    width: 16px;
+    height: 16px;
+    background-color: rgba(0, 0, 0, 0);
+    border-width: 0;
+}
+
+.ndmf-row-object {
+    flex-grow: 1;
+    flex-shrink: 1;
+    flex-basis: 0;
+    margin-left: 0;
+    margin-right: 0;
+}
+
+.ndmf-deformer-row--disabled .ndmf-row-object {
+    opacity: 0.45;
+}
+
+.ndmf-row-badge {
+    display: none;
+    font-size: 9px;
+    padding: 1px 4px;
+    margin-left: 3px;
+    margin-right: 3px;
+    border-radius: 6px;
+    flex-shrink: 0;
+    -unity-text-align: middle-center;
+}
+
+.ndmf-row-badge--shape {
+    display: flex;
+    background-color: rgba(77, 128, 217, 0.45);
+}
+
+.ndmf-row-badge--mask {
+    display: flex;
+    background-color: rgba(217, 140, 51, 0.45);
+}
+
+.ndmf-row-badge--utility {
+    display: flex;
+    background-color: rgba(140, 140, 140, 0.45);
+}
+
+.ndmf-row-badge--experimental {
+    display: flex;
+    background-color: rgba(166, 102, 217, 0.45);
+}
+
+.ndmf-stack-footer {
+    margin-top: 2px;
+}
+
+.ndmf-footer-hint {
+    opacity: 0.5;
+    font-size: 10px;
+    flex-grow: 1;
+    flex-shrink: 1;
+}
+
+.ndmf-footer-button {
+    width: 26px;
+}
+
+.ndmf-inline-container {
+    margin-top: 4px;
+}
+
+.ndmf-inline-box {
+    border-width: 1px;
+    border-color: rgba(0, 0, 0, 0.3);
+    border-radius: 3px;
+    padding: 2px 4px 4px 4px;
+}
+
+.ndmf-inline-title {
+    opacity: 0.7;
+    font-size: 10px;
+    flex-grow: 1;
+}
+
+.ndmf-inline-select {
+    font-size: 10px;
+}
+
+.ndmf-stack-settings {
+    margin-top: 6px;
+}
+
+/* ---- Lattice インスペクタ ---- */
+
+.ndmf-lattice-buttons {
+    margin-top: 4px;
+}
+
+/* ---- UV 島セレクタ ---- */
+
+.ndmf-uv-map {
+    width: 300px;
+    height: 300px;
+    align-self: center;
+    margin-top: 4px;
+    margin-bottom: 4px;
+    border-width: 1px;
+    border-color: rgb(90, 90, 90);
+}
+
+.ndmf-uv-overlay {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+}
+
+.ndmf-uv-buttons {
+    margin-top: 2px;
+}
+
+/* ---- シェイプ個別設定の行(BlendShapeOverrideDrawer) ---- */
+
+.ndmf-shape-picker {
+    flex-grow: 1;
+    flex-shrink: 1;
+    flex-basis: 0;
+    -unity-text-align: middle-left;
+    margin-left: 0;
+    overflow: hidden;
+}
+
+.ndmf-shape-picker--empty {
+    opacity: 0.6;
+}
+
+.ndmf-shape-picker--missing {
+    color: rgb(255, 158, 64);
+}
+
+.ndmf-shape-mode {
+    width: 150px;
+    flex-shrink: 0;
+    margin-left: 4px;
+}

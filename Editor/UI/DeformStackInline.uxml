@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 選択行のデフォーマをスタック内でインライン編集する枠。
+     inline-editor-slot に対象デフォーマの InspectorElement が入る。 -->
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+    <ui:VisualElement class="ndmf-inline-box">
+        <ui:VisualElement class="ndmf-row">
+            <ui:Label name="inline-title" class="ndmf-inline-title" />
+            <ui:Button name="inline-select" text="オブジェクトを選択" class="ndmf-inline-select"
+                       tooltip="デフォーマの GameObject を選択する" />
+        </ui:VisualElement>
+        <ui:VisualElement name="inline-editor-slot" />
+    </ui:VisualElement>
+</ui:UXML>

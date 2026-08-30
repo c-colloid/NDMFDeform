@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- デフォーマ一覧の行テンプレート。
+     目アイコン(有効トグル)+ 参照フィールド + カテゴリバッジ。
+     アイコン画像・バッジ文言・バインドは C#(DeformStackEditor)が設定する。 -->
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+    <ui:VisualElement class="ndmf-deformer-row">
+        <ui:Toggle name="row-enabled" class="ndmf-row-eye-toggle" tooltip="このデフォーマを適用するか" />
+        <uie:ObjectField name="row-deformer" class="ndmf-row-object" allow-scene-objects="true" />
+        <ui:Label name="row-badge" class="ndmf-row-badge" />
+    </ui:VisualElement>
+</ui:UXML>

@@ -80,38 +80,20 @@ namespace MeshModifier.NDMFDeform.Editor
 		{
 			var root = base.CreateInspectorGUI();
 
+			// 島セレクタの置き場と操作ガイドの構成は UVIslandMaskInspector.uxml
+			NdmfDeformUI.CloneTree(NdmfDeformUI.UVIslandMaskInspectorGuid, root);
+
 			if (targets.Length == 1)
 			{
-				root.Add(new UVIslandSelectorView((UVIslandMaskDeformer)target));
+				(root.Q<VisualElement>("selector-slot") ?? root)
+					.Add(new UVIslandSelectorView((UVIslandMaskDeformer)target));
 			}
 			else
 			{
-				var note = new Label("UV 島の選択は 1 つずつ編集してください(複数選択中は非表示)。");
-				note.style.opacity = 0.7f;
-				note.style.whiteSpace = WhiteSpace.Normal;
-				root.Add(note);
+				var note = root.Q<Label>("multi-edit-note");
+				if (note != null)
+					note.style.display = DisplayStyle.Flex;
 			}
-
-			var guide = new Foldout { text = "操作ガイド", value = false };
-			guide.style.marginTop = 4;
-			var hint = new Label(
-				"UV マップ上の島をクリックすると選択 / 解除できます。\n" +
-				"左ドラッグで矩形範囲選択(Ctrl+ドラッグで範囲解除)、\n" +
-				"UV が重なった場所のクリックはメニューから島を選べます。\n" +
-				"ホイールでズーム、中ボタン(または Alt+左)ドラッグでパンします。\n" +
-				"シーンビューでもメッシュ面のクリックで島を選択 / 解除できます\n" +
-				"(選択島は緑、ホバー中の島は黄色でハイライト。隠れた部分も薄く表示)。\n" +
-				"クリックのレイは面を貫通し、複数の島に当たった場合は\n" +
-				"メニューで手前 / 奥の島(服の下の素体など)を選べます。\n" +
-				"シーンのハイライトとクリック判定は変形後(プレビュー)の形状に追従します。\n" +
-				"サブメッシュのドロップダウンで表示・クリック対象を絞り込めます。\n" +
-				"スタック内でこのマスクより前にあるデフォーマの変形が、\n" +
-				"選択した島の頂点で打ち消されます。Invert で島のみに変形を残します。\n" +
-				"Falloff は打ち消しを島の外側へ UV 距離でぼかします。");
-			hint.style.opacity = 0.7f;
-			hint.style.whiteSpace = WhiteSpace.Normal;
-			guide.Add(hint);
-			root.Add(guide);
 
 			return root;
 		}

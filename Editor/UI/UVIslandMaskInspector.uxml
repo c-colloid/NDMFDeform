@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- UVIslandMaskDeformer 専用インスペクタの追加部。
+     selector-slot に UVIslandSelectorView(単一選択時のみ)が入る。 -->
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+    <ui:VisualElement name="selector-slot" />
+    <ui:Label name="multi-edit-note" class="ndmf-description" style="display: none;"
+              text="UV 島の選択は 1 つずつ編集してください(複数選択中は非表示)。" />
+    <ui:Foldout name="uv-guide" text="操作ガイド" value="false" class="ndmf-guide">
+        <ui:Label class="ndmf-guide-text"
+                  text="UV マップ上の島をクリックすると選択 / 解除できます。&#10;左ドラッグで矩形範囲選択(Ctrl+ドラッグで範囲解除)、&#10;UV が重なった場所のクリックはメニューから島を選べます。&#10;ホイールでズーム、中ボタン(または Alt+左)ドラッグでパンします。&#10;シーンビューでもメッシュ面のクリックで島を選択 / 解除できます&#10;(選択島は緑、ホバー中の島は黄色でハイライト。隠れた部分も薄く表示)。&#10;クリックのレイは面を貫通し、複数の島に当たった場合は&#10;メニューで手前 / 奥の島(服の下の素体など)を選べます。&#10;シーンのハイライトとクリック判定は変形後(プレビュー)の形状に追従します。&#10;サブメッシュのドロップダウンで表示・クリック対象を絞り込めます。&#10;スタック内でこのマスクより前にあるデフォーマの変形が、&#10;選択した島の頂点で打ち消されます。Invert で島のみに変形を残します。&#10;Falloff は打ち消しを島の外側へ UV 距離でぼかします。" />
+    </ui:Foldout>
+</ui:UXML>

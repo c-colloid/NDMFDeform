@@ -19,29 +19,21 @@ namespace MeshModifier.NDMFDeform.Editor
 	[CustomPropertyDrawer(typeof(DeformStack.BlendShapeOverride))]
 	public class BlendShapeOverrideDrawer : PropertyDrawer
 	{
-		private static readonly Color MissingColor = new Color(1f, 0.62f, 0.25f);
-
 		public override VisualElement CreatePropertyGUI(SerializedProperty property)
 		{
+			// 行の構成は BlendShapeOverrideRow.uxml / 状態表現は USS クラス
+			// (--empty / --missing)。ここではバインドと文言の更新だけを行う
 			var row = new VisualElement();
-			row.style.flexDirection = FlexDirection.Row;
-			row.style.alignItems = Align.Center;
+			NdmfDeformUI.CloneTree(NdmfDeformUI.BlendShapeOverrideRowGuid, row);
 
 			var nameProp = property.FindPropertyRelative("shapeName");
 			var modeProp = property.FindPropertyRelative("mode");
 			var serializedObject = property.serializedObject;
 			var namePath = nameProp.propertyPath;
 
-			var picker = new Button
-			{
-				tooltip = "レンダラーのブレンドシェイプから選択",
-			};
-			picker.style.flexGrow = 1;
-			picker.style.flexShrink = 1;
-			picker.style.flexBasis = 0;
-			picker.style.unityTextAlign = TextAnchor.MiddleLeft;
-			picker.style.marginLeft = 0;
-			picker.style.overflow = Overflow.Hidden;
+			var picker = row.Q<Button>("shape-picker");
+			if (picker == null)
+				return row;
 
 			void Refresh()
 			{
@@ -49,24 +41,23 @@ namespace MeshModifier.NDMFDeform.Editor
 				if (p == null)
 					return;
 				var shapeName = p.stringValue;
+				picker.EnableInClassList("ndmf-shape-picker--empty", string.IsNullOrEmpty(shapeName));
 				if (string.IsNullOrEmpty(shapeName))
 				{
 					picker.text = "(シェイプを選択...)";
-					picker.style.color = StyleKeyword.Null;
-					picker.style.opacity = 0.6f;
+					picker.EnableInClassList("ndmf-shape-picker--missing", false);
 					return;
 				}
-				picker.style.opacity = 1f;
 				if (GetShapeNames(serializedObject.targetObject as DeformStack).Contains(shapeName))
 				{
 					picker.text = shapeName;
-					picker.style.color = StyleKeyword.Null;
+					picker.EnableInClassList("ndmf-shape-picker--missing", false);
 					picker.tooltip = shapeName;
 				}
 				else
 				{
 					picker.text = $"{shapeName} (メッシュに無し)";
-					picker.style.color = MissingColor;
+					picker.EnableInClassList("ndmf-shape-picker--missing", true);
 					picker.tooltip = $"'{shapeName}' は現在のメッシュに存在しません(リネームまたは削除された可能性)";
 				}
 			}
@@ -87,13 +78,13 @@ namespace MeshModifier.NDMFDeform.Editor
 
 			row.TrackPropertyValue(nameProp, _ => Refresh());
 			Refresh();
-			row.Add(picker);
 
-			var mode = new PropertyField(modeProp, "");
-			mode.style.width = 150;
-			mode.style.flexShrink = 0;
-			mode.style.marginLeft = 4;
-			row.Add(mode);
+			var mode = row.Q<PropertyField>("shape-mode");
+			if (mode != null)
+			{
+				mode.label = string.Empty;
+				mode.BindProperty(modeProp);
+			}
 
 			return row;
 		}

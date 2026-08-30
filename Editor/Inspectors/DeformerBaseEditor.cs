@@ -69,32 +69,26 @@ namespace MeshModifier.NDMFDeform.Editor
 
 		public override VisualElement CreateInspectorGUI()
 		{
+			// 構成は DeformerInspector.uxml。ここでは [DeformerMeta] の流し込みだけ行う
 			var root = new VisualElement();
-			NdmfDeformFonts.ApplyEditorUiFont(root);
+			NdmfDeformUI.CloneTree(NdmfDeformUI.DeformerInspectorGuid, root);
 
 			var meta = (DeformerMetaAttribute)System.Attribute.GetCustomAttribute(
 				target.GetType(), typeof(DeformerMetaAttribute));
-			if (meta != null)
-			{
-				if (!string.IsNullOrEmpty(meta.Name))
-				{
-					var title = new Label(meta.Name);
-					title.style.unityFontStyleAndWeight = FontStyle.Bold;
-					title.style.marginTop = 2;
-					root.Add(title);
-				}
-				if (!string.IsNullOrEmpty(meta.Description))
-				{
-					var description = new Label(meta.Description);
-					description.style.opacity = 0.7f;
-					description.style.whiteSpace = WhiteSpace.Normal;
-					description.style.marginBottom = 4;
-					root.Add(description);
-				}
-			}
+			BindMetaLabel(root.Q<Label>("deformer-title"), meta?.Name);
+			BindMetaLabel(root.Q<Label>("deformer-description"), meta?.Description);
 
-			InspectorElement.FillDefaultInspector(root, serializedObject, this);
+			var slot = root.Q<VisualElement>("default-inspector") ?? root;
+			InspectorElement.FillDefaultInspector(slot, serializedObject, this);
 			return root;
+		}
+
+		private static void BindMetaLabel(Label label, string text)
+		{
+			if (label == null)
+				return;
+			label.text = text ?? string.Empty;
+			label.style.display = string.IsNullOrEmpty(text) ? DisplayStyle.None : DisplayStyle.Flex;
 		}
 
 		// 注意: private にすると派生エディタ(LatticeDeformerEditor 等)経由で

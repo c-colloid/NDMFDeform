@@ -34,57 +34,37 @@ namespace MeshModifier.NDMFDeform.Editor
 				});
 			});
 
-			var buttons = new VisualElement();
-			buttons.style.flexDirection = FlexDirection.Row;
-			buttons.style.marginTop = 4;
+			// ボタンと操作ガイドの構成は LatticeInspector.uxml
+			NdmfDeformUI.CloneTree(NdmfDeformUI.LatticeInspectorGuid, root);
 
 			// 解像度の変更は OnValidate で自動適用(既存変形はリサンプリングで引継ぎ)されるため、
 			// ここは恒等格子への明示リセットのみ
-			var resetPoints = new Button(() =>
-			{
-				foreach (var t in targets)
+			var resetPoints = root.Q<Button>("reset-points");
+			if (resetPoints != null)
+				resetPoints.clicked += () =>
 				{
-					if (t is not LatticeDeformer lattice) continue;
-					Undo.RecordObject(lattice, "Reset Lattice Control Points");
-					lattice.GenerateControlPoints(lattice.Resolution);
-					EditorUtility.SetDirty(lattice);
-				}
-				SceneView.RepaintAll();
-			}) { text = "制御点をリセット" };
+					foreach (var t in targets)
+					{
+						if (t is not LatticeDeformer lattice) continue;
+						Undo.RecordObject(lattice, "Reset Lattice Control Points");
+						lattice.GenerateControlPoints(lattice.Resolution);
+						EditorUtility.SetDirty(lattice);
+					}
+					SceneView.RepaintAll();
+				};
 
-			var fitBounds = new Button(() =>
-			{
-				foreach (var t in targets)
+			var fitBounds = root.Q<Button>("fit-bounds");
+			if (fitBounds != null)
+				fitBounds.clicked += () =>
 				{
-					if (t is not LatticeDeformer lattice) continue;
-					Undo.RecordObject(lattice.transform, "Fit Lattice To Bounds");
-					lattice.FitToParentStack();
-				}
-				SceneView.RepaintAll();
-			}) { text = "バウンズへフィット" };
-
-			buttons.Add(resetPoints);
-			buttons.Add(fitBounds);
-			root.Add(buttons);
-
-			var guide = new Foldout { text = "操作ガイド", value = false };
-			guide.style.marginTop = 4;
-			var hint = new Label(
-				"制御点はシーンビューで編集します。\n" +
-				"クリック選択 / Shift 追加 / ドラッグで矩形選択\n" +
-				"Ctrl+ドラッグ: 点から軸ガイドが出て、スワイプ方向の軸で行選択\n" +
-				"Ctrl+Shift+ドラッグ: スワイプ方向の軸のリング(ループ)選択\n" +
-				"クリックのみの場合は再クリックで軸循環、\n" +
-				"Ctrl+Shift+ダブルクリックでシート全体に拡張します。\n" +
-				"選択中は W/E/R(移動 / 回転 / スケール)ツールが\n" +
-				"選択点に適用されます。Ctrl+A で全選択、\n" +
-				"Esc または空クリックで選択解除。\n" +
-				"表示設定(奥点フェード・スライス)は SceneView の\n" +
-				"「NDMF Deform Lattice」オーバーレイから切替えられます。");
-			hint.style.opacity = 0.7f;
-			hint.style.whiteSpace = WhiteSpace.Normal;
-			guide.Add(hint);
-			root.Add(guide);
+					foreach (var t in targets)
+					{
+						if (t is not LatticeDeformer lattice) continue;
+						Undo.RecordObject(lattice.transform, "Fit Lattice To Bounds");
+						lattice.FitToParentStack();
+					}
+					SceneView.RepaintAll();
+				};
 
 			return root;
 		}

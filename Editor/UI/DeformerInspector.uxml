@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- デフォーマ共通インスペクタ(DeformerBaseEditor)。
+     タイトル・説明は [DeformerMeta] から C# が流し込み、
+     default-inspector に自動生成プロパティが展開される。 -->
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+    <ui:Label name="deformer-title" class="ndmf-section-title" />
+    <ui:Label name="deformer-description" class="ndmf-description ndmf-deformer-description" />
+    <ui:VisualElement name="default-inspector" />
+</ui:UXML>

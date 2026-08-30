@@ -18,7 +18,6 @@ namespace MeshModifier.NDMFDeform.Editor
 	public class UVIslandSelectorView : VisualElement
 	{
 		private const int TextureSize = 512;
-		private const int DisplaySize = 300;
 
 		/// <summary>ズーム・パン中の再レンダリング間隔(秒)。約 30Hz</summary>
 		private const double RenderInterval = 0.033;
@@ -60,52 +59,31 @@ namespace MeshModifier.NDMFDeform.Editor
 		{
 			_deformer = deformer;
 
-			var title = new Label("UV 島の選択");
-			title.style.unityFontStyleAndWeight = FontStyle.Bold;
-			title.style.marginTop = 6;
-			Add(title);
+			// 構成は UVIslandSelector.uxml / スタイルは NdmfDeform.uss。
+			// ここでは要素の取得と動作のバインドだけを行う
+			NdmfDeformUI.CloneTree(NdmfDeformUI.UVIslandSelectorGuid, this);
 
 			_noMeshHelp = new HelpBox(
 				"対象メッシュが見つかりません。DeformStack の付いたレンダラーの配下に置いてください。",
 				HelpBoxMessageType.Warning);
-			Add(_noMeshHelp);
+			(this.Q<VisualElement>("no-mesh-slot") ?? this).Add(_noMeshHelp);
 
-			_subMeshDropdown = new DropdownField("サブメッシュ");
+			_subMeshDropdown = this.Q<DropdownField>("submesh-dropdown");
+			_map = this.Q<VisualElement>("uv-map");
+			_hoverOverlay = this.Q<VisualElement>("uv-hover-overlay");
+			_status = this.Q<Label>("uv-status");
+			if (_subMeshDropdown == null || _map == null || _hoverOverlay == null || _status == null)
+				return; // UXML が読めない場合(CloneTree が警告済み)は動作を諦める
+
 			_subMeshDropdown.RegisterValueChangedCallback(_ =>
 			{
 				_subMeshFilter = _subMeshDropdown.index - 1;
 				SetHover(null);
 				RenderNow();
 			});
-			Add(_subMeshDropdown);
 
-			_map = new VisualElement();
-			_map.style.width = DisplaySize;
-			_map.style.height = DisplaySize;
-			_map.style.alignSelf = Align.Center;
-			_map.style.marginTop = 4;
-			_map.style.marginBottom = 4;
-			_map.style.borderTopWidth = 1;
-			_map.style.borderBottomWidth = 1;
-			_map.style.borderLeftWidth = 1;
-			_map.style.borderRightWidth = 1;
-			var borderColor = (Color)new Color32(90, 90, 90, 255);
-			_map.style.borderTopColor = borderColor;
-			_map.style.borderBottomColor = borderColor;
-			_map.style.borderLeftColor = borderColor;
-			_map.style.borderRightColor = borderColor;
-			Add(_map);
-
-			// ホバー島の輪郭はテクスチャを再生成せずベクタ描画で重ねる
-			_hoverOverlay = new VisualElement();
-			_hoverOverlay.style.position = Position.Absolute;
-			_hoverOverlay.style.left = 0;
-			_hoverOverlay.style.top = 0;
-			_hoverOverlay.style.right = 0;
-			_hoverOverlay.style.bottom = 0;
-			_hoverOverlay.pickingMode = PickingMode.Ignore;
+			// ホバー島の輪郭・マーキーはテクスチャを再生成せずベクタ描画で重ねる
 			_hoverOverlay.generateVisualContent += DrawHoverOverlay;
-			_map.Add(_hoverOverlay);
 
 			_map.RegisterCallback<WheelEvent>(OnWheel);
 			_map.RegisterCallback<PointerDownEvent>(OnPointerDown);
@@ -113,26 +91,9 @@ namespace MeshModifier.NDMFDeform.Editor
 			_map.RegisterCallback<PointerUpEvent>(OnPointerUp);
 			_map.RegisterCallback<PointerLeaveEvent>(_ => SetHover(null));
 
-			_status = new Label();
-			_status.style.opacity = 0.7f;
-			_status.style.whiteSpace = WhiteSpace.Normal;
-			Add(_status);
-
-			var hint = new Label(
-				"ホイール: ズーム / 中ボタン or Alt+ドラッグ: パン / 左ドラッグ: 範囲選択(Ctrl で解除)\n" +
-				"UV が重なった場所のクリックはメニューから島を選べます。シーンビューの面クリックでも選択できます");
-			hint.style.opacity = 0.5f;
-			hint.style.fontSize = 10;
-			hint.style.whiteSpace = WhiteSpace.Normal;
-			Add(hint);
-
-			var buttons = new VisualElement();
-			buttons.style.flexDirection = FlexDirection.Row;
-			buttons.style.marginTop = 2;
-			buttons.Add(new Button(() => UVIslandSelection.ClearSelection(_deformer)) { text = "選択解除" });
-			buttons.Add(new Button(ResetView) { text = "全体表示" });
-			buttons.Add(new Button(ReanalyzeMesh) { text = "再解析" });
-			Add(buttons);
+			WireButton("clear-selection", () => UVIslandSelection.ClearSelection(_deformer));
+			WireButton("reset-view", ResetView);
+			WireButton("reanalyze", ReanalyzeMesh);
 
 			RegisterCallback<AttachToPanelEvent>(_ =>
 			{
@@ -148,6 +109,13 @@ namespace MeshModifier.NDMFDeform.Editor
 			});
 
 			Refresh();
+		}
+
+		private void WireButton(string name, System.Action onClick)
+		{
+			var button = this.Q<Button>(name);
+			if (button != null)
+				button.clicked += onClick;
 		}
 
 		/// <summary>メッシュ解決・解析・テクスチャを更新する</summary>

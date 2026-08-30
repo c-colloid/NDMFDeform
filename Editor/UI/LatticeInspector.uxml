@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- LatticeDeformer 専用インスペクタの追加部(共通インスペクタの下に付く)。 -->
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+    <ui:VisualElement class="ndmf-row ndmf-lattice-buttons">
+        <ui:Button name="reset-points" text="制御点をリセット" />
+        <ui:Button name="fit-bounds" text="バウンズへフィット" />
+    </ui:VisualElement>
+    <ui:Foldout name="lattice-guide" text="操作ガイド" value="false" class="ndmf-guide">
+        <ui:Label class="ndmf-guide-text"
+                  text="制御点はシーンビューで編集します。&#10;クリック選択 / Shift 追加 / ドラッグで矩形選択&#10;Ctrl+ドラッグ: 点から軸ガイドが出て、スワイプ方向の軸で行選択&#10;Ctrl+Shift+ドラッグ: スワイプ方向の軸のリング(ループ)選択&#10;クリックのみの場合は再クリックで軸循環、&#10;Ctrl+Shift+ダブルクリックでシート全体に拡張します。&#10;選択中は W/E/R(移動 / 回転 / スケール)ツールが&#10;選択点に適用されます。Ctrl+A で全選択、&#10;Esc または空クリックで選択解除。&#10;表示設定(奥点フェード・スライス)は SceneView の&#10;「NDMF Deform Lattice」オーバーレイから切替えられます。" />
+    </ui:Foldout>
+</ui:UXML>

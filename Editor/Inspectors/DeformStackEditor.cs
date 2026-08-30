@@ -22,7 +22,6 @@ namespace MeshModifier.NDMFDeform.Editor
 	public class DeformStackEditor : UnityEditor.Editor
 	{
 		private const string DeformersPath = "deformers";
-		private const int RowHeight = 24;
 
 		/// <summary>
 		/// スタック経由でインライン編集中のデフォーマ。
@@ -44,49 +43,32 @@ namespace MeshModifier.NDMFDeform.Editor
 
 		public override VisualElement CreateInspectorGUI()
 		{
+			// 構成は DeformStackInspector.uxml / スタイルは NdmfDeform.uss。
+			// ここでは要素の取得とバインド・コールバックの接続だけを行う
 			var root = new VisualElement();
-			NdmfDeformFonts.ApplyEditorUiFont(root);
+			NdmfDeformUI.CloneTree(NdmfDeformUI.StackInspectorGuid, root);
 
-			var header = new Label("デフォーマ");
-			header.style.unityFontStyleAndWeight = FontStyle.Bold;
-			header.style.marginTop = 2;
-			header.style.marginBottom = 2;
-			root.Add(header);
-
-			_listView = new ListView
+			_listView = root.Q<ListView>("deformer-list");
+			if (_listView != null)
 			{
-				bindingPath = DeformersPath,
-				reorderable = true,
-				reorderMode = ListViewReorderMode.Animated,
-				showFoldoutHeader = false,
-				showBoundCollectionSize = false,
-				showAddRemoveFooter = false,
-				showBorder = true,
-				selectionType = SelectionType.Single,
-				virtualizationMethod = CollectionVirtualizationMethod.FixedHeight,
-				fixedItemHeight = RowHeight,
-			};
-			// 空リストでもドロップ先として見えるように最低高さを確保する
-			_listView.style.minHeight = RowHeight + 4;
-			_listView.makeItem = MakeRow;
-			_listView.bindItem = BindRow;
-			_listView.unbindItem = (element, _) => element.Unbind();
-			_listView.selectedIndicesChanged += OnRowSelectionChanged;
-			_listView.itemIndexChanged += (_, _) => SyncInlineFromSelection();
-			root.Add(_listView);
+				// binding-path は UXML にも書いてあるが、Unity バージョンによって
+				// ListView の UXML 属性として解釈されないことがあるため C# 側でも保証する
+				_listView.bindingPath = DeformersPath;
+				_listView.makeItem = MakeRow;
+				_listView.bindItem = BindRow;
+				_listView.unbindItem = (element, _) => element.Unbind();
+				_listView.selectedIndicesChanged += OnRowSelectionChanged;
+				_listView.itemIndexChanged += (_, _) => SyncInlineFromSelection();
+			}
 
-			root.Add(MakeFooter());
+			var remove = root.Q<Button>("remove-button");
+			if (remove != null)
+				remove.clicked += RemoveSelected;
+			var add = root.Q<Button>("add-button");
+			if (add != null)
+				add.clicked += ShowAddMenu;
 
-			_inlineContainer = new VisualElement();
-			_inlineContainer.style.marginTop = 4;
-			root.Add(_inlineContainer);
-
-			var settings = new VisualElement();
-			settings.style.marginTop = 6;
-			settings.Add(new PropertyField(serializedObject.FindProperty("normalsMode"), "法線"));
-			settings.Add(new PropertyField(serializedObject.FindProperty("nonlinearShapeCorrection"), "シェイプ非線形補正"));
-			settings.Add(new PropertyField(serializedObject.FindProperty("blendShapeOverrides"), "シェイプ個別設定"));
-			root.Add(settings);
+			_inlineContainer = root.Q<VisualElement>("inline-container");
 
 			RegisterDragAndDrop(root);
 			return root;
@@ -96,61 +78,17 @@ namespace MeshModifier.NDMFDeform.Editor
 
 		private VisualElement MakeRow()
 		{
+			// 行の構成は DeformStackRow.uxml
 			var row = new VisualElement();
-			row.style.flexDirection = FlexDirection.Row;
-			row.style.alignItems = Align.Center;
-			row.style.height = RowHeight;
+			NdmfDeformUI.CloneTree(NdmfDeformUI.StackRowGuid, row);
 
-			var toggle = new Toggle { name = "row-enabled", tooltip = "このデフォーマを適用するか" };
-			toggle.style.marginLeft = 2;
-			toggle.style.marginRight = 2;
-			toggle.style.flexShrink = 0;
+			var toggle = row.Q<Toggle>("row-enabled");
+			var field = row.Q<ObjectField>("row-deformer");
+			var badge = row.Q<Label>("row-badge");
+			if (toggle == null || field == null)
+				return row;
 
-			// チェックボックスではなく目のアイコンで表示する(旧 Deformable と同じ視覚言語)
-			var checkmark = toggle.Q<VisualElement>("unity-checkmark");
-			if (checkmark != null)
-			{
-				checkmark.name = "row-eye";
-				checkmark.style.width = 16;
-				checkmark.style.height = 16;
-				checkmark.style.backgroundColor = Color.clear;
-				checkmark.style.borderTopWidth = 0;
-				checkmark.style.borderBottomWidth = 0;
-				checkmark.style.borderLeftWidth = 0;
-				checkmark.style.borderRightWidth = 0;
-			}
-
-			var field = new ObjectField
-			{
-				name = "row-deformer",
-				objectType = typeof(DeformerBase),
-				allowSceneObjects = true,
-			};
-			field.style.flexGrow = 1;
-			field.style.flexShrink = 1;
-			field.style.flexBasis = 0;
-			field.style.marginLeft = 0;
-			field.style.marginRight = 0;
-
-			var badge = new Label { name = "row-badge" };
-			badge.style.display = DisplayStyle.None;
-			badge.style.fontSize = 9;
-			badge.style.paddingLeft = 4;
-			badge.style.paddingRight = 4;
-			badge.style.paddingTop = 1;
-			badge.style.paddingBottom = 1;
-			badge.style.marginLeft = 3;
-			badge.style.marginRight = 3;
-			badge.style.borderTopLeftRadius = 6;
-			badge.style.borderTopRightRadius = 6;
-			badge.style.borderBottomLeftRadius = 6;
-			badge.style.borderBottomRightRadius = 6;
-			badge.style.flexShrink = 0;
-			badge.style.unityTextAlign = TextAnchor.MiddleCenter;
-
-			row.Add(toggle);
-			row.Add(field);
-			row.Add(badge);
+			field.objectType = typeof(DeformerBase);
 
 			toggle.RegisterValueChangedCallback(evt => ApplyEnabledVisual(row, evt.newValue));
 			field.RegisterValueChangedCallback(evt =>
@@ -170,19 +108,22 @@ namespace MeshModifier.NDMFDeform.Editor
 			if (entry == null)
 				return;
 			var enabledProp = entry.FindPropertyRelative("enabled");
-			row.Q<Toggle>("row-enabled").BindProperty(enabledProp);
-			row.Q<ObjectField>("row-deformer").BindProperty(entry.FindPropertyRelative("deformer"));
+			row.Q<Toggle>("row-enabled")?.BindProperty(enabledProp);
+			row.Q<ObjectField>("row-deformer")?.BindProperty(entry.FindPropertyRelative("deformer"));
 			ApplyEnabledVisual(row, enabledProp.boolValue);
 		}
 
-		/// <summary>行の有効状態の見た目(目アイコン・参照フィールドの淡色化)を反映する</summary>
+		/// <summary>
+		/// 行の有効状態の見た目を反映する。淡色化は USS
+		/// (.ndmf-deformer-row--disabled)、目のアイコン画像だけここで差し替える
+		/// (エディタ内蔵アイコンのため USS からは参照できない)。
+		/// </summary>
 		private static void ApplyEnabledVisual(VisualElement row, bool enabled)
 		{
-			var field = row.Q<ObjectField>("row-deformer");
-			if (field != null)
-				field.style.opacity = enabled ? 1f : 0.45f;
+			row.Q(className: "ndmf-deformer-row")
+				?.EnableInClassList("ndmf-deformer-row--disabled", !enabled);
 
-			var eye = row.Q<VisualElement>("row-eye");
+			var eye = row.Q<Toggle>("row-enabled")?.Q<VisualElement>("unity-checkmark");
 			if (eye != null)
 			{
 				var icon = enabled ? EyeOnIcon : EyeOffIcon;
@@ -226,18 +167,34 @@ namespace MeshModifier.NDMFDeform.Editor
 			return null;
 		}
 
+		/// <summary>
+		/// カテゴリバッジの文言と色を反映する。色は USS のモディファイアクラス
+		/// (.ndmf-row-badge--*)で定義され、クラスが無い状態は非表示になる。
+		/// </summary>
 		private static void UpdateBadge(Label badge, DeformerBase deformer)
 		{
-			if (deformer == null)
-			{
-				badge.style.display = DisplayStyle.None;
+			if (badge == null)
 				return;
-			}
+			foreach (var className in BadgeClasses.Values)
+				badge.RemoveFromClassList(className);
+			if (deformer == null)
+				return;
+
 			var category = MetaOf(deformer.GetType())?.Category ?? DeformerCategory.Shape;
 			badge.text = CategoryLabel(category);
-			badge.style.backgroundColor = CategoryColor(category);
-			badge.style.display = DisplayStyle.Flex;
+			badge.AddToClassList(BadgeClasses.TryGetValue(category, out var badgeClass)
+				? badgeClass
+				: BadgeClasses[DeformerCategory.Shape]);
 		}
+
+		private static readonly Dictionary<DeformerCategory, string> BadgeClasses =
+			new Dictionary<DeformerCategory, string>
+			{
+				{ DeformerCategory.Shape, "ndmf-row-badge--shape" },
+				{ DeformerCategory.Mask, "ndmf-row-badge--mask" },
+				{ DeformerCategory.Utility, "ndmf-row-badge--utility" },
+				{ DeformerCategory.Experimental, "ndmf-row-badge--experimental" },
+			};
 
 		private static string CategoryLabel(DeformerCategory category)
 		{
@@ -248,52 +205,6 @@ namespace MeshModifier.NDMFDeform.Editor
 				case DeformerCategory.Experimental: return "実験的";
 				default: return "形状";
 			}
-		}
-
-		private static Color CategoryColor(DeformerCategory category)
-		{
-			switch (category)
-			{
-				case DeformerCategory.Mask: return new Color(0.85f, 0.55f, 0.20f, 0.45f);
-				case DeformerCategory.Utility: return new Color(0.55f, 0.55f, 0.55f, 0.45f);
-				case DeformerCategory.Experimental: return new Color(0.65f, 0.40f, 0.85f, 0.45f);
-				default: return new Color(0.30f, 0.50f, 0.85f, 0.45f);
-			}
-		}
-
-		// ---- フッター(＋ / − とヒント) ----
-
-		private VisualElement MakeFooter()
-		{
-			var footer = new VisualElement();
-			footer.style.flexDirection = FlexDirection.Row;
-			footer.style.alignItems = Align.Center;
-			footer.style.marginTop = 2;
-
-			var hint = new Label("デフォーマや GameObject をリストへドラッグ、または ＋ で新規作成");
-			hint.style.opacity = 0.5f;
-			hint.style.fontSize = 10;
-			hint.style.flexGrow = 1;
-			hint.style.flexShrink = 1;
-			footer.Add(hint);
-
-			var remove = new Button(RemoveSelected)
-			{
-				text = "−",
-				tooltip = "選択行をリストから外す(コンポーネント自体は削除しません)",
-			};
-			remove.style.width = 26;
-			footer.Add(remove);
-
-			var add = new Button(ShowAddMenu)
-			{
-				text = "＋",
-				tooltip = "デフォーマを新規作成して追加(子 GameObject として作成されます)",
-			};
-			add.style.width = 26;
-			footer.Add(add);
-
-			return footer;
 		}
 
 		private void ShowAddMenu()
@@ -402,50 +313,24 @@ namespace MeshModifier.NDMFDeform.Editor
 
 		private VisualElement BuildInlineInspector(DeformerBase deformer)
 		{
+			// 枠の構成は DeformStackInline.uxml
 			var box = new VisualElement();
-			box.style.borderTopWidth = 1;
-			box.style.borderBottomWidth = 1;
-			box.style.borderLeftWidth = 1;
-			box.style.borderRightWidth = 1;
-			var borderColor = new Color(0f, 0f, 0f, 0.3f);
-			box.style.borderTopColor = borderColor;
-			box.style.borderBottomColor = borderColor;
-			box.style.borderLeftColor = borderColor;
-			box.style.borderRightColor = borderColor;
-			box.style.borderTopLeftRadius = 3;
-			box.style.borderTopRightRadius = 3;
-			box.style.borderBottomLeftRadius = 3;
-			box.style.borderBottomRightRadius = 3;
-			box.style.paddingLeft = 4;
-			box.style.paddingRight = 4;
-			box.style.paddingTop = 2;
-			box.style.paddingBottom = 4;
+			NdmfDeformUI.CloneTree(NdmfDeformUI.StackInlineGuid, box);
 
-			var headerRow = new VisualElement();
-			headerRow.style.flexDirection = FlexDirection.Row;
-			headerRow.style.alignItems = Align.Center;
+			var title = box.Q<Label>("inline-title");
+			if (title != null)
+				title.text = deformer.gameObject.name;
 
-			var title = new Label(deformer.gameObject.name);
-			title.style.opacity = 0.7f;
-			title.style.fontSize = 10;
-			title.style.flexGrow = 1;
-			headerRow.Add(title);
-
-			var select = new Button(() =>
-			{
-				Selection.activeGameObject = deformer.gameObject;
-				EditorGUIUtility.PingObject(deformer.gameObject);
-			})
-			{
-				text = "オブジェクトを選択",
-				tooltip = "デフォーマの GameObject を選択する",
-			};
-			select.style.fontSize = 10;
-			headerRow.Add(select);
-			box.Add(headerRow);
+			var select = box.Q<Button>("inline-select");
+			if (select != null)
+				select.clicked += () =>
+				{
+					Selection.activeGameObject = deformer.gameObject;
+					EditorGUIUtility.PingObject(deformer.gameObject);
+				};
 
 			_inlineEditor = CreateEditor(deformer);
-			box.Add(new InspectorElement(_inlineEditor));
+			(box.Q<VisualElement>("inline-editor-slot") ?? box).Add(new InspectorElement(_inlineEditor));
 			return box;
 		}
 

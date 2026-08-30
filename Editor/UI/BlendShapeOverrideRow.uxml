@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- シェイプ個別設定の行(BlendShapeOverrideDrawer)。
+     シェイプ名ボタンの文言・状態クラスとプロパティバインドは C# 側。 -->
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+    <ui:VisualElement class="ndmf-row">
+        <ui:Button name="shape-picker" class="ndmf-shape-picker"
+                   tooltip="レンダラーのブレンドシェイプから選択" />
+        <uie:PropertyField name="shape-mode" class="ndmf-shape-mode" label="" />
+    </ui:VisualElement>
+</ui:UXML>
