@@ -38,12 +38,29 @@ namespace MeshModifier.NDMFDeform.Editor
 			}
 		}
 
+		/// <summary>選択以外の要因(スタック内のインライン選択)が変わった時の再判定要求</summary>
+		internal static void InvalidateVisibility()
+		{
+			_visibleCacheValid = false;
+		}
+
 		private static bool ComputeVisible()
 		{
 			foreach (var go in Selection.gameObjects)
 			{
-				if (go != null && go.TryGetComponent<LatticeDeformer>(out _))
+				if (go == null) continue;
+				if (go.TryGetComponent<LatticeDeformer>(out _))
 					return true;
+
+				// DeformStack 選択中はスタック経由でラティスを編集できるため表示する
+				if (go.TryGetComponent<DeformStack>(out var stack))
+				{
+					foreach (var entry in stack.Deformers)
+					{
+						if (entry.deformer is LatticeDeformer)
+							return true;
+					}
+				}
 			}
 			return false;
 		}
@@ -179,8 +196,13 @@ namespace MeshModifier.NDMFDeform.Editor
 		/// <summary>選択中のラティスの解像度から現在のスライス軸の最大インデックスを得る</summary>
 		private static int SliceMaxIndex()
 		{
-			var go = Selection.activeGameObject;
-			var lattice = go != null ? go.GetComponent<LatticeDeformer>() : null;
+			// スタック経由のインライン編集中はそのラティスを優先する
+			var lattice = DeformStackEditor.ActiveInlineDeformer as LatticeDeformer;
+			if (lattice == null)
+			{
+				var go = Selection.activeGameObject;
+				lattice = go != null ? go.GetComponent<LatticeDeformer>() : null;
+			}
 			if (lattice == null)
 				return 15;
 
