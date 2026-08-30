@@ -49,10 +49,19 @@ jobs:
           mv "/tmp/$ZIP" "$ZIP"
           unzip -l "$ZIP" | head -20
 
+      # 従来どおり unitypackage でも導入できるようにする
+      # (Packages/ 配下へ展開される形式。Unity なしで .meta の GUID から生成)
+      - name: Build unitypackage
+        run: |
+          UNITYPACKAGE="NDMFDeform_v${{ steps.version.outputs.version }}.unitypackage"
+          echo "UNITYPACKAGE=$UNITYPACKAGE" >> "$GITHUB_ENV"
+          python3 .github/scripts/build_unitypackage.py . "$UNITYPACKAGE"
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             ${{ env.ZIP }}
+            ${{ env.UNITYPACKAGE }}
             package.json
           generate_release_notes: true
