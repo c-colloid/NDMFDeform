@@ -1,0 +1,67 @@
+# タグ push (v*) でパッケージ zip を作り GitHub Release に添付する。
+# zip はパッケージ内容がルートに来る VPM 形式(リポジトリルート = パッケージルート)。
+# 0.9.x(移行リリース)は Deform フォークを同梱し、1.0.0 以降はフォーク削除後の内容になる。
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # Deform はサブモジュール(0.x の移行リリースでは zip に同梱する)。
+      # 取得しないと空の Deform/ が入り、旧システムがコンパイルエラーになる
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Verify tag matches package.json version
+        id: version
+        run: |
+          VERSION=$(jq -r .version package.json)
+          TAG="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [ "$VERSION" != "$TAG" ]; then
+            echo "::error::tag v$TAG does not match package.json version $VERSION"
+            exit 1
+          fi
+
+      - name: Build package zip
+        run: |
+          NAME=$(jq -r .name package.json)
+          VERSION="${{ steps.version.outputs.version }}"
+          ZIP="$NAME-$VERSION.zip"
+          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+          zip -r "/tmp/$ZIP" . \
+            -x ".git/*" \
+            -x ".github/*" \
+            -x "TestProject/*" \
+            -x "*.zip" \
+            -x "*/.git" \
+            -x "*/.git/*" \
+            -x "*/.github/*"
+          mv "/tmp/$ZIP" "$ZIP"
+          unzip -l "$ZIP" | head -20
+
+      # 従来どおり unitypackage でも導入できるようにする
+      # (Packages/ 配下へ展開される形式。Unity なしで .meta の GUID から生成)
+      - name: Build unitypackage
+        run: |
+          UNITYPACKAGE="NDMFDeform_v${{ steps.version.outputs.version }}.unitypackage"
+          echo "UNITYPACKAGE=$UNITYPACKAGE" >> "$GITHUB_ENV"
+          python3 .github/scripts/build_unitypackage.py . "$UNITYPACKAGE"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ env.ZIP }}
+            ${{ env.UNITYPACKAGE }}
+            package.json
+          generate_release_notes: true

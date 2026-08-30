@@ -1,0 +1,23 @@
+{
+    "name": "NDMFDeform.Runtime",
+    "rootNamespace": "MeshModifier.NDMFDeform",
+    "references": [
+        "Unity.Burst",
+        "Unity.Mathematics"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.vrchat.base",
+            "expression": "",
+            "define": "NDMFDEFORM_VRCSDK"
+        }
+    ],
+    "noEngineReferences": false
+}

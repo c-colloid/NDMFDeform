@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- DeformStack インスペクタ(旧 Deformable 相当の UX)。
+     行テンプレートは DeformStackRow.uxml、インライン枠は DeformStackInline.uxml。 -->
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+    <ui:Label text="デフォーマ" class="ndmf-stack-header" />
+    <ui:ListView name="deformer-list"
+                 class="ndmf-deformer-list"
+                 binding-path="deformers"
+                 reorderable="true"
+                 reorder-mode="Animated"
+                 show-foldout-header="false"
+                 show-bound-collection-size="false"
+                 show-add-remove-footer="false"
+                 show-border="true"
+                 selection-type="Single"
+                 virtualization-method="FixedHeight"
+                 fixed-item-height="24" />
+    <ui:VisualElement name="stack-footer" class="ndmf-row ndmf-stack-footer">
+        <ui:Label text="デフォーマや GameObject をリストへドラッグ、または ＋ で新規作成"
+                  class="ndmf-footer-hint" />
+        <ui:Button name="remove-button" text="−" class="ndmf-footer-button"
+                   tooltip="選択行をリストから外す(コンポーネント自体は削除しません)" />
+        <ui:Button name="add-button" text="＋" class="ndmf-footer-button"
+                   tooltip="デフォーマを新規作成して追加(子 GameObject として作成されます)" />
+    </ui:VisualElement>
+    <ui:VisualElement name="inline-container" class="ndmf-inline-container" />
+    <ui:VisualElement name="stack-settings" class="ndmf-stack-settings">
+        <uie:PropertyField binding-path="normalsMode" label="法線" />
+        <uie:PropertyField binding-path="nonlinearShapeCorrection" label="シェイプ非線形補正" />
+        <uie:PropertyField binding-path="blendShapeOverrides" label="シェイプ個別設定" />
+    </ui:VisualElement>
+</ui:UXML>

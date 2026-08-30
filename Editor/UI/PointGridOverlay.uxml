@@ -1,0 +1,17 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements" editor-extension-mode="True">
+    <Style src="project://database/Assets/NDMFDeform/Editor/UI/NdmfDeform.uss?fileID=7433441132597879392&amp;guid=df9af6019ad249a5840230d67eadec6a&amp;type=3#NdmfDeform" />
+    <ui:VisualElement class="ndmf-overlay-root">
+        <uie:EnumField name="occlusion-mode" label="奥点" class="ndmf-overlay-field" />
+        <ui:VisualElement class="ndmf-row" style="flex-direction: row; justify-content: space-between;">
+            <ui:Toggle name="slice-toggle" label="スライス" class="ndmf-overlay-field" />
+            <uie:EnumField name="slice-axis" class="ndmf-overlay-slice-axis" />
+        </ui:VisualElement>
+        <ui:VisualElement name="slice-strip" class="ndmf-overlay-strip" style="flex-direction: row; justify-content: center;" />
+        <ui:VisualElement class="ndmf-row" style="flex-direction: row;">
+            <ui:Label text="選択" class="ndmf-overlay-label" />
+            <ui:Button name="select-all" text="全" style="flex-grow: 1;" />
+            <ui:Button name="clear-selection" text="解除" style="flex-grow: 1;" />
+            <ui:Button name="invert-selection" text="反転" style="flex-grow: 1;" />
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>

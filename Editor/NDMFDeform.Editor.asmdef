@@ -1,0 +1,27 @@
+{
+    "name": "NDMFDeform.Editor",
+    "rootNamespace": "MeshModifier.NDMFDeform",
+    "references": [
+        "NDMFDeform.Runtime",
+        "Unity.Burst",
+        "Unity.Mathematics",
+        "Colloid.UitkFontFix.Editor"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "jp.colloid.uitk-font-fix",
+            "expression": "",
+            "define": "UITK_FONT_FIX"
+        }
+    ],
+    "noEngineReferences": false
+}

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- UV マッププレビュー上で UV 島を選択するビュー(UVIslandSelectorView)。
+     no-mesh-slot に警告 HelpBox、uv-map の背景にプレビューテクスチャが入る。
+     ズーム・パン・選択・矩形範囲選択の動作は C# 側。 -->
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+    <ui:Label text="UV 島の選択" class="ndmf-section-title" />
+    <ui:VisualElement name="no-mesh-slot" />
+    <ui:DropdownField name="submesh-dropdown" label="サブメッシュ" />
+    <ui:VisualElement name="uv-map" class="ndmf-uv-map">
+        <ui:VisualElement name="uv-hover-overlay" class="ndmf-uv-overlay" picking-mode="Ignore" />
+    </ui:VisualElement>
+    <ui:Label name="uv-status" class="ndmf-description" />
+    <ui:Label name="uv-hint" class="ndmf-hint"
+              text="ホイール: ズーム / 中ボタン or Alt+ドラッグ: パン / 左ドラッグ: 範囲選択(Ctrl で解除)&#10;UV が重なった場所のクリックはメニューから島を選べます。シーンビューの面クリックでも選択できます" />
+    <ui:VisualElement class="ndmf-row ndmf-uv-buttons">
+        <ui:Button name="clear-selection" text="選択解除" />
+        <ui:Button name="reset-view" text="全体表示" />
+        <ui:Button name="reanalyze" text="再解析" />
+    </ui:VisualElement>
+</ui:UXML>
