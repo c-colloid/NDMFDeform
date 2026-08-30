@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Reflection;
 using MeshModifier.NDMFDeform.Core;
 using MeshModifier.NDMFDeform.Editor;
@@ -185,6 +186,116 @@ namespace MeshModifier.NDMFDeform.Tests
 			Assert.That(island1.SubMesh, Is.EqualTo(1));
 			Assert.That(island0.Vertices, Is.EquivalentTo(new[] { 0, 1, 2, 3 }));
 			Assert.That(island1.Vertices, Is.EquivalentTo(new[] { 4, 5, 6, 7 }));
+		}
+
+		// ---- UV 重なりの選択 ----
+
+		/// <summary>
+		/// 同一サブメッシュ内で UV が入れ子に重なるメッシュ。
+		/// 島 A = 頂点 0-3(UV [0.1,0.5]²)、島 B = 頂点 4-7(UV [0.2,0.3]²。A の内側)。
+		/// 両島とも最初の三角形の重心(= シード)が (0.2333, 0.2333) で一致するため、
+		/// シードの index による重なり解決の検証になる。
+		/// </summary>
+		private static Mesh CreateNestedOverlapMesh()
+		{
+			return new Mesh
+			{
+				vertices = new[]
+				{
+					new Vector3(0f, 0f, 0f), new Vector3(1f, 0f, 0f),
+					new Vector3(0f, 1f, 0f), new Vector3(1f, 1f, 0f),
+					new Vector3(2f, 0f, 0f), new Vector3(3f, 0f, 0f),
+					new Vector3(2f, 1f, 0f), new Vector3(3f, 1f, 0f),
+				},
+				uv = new[]
+				{
+					new Vector2(0.1f, 0.1f), new Vector2(0.5f, 0.1f),
+					new Vector2(0.1f, 0.5f), new Vector2(0.5f, 0.5f),
+					new Vector2(0.2f, 0.2f), new Vector2(0.3f, 0.2f),
+					new Vector2(0.2f, 0.3f), new Vector2(0.3f, 0.3f),
+				},
+				triangles = new[] { 0, 2, 1, 1, 2, 3, 4, 6, 5, 5, 6, 7 },
+			};
+		}
+
+		[Test]
+		public void FindIslandsAt_ReturnsAllOverlappingIslands()
+		{
+			_source = CreateNestedOverlapMesh();
+			var analysis = UVIslandAnalysis.Analyze(_source);
+			Assert.That(analysis.Islands.Count, Is.EqualTo(2));
+
+			// 重なった領域では両方の島が候補になる
+			var hits = new List<UVIslandAnalysis.Island>();
+			analysis.FindIslandsAt(new Vector2(0.25f, 0.25f), -1, hits);
+			Assert.That(hits.Count, Is.EqualTo(2));
+
+			// 外側の島だけの領域では 1 つ
+			var outer = new List<UVIslandAnalysis.Island>();
+			analysis.FindIslandsAt(new Vector2(0.45f, 0.45f), -1, outer);
+			Assert.That(outer.Count, Is.EqualTo(1));
+			Assert.That(outer[0].Vertices, Is.EquivalentTo(new[] { 0, 1, 2, 3 }));
+		}
+
+		[Test]
+		public void SeedRoundtrip_DisambiguatesOverlappingIslands()
+		{
+			_source = CreateNestedOverlapMesh();
+			var analysis = UVIslandAnalysis.Analyze(_source);
+
+			// シード UV が完全に一致していても index で自分の島へ戻る
+			foreach (var island in analysis.Islands)
+			{
+				var seed = analysis.MakeSeed(island);
+				Assert.That(analysis.ResolveSeed(seed), Is.SameAs(island), $"island {island.Id}");
+			}
+		}
+
+		[Test]
+		public void CollectIslandsInRect_SelectsIslandsWithVerticesInRect()
+		{
+			_source = CreateNestedOverlapMesh();
+			var analysis = UVIslandAnalysis.Analyze(_source);
+
+			// 内側の島の頂点だけを囲む矩形 → 内側のみ
+			var inner = new List<UVIslandAnalysis.Island>();
+			analysis.CollectIslandsInRect(
+				new Vector2(0.15f, 0.15f), new Vector2(0.35f, 0.35f), -1, inner);
+			Assert.That(inner.Count, Is.EqualTo(1));
+			Assert.That(inner[0].Vertices, Is.EquivalentTo(new[] { 4, 5, 6, 7 }));
+
+			// 全体を囲む矩形 → 両方
+			var all = new List<UVIslandAnalysis.Island>();
+			analysis.CollectIslandsInRect(
+				new Vector2(0.05f, 0.05f), new Vector2(0.55f, 0.55f), -1, all);
+			Assert.That(all.Count, Is.EqualTo(2));
+		}
+
+		[Test]
+		public void Bake_OverlappedInnerIslandMasksOnlyItself()
+		{
+			// UV が重なった内側の島だけを選択できる(従来の UV 保存形式では
+			// 常に外側の島へ解決されてしまい不可能だったケース)
+			var (stack, translate, mask) = CreateSetup(CreateNestedOverlapMesh());
+			stack.AddDeformer(translate);
+			stack.AddDeformer(mask);
+
+			var analysis = mask.GetOrCreateAnalysis(_source);
+			var innerIsland = analysis.Islands[1];
+			Assert.That(innerIsland.Vertices, Is.EquivalentTo(new[] { 4, 5, 6, 7 }));
+
+			mask.SelectedIslands.Add(analysis.MakeSeed(innerIsland));
+			mask.Factor = 1f;
+			mask.Falloff = 0f;
+
+			_baked = DeformBakeCore.Bake(stack, _source, _root.transform);
+
+			var v = _baked.vertices;
+			var original = _source.vertices;
+			for (var i = 0; i < 4; i++)
+				Assert.That(Vector3.Distance(v[i], original[i] + Vector3.up), Is.LessThan(1e-4f), $"vertex {i}");
+			for (var i = 4; i < 8; i++)
+				Assert.That(Vector3.Distance(v[i], original[i]), Is.LessThan(1e-4f), $"vertex {i}");
 		}
 
 		// ---- ベイク統合 ----

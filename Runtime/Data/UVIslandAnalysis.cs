@@ -231,10 +231,104 @@ namespace MeshModifier.NDMFDeform.Core
 		}
 
 		/// <summary>
+		/// UV 座標を含む島をすべて results に集める(Id 昇順)。
+		/// UV が重なっている島を列挙して選ばせる UI 用。内包判定のみで近傍フォールバックはしない。
+		/// </summary>
+		public void FindIslandsAt(Vector2 uv, int subMesh, List<Island> results)
+		{
+			foreach (var island in Islands)
+			{
+				if (subMesh >= 0 && island.SubMesh != subMesh)
+					continue;
+				if (uv.x < island.UvMin.x - UvEpsilon || uv.x > island.UvMax.x + UvEpsilon ||
+				    uv.y < island.UvMin.y - UvEpsilon || uv.y > island.UvMax.y + UvEpsilon)
+					continue;
+				if (ContainsPoint(island, uv))
+					results.Add(island);
+			}
+		}
+
+		/// <summary>
+		/// UV 矩形(min..max)に掛かる島を results に集める(矩形範囲選択用)。
+		/// 島のいずれかの頂点 UV が矩形内にあれば対象とする。
+		/// </summary>
+		public void CollectIslandsInRect(Vector2 min, Vector2 max, int subMesh, List<Island> results)
+		{
+			foreach (var island in Islands)
+			{
+				if (subMesh >= 0 && island.SubMesh != subMesh)
+					continue;
+				if (island.UvMax.x < min.x || island.UvMin.x > max.x ||
+				    island.UvMax.y < min.y || island.UvMin.y > max.y)
+					continue;
+				foreach (var v in island.Vertices)
+				{
+					var uv = Uvs[v];
+					if (uv.x >= min.x && uv.x <= max.x && uv.y >= min.y && uv.y <= max.y)
+					{
+						results.Add(island);
+						break;
+					}
+				}
+			}
+		}
+
+		/// <summary>
+		/// 島を再特定するためのシードを作る。
+		/// 代表 UV が他の島にも含まれる(UV が重なっている)場合に備え、
+		/// 「その点を含む同サブメッシュの島のうち何番目か(Id 昇順)」を index に記録する。
+		/// </summary>
+		public IslandSeed MakeSeed(Island island)
+		{
+			var ordinal = 0;
+			foreach (var other in Islands)
+			{
+				if (other == island)
+					break;
+				if (other.SubMesh != island.SubMesh)
+					continue;
+				if (ContainsPoint(other, island.Seed))
+					ordinal++;
+			}
+			return new IslandSeed(island.Seed, island.SubMesh, ordinal);
+		}
+
+		/// <summary>
+		/// シードを島へ解決する。uv を含む島(subMesh フィルタ付き・Id 昇順)のうち
+		/// index 番目を返し、島の数が変わって index が範囲外なら最初の島、
+		/// 内包する島が無ければ近傍フォールバック(FindIslandAt)にする。
+		/// </summary>
+		public Island ResolveSeed(IslandSeed seed)
+		{
+			Island first = null;
+			var ordinal = 0;
+			foreach (var island in Islands)
+			{
+				if (seed.subMesh >= 0 && island.SubMesh != seed.subMesh)
+					continue;
+				if (seed.uv.x < island.UvMin.x - UvEpsilon || seed.uv.x > island.UvMax.x + UvEpsilon ||
+				    seed.uv.y < island.UvMin.y - UvEpsilon || seed.uv.y > island.UvMax.y + UvEpsilon)
+					continue;
+				if (!ContainsPoint(island, seed.uv))
+					continue;
+				if (first == null)
+					first = island;
+				if (ordinal == seed.index)
+					return island;
+				ordinal++;
+			}
+			if (first != null)
+				return first;
+			return FindIslandAt(seed.uv, seed.subMesh);
+		}
+
+		/// <summary>
 		/// UV 座標が属する島を返す(見つからなければ null)。
 		/// subMesh が 0 以上の場合はそのサブメッシュの島のみを対象にする。
 		/// 三角形の内包判定を優先し、外れた場合は maxDistance 以内で
 		/// 境界エッジが最も近い島へフォールバックする。
+		/// UV が重なっている場合は最初(Id 最小)の島になるため、
+		/// 重なりを区別したい場面では FindIslandsAt / ResolveSeed を使うこと。
 		/// </summary>
 		public Island FindIslandAt(Vector2 uv, int subMesh = -1, float maxDistance = 0.02f)
 		{

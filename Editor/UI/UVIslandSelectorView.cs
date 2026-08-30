@@ -48,6 +48,11 @@ namespace MeshModifier.NDMFDeform.Editor
 		private Vector2 _pressPosition;
 		private bool _pressed;
 
+		// 矩形範囲選択(左ドラッグ)。閾値を超えたらクリックではなくマーキーとして扱う
+		private bool _marqueeActive;
+		private int _marqueePointerId = -1;
+		private Vector2 _marqueeEnd;
+
 		private double _lastRenderTime;
 		private bool _renderQueued;
 
@@ -113,7 +118,9 @@ namespace MeshModifier.NDMFDeform.Editor
 			_status.style.whiteSpace = WhiteSpace.Normal;
 			Add(_status);
 
-			var hint = new Label("ホイール: ズーム / 中ボタン or Alt+ドラッグ: パン / シーンビューの面クリックでも選択できます");
+			var hint = new Label(
+				"ホイール: ズーム / 中ボタン or Alt+ドラッグ: パン / 左ドラッグ: 範囲選択(Ctrl で解除)\n" +
+				"UV が重なった場所のクリックはメニューから島を選べます。シーンビューの面クリックでも選択できます");
 			hint.style.opacity = 0.5f;
 			hint.style.fontSize = 10;
 			hint.style.whiteSpace = WhiteSpace.Normal;
@@ -283,6 +290,27 @@ namespace MeshModifier.NDMFDeform.Editor
 				return;
 			}
 
+			if (_marqueeActive && evt.pointerId == _marqueePointerId)
+			{
+				_marqueeEnd = evt.localPosition;
+				_hoverOverlay.MarkDirtyRepaint();
+				return;
+			}
+
+			// 押したまま閾値を超えて動いたら矩形範囲選択を開始する
+			if (_pressed && _analysis != null &&
+			    ((Vector2)evt.localPosition - _pressPosition).sqrMagnitude >= 16f)
+			{
+				_pressed = false;
+				_marqueeActive = true;
+				_marqueePointerId = evt.pointerId;
+				_marqueeEnd = evt.localPosition;
+				_map.CapturePointer(evt.pointerId);
+				SetHover(null);
+				_hoverOverlay.MarkDirtyRepaint();
+				return;
+			}
+
 			SetHover(_analysis?.FindIslandAt(LocalToUv(evt.localPosition), _subMeshFilter));
 		}
 
@@ -297,15 +325,87 @@ namespace MeshModifier.NDMFDeform.Editor
 				return;
 			}
 
-			// パンでないほぼ動かないクリックのみ選択トグルとして扱う
-			if (_pressed && evt.button == 0 && !evt.altKey &&
-			    ((Vector2)evt.localPosition - _pressPosition).sqrMagnitude < 16f)
+			if (_marqueeActive && evt.pointerId == _marqueePointerId)
 			{
-				var island = _analysis?.FindIslandAt(LocalToUv(evt.localPosition), _subMeshFilter);
-				if (island != null)
-					UVIslandSelection.Toggle(_deformer, _analysis, island);
+				FinishMarquee(evt);
+				evt.StopPropagation();
+				return;
 			}
+
+			// パンでもマーキーでもないクリックのみ選択トグルとして扱う
+			if (_pressed && evt.button == 0 && !evt.altKey && _analysis != null)
+				ToggleAt(evt.localPosition, evt.position);
 			_pressed = false;
+		}
+
+		/// <summary>
+		/// クリック位置の島をトグルする。UV が重なって複数の島が該当する場合は
+		/// コンテキストメニューを出してどの島かを選ばせる。
+		/// </summary>
+		private void ToggleAt(Vector2 localPosition, Vector2 panelPosition)
+		{
+			var uv = LocalToUv(localPosition);
+			var hits = new List<UVIslandAnalysis.Island>();
+			_analysis.FindIslandsAt(uv, _subMeshFilter, hits);
+
+			if (hits.Count == 0)
+			{
+				// 島の外側ギリギリのクリックは従来どおり近傍フォールバック
+				var near = _analysis.FindIslandAt(uv, _subMeshFilter);
+				if (near != null)
+					UVIslandSelection.Toggle(_deformer, _analysis, near);
+				return;
+			}
+			if (hits.Count == 1)
+			{
+				UVIslandSelection.Toggle(_deformer, _analysis, hits[0]);
+				return;
+			}
+			ShowOverlapMenu(hits, panelPosition);
+		}
+
+		/// <summary>重なった島の候補メニュー(チェックは現在の選択状態)</summary>
+		private void ShowOverlapMenu(List<UVIslandAnalysis.Island> islands, Vector2 panelPosition)
+		{
+			var selected = new HashSet<UVIslandAnalysis.Island>(_deformer.ResolveSelectedIslands(_analysis));
+			var menu = new GenericMenu();
+			foreach (var island in islands)
+			{
+				var captured = island;
+				menu.AddItem(new GUIContent(IslandLabel(island)), selected.Contains(island),
+					() => UVIslandSelection.Toggle(_deformer, _analysis, captured));
+			}
+			menu.DropDown(new Rect(panelPosition.x, panelPosition.y, 0f, 0f));
+		}
+
+		private string IslandLabel(UVIslandAnalysis.Island island)
+		{
+			var label = $"島 {island.Id}(三角形 {island.Triangles.Count / 3})";
+			if (_subMeshFilter < 0 && _analysis.SubMeshCount > 1)
+				label = $"サブメッシュ {island.SubMesh} ─ {label}";
+			return label;
+		}
+
+		/// <summary>矩形範囲選択の確定。ドラッグ = 追加、Ctrl(Cmd)+ドラッグ = 解除</summary>
+		private void FinishMarquee(PointerUpEvent evt)
+		{
+			_marqueeActive = false;
+			_marqueePointerId = -1;
+			_map.ReleasePointer(evt.pointerId);
+
+			var a = LocalToUv(_pressPosition);
+			var b = LocalToUv(evt.localPosition);
+			var min = Vector2.Min(a, b);
+			var max = Vector2.Max(a, b);
+
+			var hits = new List<UVIslandAnalysis.Island>();
+			_analysis.CollectIslandsInRect(min, max, _subMeshFilter, hits);
+			if (hits.Count > 0)
+			{
+				var remove = evt.ctrlKey || evt.commandKey;
+				UVIslandSelection.SetSelected(_deformer, _analysis, hits, !remove);
+			}
+			_hoverOverlay.MarkDirtyRepaint();
 		}
 
 		private void SetHover(UVIslandAnalysis.Island island)
@@ -620,19 +720,40 @@ namespace MeshModifier.NDMFDeform.Editor
 
 		private void DrawHoverOverlay(MeshGenerationContext ctx)
 		{
-			if (_hoverIsland == null || _analysis == null)
+			if (_analysis == null)
 				return;
-
 			var painter = ctx.painter2D;
-			painter.strokeColor = new Color(1f, 0.9f, 0.2f, 0.95f);
-			painter.lineWidth = 2f;
-			painter.BeginPath();
-			foreach (var edge in _hoverIsland.BorderEdges)
+
+			if (_hoverIsland != null)
 			{
-				painter.MoveTo(UvToLocal(new Vector2(edge.x, edge.y)));
-				painter.LineTo(UvToLocal(new Vector2(edge.z, edge.w)));
+				painter.strokeColor = new Color(1f, 0.9f, 0.2f, 0.95f);
+				painter.lineWidth = 2f;
+				painter.BeginPath();
+				foreach (var edge in _hoverIsland.BorderEdges)
+				{
+					painter.MoveTo(UvToLocal(new Vector2(edge.x, edge.y)));
+					painter.LineTo(UvToLocal(new Vector2(edge.z, edge.w)));
+				}
+				painter.Stroke();
 			}
-			painter.Stroke();
+
+			// 矩形範囲選択のマーキー(Unity 標準のシーン矩形選択と同系色)
+			if (_marqueeActive)
+			{
+				var min = Vector2.Min(_pressPosition, _marqueeEnd);
+				var max = Vector2.Max(_pressPosition, _marqueeEnd);
+				painter.fillColor = new Color32(148, 184, 237, 84);
+				painter.strokeColor = new Color(1f, 1f, 1f, 0.9f);
+				painter.lineWidth = 1f;
+				painter.BeginPath();
+				painter.MoveTo(new Vector2(min.x, min.y));
+				painter.LineTo(new Vector2(max.x, min.y));
+				painter.LineTo(new Vector2(max.x, max.y));
+				painter.LineTo(new Vector2(min.x, max.y));
+				painter.ClosePath();
+				painter.Fill();
+				painter.Stroke();
+			}
 		}
 
 		private void DestroyTexture()

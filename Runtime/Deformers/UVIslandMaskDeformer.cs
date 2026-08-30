@@ -23,10 +23,19 @@ namespace MeshModifier.NDMFDeform.Core
 		/// <summary>-1 = 全サブメッシュから検索(サブメッシュ情報の無い旧データ)</summary>
 		public int subMesh;
 
-		public IslandSeed(Vector2 uv, int subMesh)
+		/// <summary>
+		/// uv を含む島が複数ある(UV が重なっている)場合の順位(Id 昇順で何番目か)。
+		/// 旧データは 0(最初の島)として解決される。
+		/// </summary>
+		public int index;
+
+		public IslandSeed(Vector2 uv, int subMesh) : this(uv, subMesh, 0) { }
+
+		public IslandSeed(Vector2 uv, int subMesh, int index)
 		{
 			this.uv = uv;
 			this.subMesh = subMesh;
+			this.index = index;
 		}
 	}
 
@@ -147,7 +156,7 @@ namespace MeshModifier.NDMFDeform.Core
 				return list;
 			foreach (var seed in selectedIslands)
 			{
-				var island = analysis.FindIslandAt(seed.uv, seed.subMesh);
+				var island = analysis.ResolveSeed(seed);
 				if (island != null && !list.Contains(island))
 					list.Add(island);
 			}
@@ -166,6 +175,7 @@ namespace MeshModifier.NDMFDeform.Core
 					h = h * 31 + seed.uv.x.GetHashCode();
 					h = h * 31 + seed.uv.y.GetHashCode();
 					h = h * 31 + seed.subMesh;
+					h = h * 31 + seed.index;
 				}
 				return h;
 			}

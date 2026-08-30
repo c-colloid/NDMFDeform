@@ -44,9 +44,33 @@ namespace MeshModifier.NDMFDeform.Editor
 
 			// この島に解決される既存シードを取り除く。無ければ追加(= トグル)
 			var seeds = deformer.SelectedIslands;
-			var removed = seeds.RemoveAll(s => analysis.FindIslandAt(s.uv, s.subMesh) == island) > 0;
+			var removed = seeds.RemoveAll(s => analysis.ResolveSeed(s) == island) > 0;
 			if (!removed)
-				seeds.Add(new IslandSeed(island.Seed, island.SubMesh));
+				seeds.Add(analysis.MakeSeed(island));
+
+			Commit(deformer);
+		}
+
+		/// <summary>複数島をまとめて選択 / 解除する(矩形範囲選択用。1 回の Undo にまとまる)</summary>
+		public static void SetSelected(UVIslandMaskDeformer deformer, UVIslandAnalysis analysis,
+			System.Collections.Generic.List<UVIslandAnalysis.Island> islands, bool selected)
+		{
+			if (deformer == null || analysis == null || islands == null || islands.Count == 0)
+				return;
+
+			Undo.RecordObject(deformer, selected ? "Select UV Islands" : "Deselect UV Islands");
+
+			// 対象島に解決される既存シードを外してから、選択なら入れ直す(重複防止)
+			var seeds = deformer.SelectedIslands;
+			var islandSet = new System.Collections.Generic.HashSet<UVIslandAnalysis.Island>(islands);
+			var removed = seeds.RemoveAll(s => islandSet.Contains(analysis.ResolveSeed(s)));
+			if (selected)
+			{
+				foreach (var island in islands)
+					seeds.Add(analysis.MakeSeed(island));
+			}
+			else if (removed == 0)
+				return;
 
 			Commit(deformer);
 		}

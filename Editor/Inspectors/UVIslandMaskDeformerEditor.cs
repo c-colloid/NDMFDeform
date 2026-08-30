@@ -96,9 +96,13 @@ namespace MeshModifier.NDMFDeform.Editor
 			guide.style.marginTop = 4;
 			var hint = new Label(
 				"UV マップ上の島をクリックすると選択 / 解除できます。\n" +
+				"左ドラッグで矩形範囲選択(Ctrl+ドラッグで範囲解除)、\n" +
+				"UV が重なった場所のクリックはメニューから島を選べます。\n" +
 				"ホイールでズーム、中ボタン(または Alt+左)ドラッグでパンします。\n" +
 				"シーンビューでもメッシュ面のクリックで島を選択 / 解除できます\n" +
 				"(選択島は緑、ホバー中の島は黄色でハイライト。隠れた部分も薄く表示)。\n" +
+				"クリックのレイは面を貫通し、複数の島に当たった場合は\n" +
+				"メニューで手前 / 奥の島(服の下の素体など)を選べます。\n" +
 				"シーンのハイライトとクリック判定は変形後(プレビュー)の形状に追従します。\n" +
 				"サブメッシュのドロップダウンで表示・クリック対象を絞り込めます。\n" +
 				"スタック内でこのマスクより前にあるデフォーマの変形が、\n" +
@@ -155,10 +159,17 @@ namespace MeshModifier.NDMFDeform.Editor
 			if (e.type == EventType.MouseDown && e.button == 0 && !e.alt &&
 			    HandleUtility.nearestControl == controlId)
 			{
-				var island = PickIsland(e.mousePosition, pickMesh, matrix, analysis);
-				if (island != null)
+				// レイを貫通させて奥の島(服の下の素体など)も候補に入れる。
+				// 1 つなら即トグル、複数ならメニューでどの島かを選ばせる
+				var islands = PickIslandsAlongRay(e.mousePosition, pickMesh, matrix, analysis);
+				if (islands.Count == 1)
 				{
-					UVIslandSelection.Toggle(mask, analysis, island);
+					UVIslandSelection.Toggle(mask, analysis, islands[0]);
+					e.Use();
+				}
+				else if (islands.Count > 1)
+				{
+					ShowOverlapMenu(mask, analysis, islands);
 					e.Use();
 				}
 			}
@@ -251,7 +262,7 @@ namespace MeshModifier.NDMFDeform.Editor
 
 		// ---- レイキャスト ----
 
-		/// <summary>シーンビューのマウス位置からレイキャストして UV 島を拾う</summary>
+		/// <summary>シーンビューのマウス位置からレイキャストして UV 島を拾う(最前面のみ)</summary>
 		private UVIslandAnalysis.Island PickIsland(
 			Vector2 guiPosition, Mesh mesh, Matrix4x4 matrix, UVIslandAnalysis analysis)
 		{
@@ -266,6 +277,57 @@ namespace MeshModifier.NDMFDeform.Editor
 			if (triangle < 0 || triangle >= analysis.IslandOfTriangle.Length)
 				return null;
 			return analysis.IslandOfTriangle[triangle];
+		}
+
+		/// <summary>
+		/// レイをメッシュに貫通させ、通過した面の島を手前から順に(重複なしで)集める。
+		/// 服の下の素体のように、外から直接クリックできない島の選択に使う。
+		/// </summary>
+		private List<UVIslandAnalysis.Island> PickIslandsAlongRay(
+			Vector2 guiPosition, Mesh mesh, Matrix4x4 matrix, UVIslandAnalysis analysis)
+		{
+			var results = new List<UVIslandAnalysis.Island>();
+			if (analysis.IslandOfTriangle == null)
+				return results;
+
+			var ray = HandleUtility.GUIPointToWorldRay(guiPosition);
+			const int maxHits = 16;
+			for (var i = 0; i < maxHits; i++)
+			{
+				if (!IntersectRayMesh(ray, mesh, matrix, out var hit))
+					break;
+
+				var triangle = hit.triangleIndex;
+				if (triangle >= 0 && triangle < analysis.IslandOfTriangle.Length)
+				{
+					var island = analysis.IslandOfTriangle[triangle];
+					if (island != null && !results.Contains(island))
+						results.Add(island);
+				}
+
+				// 当たった面のすぐ先からレイを再開して奥の面を拾う
+				ray = new Ray(ray.GetPoint(hit.distance + 1e-4f), ray.direction);
+			}
+			return results;
+		}
+
+		/// <summary>重なった島の候補メニュー(手前から順。チェックは現在の選択状態)</summary>
+		private static void ShowOverlapMenu(UVIslandMaskDeformer mask, UVIslandAnalysis analysis,
+			List<UVIslandAnalysis.Island> islands)
+		{
+			var selected = new HashSet<UVIslandAnalysis.Island>(mask.ResolveSelectedIslands(analysis));
+			var menu = new GenericMenu();
+			for (var i = 0; i < islands.Count; i++)
+			{
+				var island = islands[i];
+				var depth = i == 0 ? "手前" : $"奥 {i}";
+				var label = $"{depth} ─ 島 {island.Id}(三角形 {island.Triangles.Count / 3})";
+				if (analysis.SubMeshCount > 1)
+					label += $" ─ サブメッシュ {island.SubMesh}";
+				menu.AddItem(new GUIContent(label), selected.Contains(island),
+					() => UVIslandSelection.Toggle(mask, analysis, island));
+			}
+			menu.ShowAsContext();
 		}
 
 		/// <summary>
