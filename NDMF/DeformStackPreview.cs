@@ -19,11 +19,21 @@ namespace MeshModifier.NDMFDeform.NDMF
 	{
 		public ImmutableList<RenderGroup> GetTargetGroups(ComputeContext context)
 		{
+			// NDMF が処理するのはアバタールート(AvatarDescriptor 等)配下のみなので、
+			// プレビューも同じ範囲に限定する。アバター外のスタックまで対象にすると
+			// 「プレビューでは変形するのにビルド / プレイでは適用されない」不整合や、
+			// プレイモード遷移時の NDMF セッション再構築で例外の原因になる。
+			// GetAvatarRoots / GetComponentsInChildren は反応的なので、
+			// 後から AvatarDescriptor を付けた場合も自動で対象に入る
 			var groups = new List<RenderGroup>();
-			foreach (var stack in context.GetComponentsByType<DeformStack>())
+			var seen = new HashSet<Renderer>();
+			foreach (var root in context.GetAvatarRoots())
 			{
-				if (stack.TryGetComponent<Renderer>(out var renderer))
-					groups.Add(RenderGroup.For(renderer));
+				foreach (var stack in context.GetComponentsInChildren<DeformStack>(root, true))
+				{
+					if (stack.TryGetComponent<Renderer>(out var renderer) && seen.Add(renderer))
+						groups.Add(RenderGroup.For(renderer));
+				}
 			}
 			return groups.ToImmutableList();
 		}
