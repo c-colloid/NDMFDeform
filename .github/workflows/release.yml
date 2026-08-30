@@ -15,7 +15,11 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      # Deform はサブモジュール(0.x の移行リリースでは zip に同梱する)。
+      # 取得しないと空の Deform/ が入り、旧システムがコンパイルエラーになる
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Verify tag matches package.json version
         id: version
@@ -38,7 +42,10 @@ jobs:
             -x ".git/*" \
             -x ".github/*" \
             -x "TestProject/*" \
-            -x "*.zip"
+            -x "*.zip" \
+            -x "*/.git" \
+            -x "*/.git/*" \
+            -x "*/.github/*"
           mv "/tmp/$ZIP" "$ZIP"
           unzip -l "$ZIP" | head -20
 
