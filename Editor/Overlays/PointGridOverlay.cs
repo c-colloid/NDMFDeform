@@ -44,23 +44,19 @@ namespace MeshModifier.NDMFDeform.Editor
 			_visibleCacheValid = false;
 		}
 
-		private static bool ComputeVisible()
+		internal static bool ComputeVisible()
 		{
+			// DeformStack 選択中は、リストにラティスが含まれるだけでは表示しない。
+			// 実際にラティス行をインライン選択して編集している時のみ表示する
+			// (リスト内の別オブジェクトのラティス参照でも、選択されて初めて対象になる)
+			if (DeformStackEditor.ActiveInlineDeformer is LatticeDeformer)
+				return true;
+
 			foreach (var go in Selection.gameObjects)
 			{
 				if (go == null) continue;
 				if (go.TryGetComponent<LatticeDeformer>(out _))
 					return true;
-
-				// DeformStack 選択中はスタック経由でラティスを編集できるため表示する
-				if (go.TryGetComponent<DeformStack>(out var stack))
-				{
-					foreach (var entry in stack.Deformers)
-					{
-						if (entry.deformer is LatticeDeformer)
-							return true;
-					}
-				}
 			}
 			return false;
 		}
@@ -183,8 +179,11 @@ namespace MeshModifier.NDMFDeform.Editor
 				var go = Selection.activeGameObject;
 				lattice = go != null ? go.GetComponent<LatticeDeformer>() : null;
 			}
+			// 対象ラティスが特定できない場合はボタンを出さない
+			// (表示条件により通常ここへは来ない。以前の既定値 15 は
+			// 無関係な 16 個の番号ボタンが出て別のラティスの UI に見えてしまっていた)
 			if (lattice == null)
-				return 15;
+				return -1;
 
 			var res = lattice.Resolution;
 			switch (PointGridViewState.SliceAxis)
