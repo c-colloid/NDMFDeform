@@ -302,7 +302,8 @@ namespace MeshModifier.NDMFDeform.Editor
 			var menu = new GenericMenu();
 			foreach (var (type, meta) in DeformerTypes())
 			{
-				var path = meta.Category == DeformerCategory.Mask ? $"マスク/{meta.Name}" : meta.Name;
+				// GameObject メニュー(Deformers/Mask/...)と同じ階層表記に合わせる
+				var path = meta.Category == DeformerCategory.Mask ? $"Mask/{meta.Name}" : meta.Name;
 				menu.AddItem(new GUIContent(path, meta.Description), false, () =>
 				{
 					var created = NdmfDeformObjectFactory.CreateDeformer(stack.gameObject, type, meta.Name);

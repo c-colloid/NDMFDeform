@@ -28,54 +28,52 @@ namespace MeshModifier.NDMFDeform.Editor
 				NdmfDeformObjectFactory.AddStack(target);
 		}
 
-		// ---- Shape ----
+		// ---- デフォーマ(旧メニューに倣い、Deformable とは別階層の Deformers/ 配下) ----
 
-		[MenuItem(Root + "Lattice", false, 21)]
+		[MenuItem(Root + "Deformers/Lattice", false, 21)]
 		private static void CreateLattice(MenuCommand c) => Create<LatticeDeformer>(c);
 
-		[MenuItem(Root + "Cylindrical Scale", false, 22)]
+		[MenuItem(Root + "Deformers/Cylindrical Scale", false, 22)]
 		private static void CreateCylindricalScale(MenuCommand c) => Create<CylindricalScaleDeformer>(c);
 
-		[MenuItem(Root + "Cylindrical Vertex Transform", false, 23)]
+		[MenuItem(Root + "Deformers/Cylindrical Vertex Transform", false, 23)]
 		private static void CreateCylindricalVertexTransform(MenuCommand c) =>
 			Create<CylindricalVertexTransformDeformer>(c);
 
-		[MenuItem(Root + "Transform", false, 24)]
+		[MenuItem(Root + "Deformers/Transform", false, 24)]
 		private static void CreateTransform(MenuCommand c) => Create<TransformDeformer>(c);
 
-		[MenuItem(Root + "Scale", false, 25)]
+		[MenuItem(Root + "Deformers/Scale", false, 25)]
 		private static void CreateScale(MenuCommand c) => Create<ScaleDeformer>(c);
 
-		// ---- Mask ----
-
-		[MenuItem(Root + "UV Island Mask", false, 37)]
+		[MenuItem(Root + "Deformers/Mask/UV Island Mask", false, 37)]
 		private static void CreateUvIslandMask(MenuCommand c) => Create<UVIslandMaskDeformer>(c);
 
-		[MenuItem(Root + "Sphere Mask", false, 38)]
+		[MenuItem(Root + "Deformers/Mask/Sphere Mask", false, 38)]
 		private static void CreateSphereMask(MenuCommand c) => Create<SphereMaskDeformer>(c);
 
-		[MenuItem(Root + "Box Mask", false, 39)]
+		[MenuItem(Root + "Deformers/Mask/Box Mask", false, 39)]
 		private static void CreateBoxMask(MenuCommand c) => Create<BoxMaskDeformer>(c);
 
-		[MenuItem(Root + "Vertical Gradient Mask", false, 40)]
+		[MenuItem(Root + "Deformers/Mask/Vertical Gradient Mask", false, 40)]
 		private static void CreateVerticalGradientMask(MenuCommand c) => Create<VerticalGradientMaskDeformer>(c);
 
-		[MenuItem(Root + "Vertex Color Mask", false, 41)]
+		[MenuItem(Root + "Deformers/Mask/Vertex Color Mask", false, 41)]
 		private static void CreateVertexColorMask(MenuCommand c) => Create<VertexColorMaskDeformer>(c);
 
 		// ---- validate(全項目共通: シーン上の GameObject 選択時のみ有効) ----
 
 		[MenuItem(Root + "Deform Stack (旧 Deformable)", true)]
-		[MenuItem(Root + "Lattice", true)]
-		[MenuItem(Root + "Cylindrical Scale", true)]
-		[MenuItem(Root + "Cylindrical Vertex Transform", true)]
-		[MenuItem(Root + "Transform", true)]
-		[MenuItem(Root + "Scale", true)]
-		[MenuItem(Root + "UV Island Mask", true)]
-		[MenuItem(Root + "Sphere Mask", true)]
-		[MenuItem(Root + "Box Mask", true)]
-		[MenuItem(Root + "Vertical Gradient Mask", true)]
-		[MenuItem(Root + "Vertex Color Mask", true)]
+		[MenuItem(Root + "Deformers/Lattice", true)]
+		[MenuItem(Root + "Deformers/Cylindrical Scale", true)]
+		[MenuItem(Root + "Deformers/Cylindrical Vertex Transform", true)]
+		[MenuItem(Root + "Deformers/Transform", true)]
+		[MenuItem(Root + "Deformers/Scale", true)]
+		[MenuItem(Root + "Deformers/Mask/UV Island Mask", true)]
+		[MenuItem(Root + "Deformers/Mask/Sphere Mask", true)]
+		[MenuItem(Root + "Deformers/Mask/Box Mask", true)]
+		[MenuItem(Root + "Deformers/Mask/Vertical Gradient Mask", true)]
+		[MenuItem(Root + "Deformers/Mask/Vertex Color Mask", true)]
 		private static bool ValidateSelection()
 		{
 			var go = Selection.activeGameObject;

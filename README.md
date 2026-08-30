@@ -49,7 +49,7 @@ Non-destructive mesh deformation plugin for VRChat avatars, built on NDMF.
 ## 使い方(最小)
 
 1. 変形したいレンダラー(SkinnedMeshRenderer など)の GameObject をヒエラルキーで右クリック →
-   **NDMF Deform > Lattice** などデフォーマを選択
+   **NDMF Deform > Deformers > Lattice** などデフォーマを選択
    (Deform Stack が無ければ自動で追加され、デフォーマは子 GameObject として作成・登録されます)
 2. NDMF プレビューで確認しながら編集 → アバタービルド時に自動でベイクされます
 
