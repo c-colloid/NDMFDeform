@@ -13,7 +13,7 @@ jobs:
   editmode:
     name: EditMode tests (Unity 2022.3.22f1)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     container:
       image: unityci/editor:ubuntu-2022.3.22f1-base-3
     permissions:
@@ -48,14 +48,31 @@ jobs:
           "$LICENSING_CLIENT" --activate-all --include-personal \
             --username "$UNITY_EMAIL" --password "$UNITY_PASSWORD"
 
+      # まれにエディタがテスト開始前にハングする(結果 XML もログもほぼ空のまま
+      # ジョブタイムアウトまで沈黙)。試行ごとに timeout で区切り、
+      # 「結果ファイルを出さずに終了した」場合のみ 1 回だけ再試行する。
+      # テストが実際に失敗した場合(results.xml あり)は再試行しない。
       - name: Run EditMode tests
         run: |
           mkdir -p test-results
-          /opt/unity/Editor/Unity -batchmode -nographics \
-            -projectPath "$GITHUB_WORKSPACE/TestProject" \
-            -runTests -testPlatform EditMode -assemblyNames "NDMFDeform.Tests" \
-            -testResults "$GITHUB_WORKSPACE/test-results/results.xml" \
-            -logFile "$GITHUB_WORKSPACE/test-results/tests.log"
+          run_tests() {
+            timeout 25m /opt/unity/Editor/Unity -batchmode -nographics \
+              -projectPath "$GITHUB_WORKSPACE/TestProject" \
+              -runTests -testPlatform EditMode -assemblyNames "NDMFDeform.Tests" \
+              -testResults "$GITHUB_WORKSPACE/test-results/results.xml" \
+              -logFile "$GITHUB_WORKSPACE/test-results/tests.log"
+          }
+          code=0
+          run_tests || code=$?
+          if [ "$code" -eq 0 ]; then
+            exit 0
+          fi
+          if [ -f test-results/results.xml ]; then
+            exit "$code"
+          fi
+          echo "::warning::Unity exited without producing test results (exit $code). Retrying once (startup hang)."
+          mv test-results/tests.log test-results/tests-attempt1.log || true
+          run_tests
 
       - name: Summarize results
         if: always()
