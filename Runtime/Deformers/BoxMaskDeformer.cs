@@ -12,6 +12,13 @@ namespace MeshModifier.NDMFDeform.Core
 	/// 直方体領域のマスク。内側バウンズの中で変形を完全に打ち消し、
 	/// 外側バウンズまで減衰する(invert で外側を打ち消す)。
 	/// 元実装と同じく、領域判定は変形後の頂点位置に対して行う。
+	///
+	/// 減衰は元実装(表面投影点間の距離比)から変更している:
+	/// 元実装は「内側の点から外側バウンズ表面への最近接投影」が面の切替わりで
+	/// 不連続になり、重みがジャンプしてメッシュに段差が出るため、
+	/// 連続な距離場 t = d_out / (d_in + d_out) を使う
+	/// (d_in = 内側バウンズまでの距離、d_out = 外側バウンズへのめり込み深さ)。
+	/// 面中央の軸上では元実装と同じ減衰になる。
 	/// </summary>
 	[DeformerMeta(Name = "Box Mask", Category = DeformerCategory.Mask,
 	              Description = "直方体領域の変形を打ち消す(反転で外側を打ち消す)")]
@@ -81,41 +88,23 @@ namespace MeshModifier.NDMFDeform.Core
 				var meshPoint = vertices[index];
 				var point = mul(meshToAxis, float4(meshPoint, 1f)).xyz;
 
+				// d_in: 内側バウンズまでの距離(内側なら 0)
+				var dIn = length(max(abs(point - innerCenter) - innerExtents, float3(0f)));
+				// d_out: 外側バウンズへのめり込み深さ = 最も近い面までの距離(外側なら 0)
+				var dOut = max(cmin(outerExtents - abs(point - outerCenter)), 0f);
+
 				float t;
-				if (all(abs(point - innerCenter) <= innerExtents))
-				{
+				if (dIn <= 0f)
 					t = 1f;
-				}
+				else if (dOut <= 0f)
+					t = 0f;
 				else
-				{
-					var innerPoint = ClosestSurfacePoint(innerCenter, innerExtents, point);
-					var outerPoint = ClosestSurfacePoint(outerCenter, outerExtents, point);
-					var span = max(distance(innerPoint, outerPoint), 1e-6f);
-					t = 1f - distance(innerPoint, point) / span;
-				}
+					t = dOut / (dIn + dOut);
 
 				if (invert == 1)
 					t = 1f - t;
 
 				vertices[index] = lerp(meshPoint, original[index], saturate(t * factor));
-			}
-
-			/// <summary>バウンズ表面上の最近接点(内側の点は最も近い面へ押し出す)</summary>
-			private static float3 ClosestSurfacePoint(float3 center, float3 extents, float3 point)
-			{
-				var local = point - center;
-				var clamped = clamp(local, -extents, extents);
-				if (any(abs(local) > extents))
-					return center + clamped;
-
-				var faceDistance = extents - abs(local);
-				if (faceDistance.x <= faceDistance.y && faceDistance.x <= faceDistance.z)
-					clamped.x = local.x >= 0f ? extents.x : -extents.x;
-				else if (faceDistance.y <= faceDistance.z)
-					clamped.y = local.y >= 0f ? extents.y : -extents.y;
-				else
-					clamped.z = local.z >= 0f ? extents.z : -extents.z;
-				return center + clamped;
 			}
 		}
 	}

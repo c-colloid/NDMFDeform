@@ -104,6 +104,57 @@ namespace MeshModifier.NDMFDeform.Tests
 		}
 
 		[Test]
+		public void BoxMask_FalloffIsContinuousAcrossSeams()
+		{
+			// 段差バグの回帰テスト: 内側バウンズが外側バウンズ内で大きく偏心した構成
+			// (実プロジェクトで段差が出た値)で、減衰帯を横切る直線上の重みが
+			// 隣接サンプル間でジャンプしないこと。
+			// 旧実装(表面投影点間の距離比)は x≈-0.57 付近で約 0.23 ジャンプしていた。
+			const int count = 81;
+			const float startX = -0.75f;
+			const float stepX = 0.005f;
+			var vertices = new NativeArray<float3>(count, Allocator.TempJob);
+			var original = new NativeArray<float3>(count, Allocator.TempJob);
+			try
+			{
+				for (var i = 0; i < count; i++)
+				{
+					var p = new float3(startX + stepX * i, -0.22f, 0f);
+					vertices[i] = p;
+					// 復元先を +X に 1 ずらしておくと、出力の x 増分がそのまま重みになる
+					original[i] = p + new float3(1f, 0f, 0f);
+				}
+
+				new BoxMaskDeformer.BoxMaskJob
+				{
+					factor = 1f,
+					innerCenter = new float3(0.0552f, -0.0523f, 0f),
+					innerExtents = new float3(0.1948f, 0.1978f, 0.25f),
+					outerCenter = new float3(-0.1732f, 0f, 0f),
+					outerExtents = new float3(0.6732f, 0.5f, 0.5f),
+					invert = 0,
+					meshToAxis = float4x4.identity,
+					vertices = vertices,
+					original = original,
+				}.Run(count);
+
+				var previous = vertices[0].x - startX;
+				for (var i = 1; i < count; i++)
+				{
+					var weight = vertices[i].x - (startX + stepX * i);
+					Assert.That(Mathf.Abs(weight - previous), Is.LessThan(0.05f),
+						$"sample {i} (x={startX + stepX * i:F3}) で重みがジャンプしています");
+					previous = weight;
+				}
+			}
+			finally
+			{
+				vertices.Dispose();
+				original.Dispose();
+			}
+		}
+
+		[Test]
 		public void VerticalGradientMask_FadesAlongAxisZ()
 		{
 			var (stack, maskGo) = CreateSetup(new[]
