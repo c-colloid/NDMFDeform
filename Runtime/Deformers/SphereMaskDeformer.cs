@@ -38,10 +38,13 @@ namespace MeshModifier.NDMFDeform.Core
 #if UNITY_EDITOR
 		public override void DescribeHandles(IHandleBuilder h)
 		{
-			// 実効半径はシリアライズ値の 0.5 倍(ジョブ内換算)なので、表示も scale=0.5 で合わせる
+			// 実効半径はシリアライズ値の 0.5 倍(ジョブ内換算)なので、表示も scale=0.5 で合わせる。
+			// inner/outer はペア宣言し、ホバー矢印が互いのリング(=フォールオフ帯)を指すようにする
 			const float RadiusScale = 0.5f;
-			h.RadiusSlider(nameof(innerRadius), HandleAxis.Y, HandleLineStyle.Solid, RadiusScale);
-			h.RadiusSlider(nameof(outerRadius), HandleAxis.Y, HandleLineStyle.Dotted, RadiusScale);
+			h.RadiusSlider(nameof(innerRadius), HandleAxis.Y, HandleLineStyle.Solid, RadiusScale,
+				pairProperty: nameof(outerRadius));
+			h.RadiusSlider(nameof(outerRadius), HandleAxis.Y, HandleLineStyle.Dotted, RadiusScale,
+				pairProperty: nameof(innerRadius));
 			h.Circle(HandleAxis.X, 0f, nameof(innerRadius), HandleLineStyle.Solid, RadiusScale);
 			h.Circle(HandleAxis.Y, 0f, nameof(innerRadius), HandleLineStyle.Solid, RadiusScale);
 			h.Circle(HandleAxis.Z, 0f, nameof(innerRadius), HandleLineStyle.Solid, RadiusScale);

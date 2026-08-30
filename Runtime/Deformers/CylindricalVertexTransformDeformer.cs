@@ -40,11 +40,12 @@ namespace MeshModifier.NDMFDeform.Core
 #if UNITY_EDITOR
 		public override void DescribeHandles(IHandleBuilder h)
 		{
-			// キャップは top リングの縁に載せる(中空に浮かせない)
+			// キャップは top リングの縁に載せる(中空に浮かせない)。
+			// radius/scope はペア宣言し、ホバー矢印が互いのリングを指すようにする
 			h.RadiusSlider(nameof(radius), HandleAxis.Y, HandleLineStyle.Solid, 1f,
-				nameof(top), HandleAxis.Z);
+				nameof(top), HandleAxis.Z, nameof(scope));
 			h.RadiusSlider(nameof(scope), HandleAxis.Y, HandleLineStyle.Dotted, 1f,
-				nameof(top), HandleAxis.Z);
+				nameof(top), HandleAxis.Z, nameof(radius));
 			h.AxisSlider(nameof(top), HandleAxis.Z);
 			h.AxisSlider(nameof(bottom), HandleAxis.Z);
 			h.Circle(HandleAxis.Z, nameof(top), nameof(radius));

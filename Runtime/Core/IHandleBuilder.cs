@@ -31,16 +31,18 @@ namespace MeshModifier.NDMFDeform.Core
 		void AxisSlider(string property, HandleAxis along, HandleLineStyle style = HandleLineStyle.Solid);
 
 		/// <summary>
-		/// float プロパティ: along 軸上・距離 value×scale の位置に置くスライダー(半径編集用)。
-		/// キャップは Solid(主)なら負側、Dotted(従)なら正側に置かれる
-		/// (radius/scope や inner/outer のペアで値が一致してもキャップが重ならず、
-		/// ホバー矢印も互いに逆向きになって区別できる)。
+		/// float プロパティ: along 軸の負方向・距離 value×scale の位置に置くスライダー(半径編集用)。
 		/// scale は「シリアライズ値と実効距離の比」(例: SphereMask は実効半径が値の 0.5 倍)。
 		/// offsetProperty を指定すると、キャップの基点を offsetAxis 軸上のその値へずらす
 		/// (円柱の top リングの縁にキャップを載せる等。中空に浮かせないため)。
+		/// pairProperty は radius/scope・inner/outer のような同軸ペアのもう一方の半径プロパティ
+		/// (scale は同一である前提)。指定すると、ホバー矢印がペアのリングの方向を向く
+		/// (外側のハンドルは内向き・内側は外向き)ため、重なっていても互いに区別できる。
+		/// 値が等しいときは Solid=外向き / Dotted=内向き。
 		/// </summary>
 		void RadiusSlider(string property, HandleAxis along, HandleLineStyle style = HandleLineStyle.Solid,
-			float scale = 1f, string offsetProperty = null, HandleAxis offsetAxis = HandleAxis.Z);
+			float scale = 1f, string offsetProperty = null, HandleAxis offsetAxis = HandleAxis.Z,
+			string pairProperty = null);
 
 		/// <summary>表示専用の円: normal 軸まわり、offsetProperty の位置に radiusProperty の半径で描く</summary>
 		void Circle(HandleAxis normal, string offsetProperty, string radiusProperty, HandleLineStyle style = HandleLineStyle.Solid);

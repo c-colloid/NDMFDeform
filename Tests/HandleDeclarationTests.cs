@@ -35,11 +35,13 @@ namespace MeshModifier.NDMFDeform.Tests
 			public void AxisSlider(string property, HandleAxis along, HandleLineStyle style) => Check(property);
 
 			public void RadiusSlider(string property, HandleAxis along, HandleLineStyle style, float scale,
-				string offsetProperty, HandleAxis offsetAxis)
+				string offsetProperty, HandleAxis offsetAxis, string pairProperty)
 			{
 				Check(property);
 				if (offsetProperty != null)
 					Check(offsetProperty);
+				if (pairProperty != null)
+					Check(pairProperty);
 			}
 
 			public void Circle(HandleAxis normal, string offsetProperty, string radiusProperty, HandleLineStyle style)

@@ -73,7 +73,8 @@ namespace MeshModifier.NDMFDeform.Editor
 		}
 
 		public void RadiusSlider(string property, HandleAxis along, HandleLineStyle style = HandleLineStyle.Solid,
-			float scale = 1f, string offsetProperty = null, HandleAxis offsetAxis = HandleAxis.Z)
+			float scale = 1f, string offsetProperty = null, HandleAxis offsetAxis = HandleAxis.Z,
+			string pairProperty = null)
 		{
 			var origin = Vector3.zero;
 			var fillNormal = Vector3.zero;
@@ -85,15 +86,21 @@ namespace MeshModifier.NDMFDeform.Editor
 				// オフセット付き(円柱など)はキャップの載っているリング平面でフィルする
 				fillNormal = AxisVector(offsetAxis);
 			}
-			// 主(Solid)は負側・従(Dotted)は正側にキャップを置く。
-			// radius/scope や inner/outer のように同軸のペアで値が一致しても
-			// キャップが重ならず、ホバー矢印(外向き)も互いに逆を向いて区別できる。
-			var sign = style == HandleLineStyle.Dotted ? 1f : -1f;
-			SliderInternal(property, along, sign, style, scale, origin, fillNormal, radiusFill: true);
+			// ペア半径(radius/scope、inner/outer)の現在値。矢印の向き付けに使う
+			float? pairValue = null;
+			if (pairProperty != null)
+			{
+				var pp = Find(pairProperty);
+				if (pp != null)
+					pairValue = pp.floatValue * scale;
+			}
+			SliderInternal(property, along, sign: -1f, style, scale, origin, fillNormal,
+				radiusFill: true, pairValue);
 		}
 
 		private void SliderInternal(string property, HandleAxis along, float sign, HandleLineStyle style,
-			float scale = 1f, Vector3 origin = default, Vector3 fillNormal = default, bool radiusFill = false)
+			float scale = 1f, Vector3 origin = default, Vector3 fillNormal = default, bool radiusFill = false,
+			float? pairValue = null)
 		{
 			var p = Find(property);
 			if (p == null) return;
@@ -119,8 +126,21 @@ namespace MeshModifier.NDMFDeform.Editor
 
 			using (new Handles.DrawingScope(color, Matrix4x4.identity))
 			{
-				// 影響範囲が広がる方向の小矢印(ホバー/ドラッグ中のみ)
-				var growDir = worldDir * Mathf.Sign(sign);
+				// ホバー/ドラッグ中の小矢印。
+				// ペア半径があるときはペアのリングの方向を向ける
+				// (外側のハンドルは内向き・内側は外向き。重なっていても互いに区別でき、
+				// 2 本のリングに挟まれた作用域を指す)。値が等しいときは Solid=外 / Dotted=内。
+				// ペアがなければ従来どおり値が増える方向(影響範囲が広がる方向)。
+				var outward = worldDir * Mathf.Sign(sign);
+				var growDir = outward;
+				var value = p.floatValue * scale;
+				if (pairValue.HasValue)
+				{
+					if (!Mathf.Approximately(pairValue.Value, value))
+						growDir = outward * Mathf.Sign(pairValue.Value - value);
+					else if (style == HandleLineStyle.Dotted)
+						growDir = -outward;
+				}
 				if (engaged)
 					DrawArrowGlyph(world + growDir * (capSize * 2.5f), growDir, handleSize * 0.28f);
 
