@@ -18,8 +18,10 @@ namespace MeshModifier.NDMFDeform.Core
 	public class CylindricalScaleDeformer : DeformerBase
 	{
 		[SerializeField, Range(0f, 1f)] private float factor = 0f;
-		[SerializeField] private float radius = 1f;
-		[SerializeField] private float scope = 1f;
+		[SerializeField, Tooltip("変形先の半径(シーンではシアン実線)。scope の円筒がこの半径になるまで縮む/広がる")]
+		private float radius = 1f;
+		[SerializeField, Tooltip("影響範囲の半径(シーンではオレンジ点線)。この内側の頂点だけが変形される")]
+		private float scope = 1f;
 		[SerializeField] private float top = 0.5f;
 		[SerializeField] private float bottom = -0.5f;
 		[SerializeField] private Transform axisOverride;

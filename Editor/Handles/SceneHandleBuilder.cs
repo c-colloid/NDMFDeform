@@ -85,11 +85,15 @@ namespace MeshModifier.NDMFDeform.Editor
 				// オフセット付き(円柱など)はキャップの載っているリング平面でフィルする
 				fillNormal = AxisVector(offsetAxis);
 			}
-			SliderInternal(property, along, sign: -1f, style, scale, origin, fillNormal);
+			// 主(Solid)は負側・従(Dotted)は正側にキャップを置く。
+			// radius/scope や inner/outer のように同軸のペアで値が一致しても
+			// キャップが重ならず、ホバー矢印(外向き)も互いに逆を向いて区別できる。
+			var sign = style == HandleLineStyle.Dotted ? 1f : -1f;
+			SliderInternal(property, along, sign, style, scale, origin, fillNormal, radiusFill: true);
 		}
 
 		private void SliderInternal(string property, HandleAxis along, float sign, HandleLineStyle style,
-			float scale = 1f, Vector3 origin = default, Vector3 fillNormal = default)
+			float scale = 1f, Vector3 origin = default, Vector3 fillNormal = default, bool radiusFill = false)
 		{
 			var p = Find(property);
 			if (p == null) return;
@@ -121,7 +125,7 @@ namespace MeshModifier.NDMFDeform.Editor
 					DrawArrowGlyph(world + growDir * (capSize * 2.5f), growDir, handleSize * 0.28f);
 
 				EditorGUI.BeginChangeCheck();
-				var newWorld = Handles.Slider(id, world, worldDir, capSize, Handles.DotHandleCap, 0f);
+				var newWorld = Handles.Slider(id, world, worldDir, capSize, CapFunction(style), 0f);
 				if (EditorGUI.EndChangeCheck())
 				{
 					var newLocal = m.inverse.MultiplyPoint3x4(newWorld) - origin;
@@ -129,13 +133,17 @@ namespace MeshModifier.NDMFDeform.Editor
 					Changed = true;
 				}
 
+				// ホバー中は「どのプロパティのハンドルか」を名前で示し、
+				// ドラッグ中は名前と数値を併記する
 				if (interaction == Interaction.Drag)
-					DrawValueLabel(world, p.floatValue * scale, color);
+					DrawHandleLabel(world, $"{p.displayName}  {p.floatValue * scale:0.###}", color);
+				else if (interaction == Interaction.Hover)
+					DrawHandleLabel(world, p.displayName, color);
 			}
 
 			// 半径スライダーのドラッグ中は実効範囲を面で提示
 			// (リング平面が指定されていればその平面、なければカメラ正対ディスク)
-			if (sign < 0f && interaction == Interaction.Drag)
+			if (radiusFill && interaction == Interaction.Drag)
 				DrawRadiusFill(m, origin, p.floatValue * scale, AccentColor(style), fillNormal);
 		}
 
@@ -221,7 +229,7 @@ namespace MeshModifier.NDMFDeform.Editor
 							DrawArrowGlyph(world + worldDir * (capSize * 2.5f), worldDir, handleSize * 0.28f);
 
 						EditorGUI.BeginChangeCheck();
-						var newWorld = Handles.Slider(id, world, worldDir, capSize, Handles.DotHandleCap, 0f);
+						var newWorld = Handles.Slider(id, world, worldDir, capSize, CapFunction(style), 0f);
 						if (EditorGUI.EndChangeCheck())
 						{
 							var newFace = m.inverse.MultiplyPoint3x4(newWorld)[axis];
@@ -231,6 +239,12 @@ namespace MeshModifier.NDMFDeform.Editor
 								min[axis] = Mathf.Min(newFace, max[axis]);
 							boundsChanged = true;
 						}
+
+						// どの Bounds の面かをホバー時に名前で示す(内箱/外箱の区別用)
+						if (interaction == Interaction.Drag)
+							DrawHandleLabel(world, $"{p.displayName}  {faceLocal[axis]:0.###}", color);
+						else if (interaction == Interaction.Hover)
+							DrawHandleLabel(world, p.displayName, color);
 					}
 
 					// ドラッグ中の面は半透明フィルで提示する
@@ -341,7 +355,7 @@ namespace MeshModifier.NDMFDeform.Editor
 					DrawArrowGlyph(world + worldDir * (capSize * 2.5f), worldDir, handleSize * 0.28f);
 
 				EditorGUI.BeginChangeCheck();
-				var newWorld = Handles.Slider(id, world, worldDir, capSize, Handles.DotHandleCap, 0f);
+				var newWorld = Handles.Slider(id, world, worldDir, capSize, CapFunction(style), 0f);
 				if (EditorGUI.EndChangeCheck())
 				{
 					// rim は dir と直交するため Dot で距離成分だけが残る
@@ -351,7 +365,9 @@ namespace MeshModifier.NDMFDeform.Editor
 				}
 
 				if (interaction == Interaction.Drag)
-					DrawValueLabel(world, p.floatValue, color);
+					DrawHandleLabel(world, $"{p.displayName}  {p.floatValue:0.###}", color);
+				else if (interaction == Interaction.Hover)
+					DrawHandleLabel(world, p.displayName, color);
 			}
 
 			// ドラッグ中は減衰カーブを「リングの櫛」で提示する
@@ -411,8 +427,11 @@ namespace MeshModifier.NDMFDeform.Editor
 			Handles.ConeHandleCap(0, to, Quaternion.LookRotation(worldDir), length * 0.45f, EventType.Repaint);
 		}
 
-		/// <summary>ドラッグ中の数値表示(キャップの脇)</summary>
-		private static void DrawValueLabel(Vector3 world, float value, Color color)
+		/// <summary>
+		/// キャップの脇のテキスト表示。
+		/// ホバー中はプロパティ名(どのハンドルか)、ドラッグ中は名前+数値を出す。
+		/// </summary>
+		private static void DrawHandleLabel(Vector3 world, string text, Color color)
 		{
 			if (Event.current.type != EventType.Repaint)
 				return;
@@ -423,7 +442,31 @@ namespace MeshModifier.NDMFDeform.Editor
 			var offset = HandleUtility.GetHandleSize(world) * 0.22f;
 			var view = SceneView.currentDrawingSceneView;
 			var right = view != null && view.camera != null ? view.camera.transform.right : Vector3.right;
-			Handles.Label(world + right * offset, value.ToString("0.###"), _valueLabelStyle);
+			Handles.Label(world + right * offset, text, _valueLabelStyle);
+		}
+
+		/// <summary>
+		/// キャップ形状もスタイルで区別する:
+		/// 主(Solid)= 塗りドット / 従(Dotted)= 中抜き円。
+		/// 色に加えて形でもペアのハンドルを見分けられるようにする。
+		/// </summary>
+		private static Handles.CapFunction CapFunction(HandleLineStyle style)
+		{
+			return style == HandleLineStyle.Dotted ? CameraFacingCircleCap : (Handles.CapFunction)Handles.DotHandleCap;
+		}
+
+		/// <summary>
+		/// 常にカメラ正対で描く中抜き円キャップ。
+		/// (CircleHandleCap は渡された回転を法線にするため、
+		/// スライダー方向によっては円が真横から見えて消えてしまう)
+		/// </summary>
+		private static void CameraFacingCircleCap(int controlID, Vector3 position, Quaternion rotation, float size,
+			EventType eventType)
+		{
+			var cam = Camera.current;
+			if (cam != null)
+				rotation = cam.transform.rotation;
+			Handles.CircleHandleCap(controlID, position, rotation, size, eventType);
 		}
 
 		/// <summary>半径ドラッグ中の実効範囲フィル(軸空間ディスク)</summary>
