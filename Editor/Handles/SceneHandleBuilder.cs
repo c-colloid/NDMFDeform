@@ -76,17 +76,20 @@ namespace MeshModifier.NDMFDeform.Editor
 			float scale = 1f, string offsetProperty = null, HandleAxis offsetAxis = HandleAxis.Z)
 		{
 			var origin = Vector3.zero;
+			var fillNormal = Vector3.zero;
 			if (offsetProperty != null)
 			{
 				var op = Find(offsetProperty);
 				if (op != null)
 					origin = AxisVector(offsetAxis) * op.floatValue;
+				// オフセット付き(円柱など)はキャップの載っているリング平面でフィルする
+				fillNormal = AxisVector(offsetAxis);
 			}
-			SliderInternal(property, along, sign: -1f, style, scale, origin);
+			SliderInternal(property, along, sign: -1f, style, scale, origin, fillNormal);
 		}
 
 		private void SliderInternal(string property, HandleAxis along, float sign, HandleLineStyle style,
-			float scale = 1f, Vector3 origin = default)
+			float scale = 1f, Vector3 origin = default, Vector3 fillNormal = default)
 		{
 			var p = Find(property);
 			if (p == null) return;
@@ -130,9 +133,10 @@ namespace MeshModifier.NDMFDeform.Editor
 					DrawValueLabel(world, p.floatValue * scale, color);
 			}
 
-			// 半径スライダーのドラッグ中は実効範囲を面で提示(カメラ正対・軸空間ディスク)
+			// 半径スライダーのドラッグ中は実効範囲を面で提示
+			// (リング平面が指定されていればその平面、なければカメラ正対ディスク)
 			if (sign < 0f && interaction == Interaction.Drag)
-				DrawRadiusFill(m, origin, p.floatValue * scale, AccentColor(style));
+				DrawRadiusFill(m, origin, p.floatValue * scale, AccentColor(style), fillNormal);
 		}
 
 		public void Circle(HandleAxis normal, string offsetProperty, string radiusProperty,
@@ -422,15 +426,21 @@ namespace MeshModifier.NDMFDeform.Editor
 			Handles.Label(world + right * offset, value.ToString("0.###"), _valueLabelStyle);
 		}
 
-		/// <summary>半径ドラッグ中の実効範囲フィル(軸空間・カメラ正対ディスク)</summary>
-		private static void DrawRadiusFill(Matrix4x4 axisMatrix, Vector3 center, float radius, Color accent)
+		/// <summary>半径ドラッグ中の実効範囲フィル(軸空間ディスク)</summary>
+		private static void DrawRadiusFill(Matrix4x4 axisMatrix, Vector3 center, float radius, Color accent,
+			Vector3 fillNormal)
 		{
 			if (Event.current.type != EventType.Repaint)
 				return;
-			var view = SceneView.currentDrawingSceneView;
-			if (view == null || view.camera == null)
-				return;
-			var normalLocal = axisMatrix.inverse.MultiplyVector(view.camera.transform.forward);
+			var normalLocal = fillNormal;
+			if (normalLocal == Vector3.zero)
+			{
+				// 平面指定なし(球など)はカメラ正対ディスク = 球のシルエット
+				var view = SceneView.currentDrawingSceneView;
+				if (view == null || view.camera == null)
+					return;
+				normalLocal = axisMatrix.inverse.MultiplyVector(view.camera.transform.forward);
+			}
 			if (normalLocal.sqrMagnitude < 1e-10f)
 				return;
 			using (new Handles.DrawingScope(new Color(accent.r, accent.g, accent.b, 0.08f), axisMatrix))

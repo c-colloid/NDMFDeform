@@ -31,7 +31,12 @@ namespace MeshModifier.NDMFDeform.Editor
 			public Mesh Source;
 			public Mesh Baked;
 			public int VertexCount;
+
+			/// <summary>プリスキン済み(見た目のワールド空間)のソース頂点</summary>
 			public NativeArray<float3> SourceVertices;
+
+			/// <summary>頂点ごとのスキン行列(フルベイク毎に作り直す)</summary>
+			internal VertexSkinning Skinning;
 			public NativeArray<float2> Uvs;
 			public NativeArray<float4> Colors;
 			public NativeArray<float3> Work;
@@ -53,6 +58,7 @@ namespace MeshModifier.NDMFDeform.Editor
 				if (Uvs.IsCreated) Uvs.Dispose();
 				if (Colors.IsCreated) Colors.Dispose();
 				if (Work.IsCreated) Work.Dispose();
+				Skinning.Dispose();
 			}
 		}
 
@@ -92,6 +98,7 @@ namespace MeshModifier.NDMFDeform.Editor
 			                 entry.Source == source &&
 			                 entry.VertexCount == source.vertexCount &&
 			                 entry.ShapeStateHash == shapeHash &&
+			                 entry.Skinning.IsCreated &&
 			                 (flags & (DeformDataFlags.Normals | DeformDataFlags.Tangents)) == 0;
 
 			if (!fastPathOk)
@@ -125,12 +132,14 @@ namespace MeshModifier.NDMFDeform.Editor
 			var handle = default(JobHandle);
 			try
 			{
+				// 入力(SourceVertices)はプリスキン済みワールド空間。軸変換は worldToLocal のみ
 				foreach (var deformer in deformers)
 				{
-					var space = new DeformSpace(
-						GetMeshToAxis(deformer.Axis, rendererTransform), rendererTransform);
+					var space = new DeformSpace(GetWorldToAxis(deformer.Axis), rendererTransform);
 					handle = deformer.Schedule(in buffers, in space, handle);
 				}
+				// 変形結果をメッシュ空間へ書き戻す(逆スキン行列)
+				handle = entry.Skinning.ScheduleToMesh(entry.Work, handle);
 			}
 			finally
 			{
@@ -192,14 +201,20 @@ namespace MeshModifier.NDMFDeform.Editor
 				if (entry.Colors.IsCreated) entry.Colors.Dispose();
 				if (entry.Work.IsCreated) entry.Work.Dispose();
 
-				var vertices = source.vertices;
-				entry.SourceVertices = new NativeArray<float3>(vertices.Length, Allocator.Persistent,
+				entry.SourceVertices = new NativeArray<float3>(source.vertexCount, Allocator.Persistent,
 					NativeArrayOptions.UninitializedMemory);
-				for (var i = 0; i < vertices.Length; i++)
-					entry.SourceVertices[i] = vertices[i];
-				entry.Work = new NativeArray<float3>(vertices.Length, Allocator.Persistent,
+				entry.Work = new NativeArray<float3>(source.vertexCount, Allocator.Persistent,
 					NativeArrayOptions.UninitializedMemory);
 			}
+
+			// スキン行列とプリスキン済み頂点はフルベイク毎に作り直す
+			// (ボーンが動いている可能性があるため)
+			entry.Skinning.Dispose();
+			entry.Skinning = VertexSkinning.Build(rendererTransform, source, Allocator.Persistent);
+			var sourceVertices = source.vertices;
+			for (var i = 0; i < sourceVertices.Length; i++)
+				entry.SourceVertices[i] = sourceVertices[i];
+			entry.Skinning.ScheduleToWorld(entry.SourceVertices, default).Complete();
 
 			entry.Source = source;
 			entry.VertexCount = source.vertexCount;
@@ -272,10 +287,9 @@ namespace MeshModifier.NDMFDeform.Editor
 			}
 		}
 
-		private static float4x4 GetMeshToAxis(Transform axis, Transform rendererTransform)
+		private static float4x4 GetWorldToAxis(Transform axis)
 		{
-			// SMR はボーン×バインドポーズ基準(RendererMeshSpace 参照)
-			var m = axis.worldToLocalMatrix * RendererMeshSpace.GetMeshToWorld(rendererTransform);
+			var m = axis.worldToLocalMatrix;
 			return new float4x4(m.GetColumn(0), m.GetColumn(1), m.GetColumn(2), m.GetColumn(3));
 		}
 

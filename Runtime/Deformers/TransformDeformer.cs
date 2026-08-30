@@ -44,12 +44,14 @@ namespace MeshModifier.NDMFDeform.Core
 				return dependency;
 
 			var t = Target;
-			// 元実装と同じく位置・回転・ローカルスケールを成分ごとに補間する
+			// 元実装と同じく位置・回転・ローカルスケールを成分ごとに補間する。
+			// バッファはワールド空間(スキン済み)なので、レンダラー姿勢を
+			// 打ち消してから補間姿勢を適用する(ワールド入出力)
 			var matrix = Matrix4x4.TRS(
 				Vector3.Lerp(renderer.position, t.position, factor),
 				Quaternion.Lerp(renderer.rotation, t.rotation, factor),
 				Vector3.Lerp(renderer.localScale, t.localScale, factor));
-			matrix = renderer.worldToLocalMatrix * matrix;
+			matrix = matrix * renderer.worldToLocalMatrix;
 
 			return new TransformJob
 			{

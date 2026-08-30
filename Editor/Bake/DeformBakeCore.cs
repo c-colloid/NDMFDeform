@@ -70,11 +70,15 @@ namespace MeshModifier.NDMFDeform.Editor
 			foreach (var d in deformers)
 				d.PrepareBake(source);
 
-			// 軸空間はフレーム間で不変なので 1 回だけ計算する
+			// 軸空間はフレーム間で不変なので 1 回だけ計算する。
+			// パイプラインは頂点をスキン行列で「見た目のワールド空間」へ持ち上げてから
+			// 変形するため、軸空間への変換は worldToLocal のみでよい
 			var spaces = new DeformSpace[deformers.Count];
 			for (var i = 0; i < deformers.Count; i++)
 				spaces[i] = new DeformSpace(
-					GetMeshToAxis(deformers[i].Axis, rendererTransform), rendererTransform);
+					ToFloat4x4(deformers[i].Axis.worldToLocalMatrix), rendererTransform);
+
+			var skinning = VertexSkinning.Build(rendererTransform, source, Allocator.TempJob);
 
 			// 各パスで共有するソースチャンネル(頂点以外はフレーム間で共通)
 			var channels = new SourceChannels
@@ -94,13 +98,20 @@ namespace MeshModifier.NDMFDeform.Editor
 			var result = Object.Instantiate(source);
 			result.name = source.name + " (NDMFDeform)";
 
-			// 基本形状のベイク(結果メッシュへ書き戻し)
-			var bakedBase = new Vector3[channels.VertexCount];
-			RunPipeline(deformers, spaces, in channels, flags, null, bakedBase, result);
+			try
+			{
+				// 基本形状のベイク(結果メッシュへ書き戻し)
+				var bakedBase = new Vector3[channels.VertexCount];
+				RunPipeline(deformers, spaces, in channels, flags, in skinning, null, bakedBase, result);
 
-			if (options.RebakeBlendShapes)
-				RebakeBlendShapes(result, source, stack, deformers, spaces, in channels, flags,
-					bakedBase, options.ShapesToRebake);
+				if (options.RebakeBlendShapes)
+					RebakeBlendShapes(result, source, stack, deformers, spaces, in channels, flags,
+						in skinning, bakedBase, options.ShapesToRebake);
+			}
+			finally
+			{
+				skinning.Dispose();
+			}
 
 			// 再計算モードの時のみ法線・タンジェントを変形後の形状から作り直す。
 			// 既定(PreserveAuthored)では作り込まれた法線・タンジェント
@@ -128,16 +139,6 @@ namespace MeshModifier.NDMFDeform.Editor
 			return list;
 		}
 
-		/// <summary>
-		/// メッシュ空間 → 軸空間の変換行列
-		/// (旧 DeformerUtils.GetMeshToAxisSpace 相当。SMR はボーン×バインドポーズ基準)。
-		/// </summary>
-		private static float4x4 GetMeshToAxis(Transform axis, Transform rendererTransform)
-		{
-			var m = axis.worldToLocalMatrix * RendererMeshSpace.GetMeshToWorld(rendererTransform);
-			return ToFloat4x4(m);
-		}
-
 		private static float4x4 ToFloat4x4(Matrix4x4 m)
 		{
 			return new float4x4(m.GetColumn(0), m.GetColumn(1), m.GetColumn(2), m.GetColumn(3));
@@ -160,15 +161,23 @@ namespace MeshModifier.NDMFDeform.Editor
 		/// 結果の頂点を output に書き込み、applyTo が非 null なら全チャンネルを書き戻す。
 		/// </summary>
 		private static void RunPipeline(List<DeformerBase> deformers, DeformSpace[] spaces,
-			in SourceChannels channels, DeformDataFlags flags,
+			in SourceChannels channels, DeformDataFlags flags, in VertexSkinning skinning,
 			Vector3[] overrideVertices, Vector3[] output, Mesh applyTo)
 		{
 			var buffers = CreateBuffers(in channels, flags, overrideVertices);
 			var handle = default(JobHandle);
 			try
 			{
+				// 入力頂点を見た目のワールド空間へ(スキン行列)。
+				// マスクの復元先スナップショットも同じ空間で取る
+				skinning.ScheduleToWorld(buffers.Vertices, default).Complete();
+				if (buffers.OriginalVertices.IsCreated)
+					buffers.OriginalVertices.CopyFrom(buffers.Vertices);
+
 				for (var i = 0; i < deformers.Count; i++)
 					handle = deformers[i].Schedule(in buffers, in spaces[i], handle);
+				// 変形結果をメッシュ空間へ書き戻す(逆スキン行列)
+				handle = skinning.ScheduleToMesh(buffers.Vertices, handle);
 				handle.Complete();
 
 				for (var i = 0; i < buffers.Length; i++)
@@ -198,8 +207,8 @@ namespace MeshModifier.NDMFDeform.Editor
 		/// </summary>
 		private static void RebakeBlendShapes(Mesh result, Mesh source, DeformStack stack,
 			List<DeformerBase> deformers, DeformSpace[] spaces,
-			in SourceChannels channels, DeformDataFlags flags, Vector3[] bakedBase,
-			HashSet<string> shapesToRebake)
+			in SourceChannels channels, DeformDataFlags flags, in VertexSkinning skinning,
+			Vector3[] bakedBase, HashSet<string> shapesToRebake)
 		{
 			var shapeCount = source.blendShapeCount;
 			if (shapeCount == 0)
@@ -254,7 +263,7 @@ namespace MeshModifier.NDMFDeform.Editor
 					// 変形に追従(既定): Deform(base + delta) − Deform(base)
 					for (var i = 0; i < n; i++)
 						frameInput[i] = channels.Vertices[i] + deltaVertices[i];
-					RunPipeline(deformers, spaces, in channels, flags, frameInput, fullOutput, null);
+					RunPipeline(deformers, spaces, in channels, flags, in skinning, frameInput, fullOutput, null);
 
 					// 中間点の真の変形位置が直線補間からどれだけずれるかで非線形を検出する。
 					// 複数フレーム持ちのシェイプは作者が中間を制御しているため対象外
@@ -263,7 +272,7 @@ namespace MeshModifier.NDMFDeform.Editor
 					{
 						for (var i = 0; i < n; i++)
 							frameInput[i] = channels.Vertices[i] + deltaVertices[i] * 0.5f;
-						RunPipeline(deformers, spaces, in channels, flags, frameInput, midOutput, null);
+						RunPipeline(deformers, spaces, in channels, flags, in skinning, frameInput, midOutput, null);
 
 						var thresholdSq = deviationThreshold * deviationThreshold;
 						for (var i = 0; i < n; i++)
@@ -280,7 +289,7 @@ namespace MeshModifier.NDMFDeform.Editor
 					if (curved)
 					{
 						AddIntermediateFrame(result, name, weight, 0.25f, deformers, spaces,
-							in channels, flags, deltaVertices, deltaNormals, deltaTangents,
+							in channels, flags, in skinning, deltaVertices, deltaNormals, deltaTangents,
 							bakedBase, frameInput, scratchOutput, outputDelta, scaledNormals, scaledTangents);
 
 						for (var i = 0; i < n; i++)
@@ -289,7 +298,7 @@ namespace MeshModifier.NDMFDeform.Editor
 						result.AddBlendShapeFrame(name, weight * 0.5f, outputDelta, scaledNormals, scaledTangents);
 
 						AddIntermediateFrame(result, name, weight, 0.75f, deformers, spaces,
-							in channels, flags, deltaVertices, deltaNormals, deltaTangents,
+							in channels, flags, in skinning, deltaVertices, deltaNormals, deltaTangents,
 							bakedBase, frameInput, scratchOutput, outputDelta, scaledNormals, scaledTangents);
 					}
 
@@ -303,7 +312,7 @@ namespace MeshModifier.NDMFDeform.Editor
 		/// <summary>係数 t の中間フレームを 1 枚ベイクして追加する</summary>
 		private static void AddIntermediateFrame(Mesh result, string name, float weight, float t,
 			List<DeformerBase> deformers, DeformSpace[] spaces,
-			in SourceChannels channels, DeformDataFlags flags,
+			in SourceChannels channels, DeformDataFlags flags, in VertexSkinning skinning,
 			Vector3[] deltaVertices, Vector3[] deltaNormals, Vector3[] deltaTangents,
 			Vector3[] bakedBase, Vector3[] frameInput, Vector3[] frameOutput, Vector3[] outputDelta,
 			Vector3[] scaledNormals, Vector3[] scaledTangents)
@@ -311,7 +320,7 @@ namespace MeshModifier.NDMFDeform.Editor
 			var n = channels.VertexCount;
 			for (var i = 0; i < n; i++)
 				frameInput[i] = channels.Vertices[i] + deltaVertices[i] * t;
-			RunPipeline(deformers, spaces, in channels, flags, frameInput, frameOutput, null);
+			RunPipeline(deformers, spaces, in channels, flags, in skinning, frameInput, frameOutput, null);
 
 			for (var i = 0; i < n; i++)
 				outputDelta[i] = frameOutput[i] - bakedBase[i];
@@ -379,8 +388,10 @@ namespace MeshModifier.NDMFDeform.Editor
 
 			if ((flags & DeformDataFlags.OriginalVertices) != 0)
 			{
-				// スナップショットは「そのパスの入力」(フレームなら base + delta)
-				buffers.OriginalVertices = new NativeArray<float3>(buffers.Vertices, Allocator.TempJob);
+				// スナップショットは「そのパスの入力」(フレームなら base + delta)。
+				// 中身はプリスキン後に RunPipeline がコピーする
+				buffers.OriginalVertices = new NativeArray<float3>(buffers.Length, Allocator.TempJob,
+					NativeArrayOptions.UninitializedMemory);
 			}
 
 			return buffers;

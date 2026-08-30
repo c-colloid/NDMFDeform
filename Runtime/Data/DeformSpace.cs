@@ -4,9 +4,10 @@ using UnityEngine;
 namespace MeshModifier.NDMFDeform.Core
 {
 	/// <summary>
-	/// メッシュ空間とデフォーマ軸空間の相互変換。
-	/// ベイクコアがレンダラーと軸 Transform から一元的に計算して各デフォーマへ渡す
-	/// (旧 DeformerUtils.GetMeshToAxisSpace 相当の責務をコアへ集約)。
+	/// 変形空間とデフォーマ軸空間の相互変換。
+	/// ベイクコアは頂点をスキン行列で「見た目のワールド空間」へ持ち上げてから
+	/// デフォーマを適用するため、MeshToAxis は実質「ワールド → 軸空間」
+	/// (軸 Transform の worldToLocal)になる。名前は歴史的経緯によるもの。
 	/// </summary>
 	public readonly struct DeformSpace
 	{

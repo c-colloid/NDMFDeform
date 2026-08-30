@@ -4,16 +4,17 @@ using UnityEngine;
 namespace MeshModifier.NDMFDeform.Core
 {
 	/// <summary>
-	/// レンダラーの「メッシュ空間 → ワールド」変換の一元計算。
+	/// レンダラーの「メッシュ空間 → ワールド」のアフィン近似(代表ボーン基準)。
 	///
 	/// MeshFilter 系はレンダラー Transform そのもの。
 	/// SkinnedMeshRenderer は GameObject の Transform がスキン結果に影響しない
-	/// (見た目はボーン×バインドポーズで決まる)ため、レンダラー Transform が
-	/// バインド時とズレているアバターでは、Transform 基準の写像が見た目のメッシュと
-	/// ズレてしまう。そこで代表ボーン(ルートボーン優先)の
-	/// localToWorld × バインドポーズを使う。
-	/// レストポーズではどのボーンを選んでも同じ行列になり、レンダラー Transform が
-	/// バインド時のままのアバターでは Transform 基準と完全に一致する(挙動不変)。
+	/// (見た目はボーン×バインドポーズで決まる)ため、代表ボーン(ルートボーン優先)の
+	/// localToWorld × バインドポーズを使う。ボーンが一様に動く限り見た目と一致する。
+	///
+	/// 注意: これは単一のアフィン近似であり、ボーンがバインド後に個別調整された
+	/// 衣装(Modular Avatar 等)では頂点毎にズレる。ベイク・プレビューの変形
+	/// パイプラインは頂点ごとのスキン行列(Editor 側 VertexSkinning)を使っており、
+	/// このクラスは UV Island のシーン表示など「1 行列で足りる近似用途」にのみ使う。
 	/// </summary>
 	public static class RendererMeshSpace
 	{
