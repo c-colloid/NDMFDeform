@@ -146,7 +146,23 @@ namespace MeshModifier.NDMFDeform.Core
 
 			transform.position = stack.transform.TransformPoint(bounds.center);
 			transform.rotation = stack.transform.rotation;
-			transform.localScale = size;
+
+			// 目標はワールドで「レンダラーのバウンズと一致する箱」。
+			// localScale には自身の親チェーンのスケールが掛かるため、
+			// メッシュ空間のサイズをそのまま入れると、親の Transform が
+			// スタックとズレている(スケール・回転が違う)場合に箱がズレる。
+			// 目標ワールドサイズを親チェーン由来のスケールで割って設定する。
+			var stackScale = stack.transform.lossyScale;
+			var worldSize = new Vector3(
+				Mathf.Abs(stackScale.x) * size.x,
+				Mathf.Abs(stackScale.y) * size.y,
+				Mathf.Abs(stackScale.z) * size.z);
+			transform.localScale = Vector3.one;
+			var inherited = transform.lossyScale;
+			transform.localScale = new Vector3(
+				worldSize.x / Mathf.Max(Mathf.Abs(inherited.x), 1e-6f),
+				worldSize.y / Mathf.Max(Mathf.Abs(inherited.y), 1e-6f),
+				worldSize.z / Mathf.Max(Mathf.Abs(inherited.z), 1e-6f));
 		}
 
 #if UNITY_EDITOR
