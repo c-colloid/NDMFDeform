@@ -65,45 +65,32 @@ namespace MeshModifier.NDMFDeform.Editor
 			return false;
 		}
 
-		private static readonly Color StripOnColor = new Color(0.2f, 0.42f, 0.68f);
-		private const float LabelWidth = 58;
-
 		public override VisualElement CreatePanelContent()
 		{
+			// 構成は PointGridOverlay.uxml / スタイルは NdmfDeform.uss。
+			// ここでは EnumField の型初期化・状態反映・コールバック接続と、
+			// 解像度依存のスライス番号ボタンの生成だけを行う
 			var root = new VisualElement();
-			NdmfDeformFonts.ApplyEditorUiFont(root);
-			root.style.minWidth = 200;
+			NdmfDeformUI.CloneTree(NdmfDeformUI.PointGridOverlayGuid, root);
+
+			var occlusion = root.Q<EnumField>("occlusion-mode");
+			var sliceToggle = root.Q<Toggle>("slice-toggle");
+			var sliceAxis = root.Q<EnumField>("slice-axis");
+			var strip = root.Q<VisualElement>("slice-strip");
+			if (occlusion == null || sliceToggle == null || sliceAxis == null || strip == null)
+				return root;
 
 			// 奥点の表示モード
-			var occlusion = new EnumField("奥点", PointGridViewState.OcclusionMode);
-			occlusion.labelElement.style.minWidth = LabelWidth;
+			occlusion.Init(PointGridViewState.OcclusionMode);
 			occlusion.RegisterValueChangedCallback(e =>
 			{
 				PointGridViewState.OcclusionMode = (PointGridOcclusionMode)e.newValue;
 				SceneView.RepaintAll();
 			});
-			root.Add(occlusion);
 
-			// スライス: トグル + 軸を 1 行に、番号ボタンは有効時のみ表示
-			var sliceRow = new VisualElement();
-			sliceRow.style.flexDirection = FlexDirection.Row;
-			sliceRow.style.alignItems = Align.Center;
-
-			var sliceToggle = new Toggle("スライス") { value = PointGridViewState.SliceEnabled };
-			sliceToggle.labelElement.style.minWidth = LabelWidth;
-			var sliceAxis = new EnumField(PointGridViewState.SliceAxis);
-			sliceAxis.style.width = 46;
-			sliceAxis.style.flexShrink = 0;
-			sliceRow.Add(sliceToggle);
-			sliceRow.Add(sliceAxis);
-			root.Add(sliceRow);
-
-			var strip = new VisualElement();
-			strip.style.flexDirection = FlexDirection.Row;
-			strip.style.flexWrap = Wrap.Wrap;
-			strip.style.marginLeft = LabelWidth + 4;
-			strip.style.marginBottom = 2;
-			root.Add(strip);
+			// スライス: トグル + 軸、番号ボタンは有効時のみ表示
+			sliceToggle.SetValueWithoutNotify(PointGridViewState.SliceEnabled);
+			sliceAxis.Init(PointGridViewState.SliceAxis);
 
 			void RebuildStrip()
 			{
@@ -113,10 +100,7 @@ namespace MeshModifier.NDMFDeform.Editor
 				{
 					var index = i;
 					var button = new Button { text = index.ToString() };
-					button.style.width = 26;
-					button.style.marginLeft = 0;
-					button.style.marginRight = 1;
-					button.style.flexShrink = 0;
+					button.AddToClassList("ndmf-overlay-strip-button");
 					StyleStripButton(button, PointGridViewState.SliceIndices.Contains(index));
 					button.clicked += () =>
 					{
@@ -165,32 +149,28 @@ namespace MeshModifier.NDMFDeform.Editor
 			}).Every(500);
 
 			// 選択コマンド
-			var selectionRow = new VisualElement();
-			selectionRow.style.flexDirection = FlexDirection.Row;
-			selectionRow.style.alignItems = Align.Center;
-			var selectionLabel = new Label("選択");
-			selectionLabel.style.minWidth = LabelWidth;
-			selectionRow.Add(selectionLabel);
-			selectionRow.Add(MakeCommandButton("全", PointGridCommand.SelectAll));
-			selectionRow.Add(MakeCommandButton("解除", PointGridCommand.ClearSelection));
-			selectionRow.Add(MakeCommandButton("反転", PointGridCommand.InvertSelection));
-			root.Add(selectionRow);
+			WireCommandButton(root, "select-all", PointGridCommand.SelectAll);
+			WireCommandButton(root, "clear-selection", PointGridCommand.ClearSelection);
+			WireCommandButton(root, "invert-selection", PointGridCommand.InvertSelection);
 
 			return root;
 		}
 
 		private static void StyleStripButton(Button button, bool on)
 		{
-			button.style.backgroundColor = on ? (StyleColor)StripOnColor : StyleKeyword.Null;
+			button.EnableInClassList("ndmf-overlay-strip-button--on", on);
 		}
 
-		private static Button MakeCommandButton(string label, PointGridCommand command)
+		private static void WireCommandButton(VisualElement root, string name, PointGridCommand command)
 		{
-			return new Button(() =>
+			var button = root.Q<Button>(name);
+			if (button == null)
+				return;
+			button.clicked += () =>
 			{
 				PointGridCommands.Pending = command;
 				SceneView.RepaintAll();
-			}) { text = label };
+			};
 		}
 
 		/// <summary>選択中のラティスの解像度から現在のスライス軸の最大インデックスを得る</summary>

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lattice の SceneView オーバーレイ(PointGridOverlay)。
+     スライス番号ボタンは選択中ラティスの解像度に依存するため C# が生成する
+     (.ndmf-overlay-strip-button と、その ON 状態のモディファイアクラス)。
+     EnumField の型と初期値も C# 側で Init する。 -->
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+    <ui:VisualElement class="ndmf-overlay-root">
+        <uie:EnumField name="occlusion-mode" label="奥点" class="ndmf-overlay-field" />
+        <ui:VisualElement class="ndmf-row">
+            <ui:Toggle name="slice-toggle" label="スライス" class="ndmf-overlay-field" />
+            <uie:EnumField name="slice-axis" class="ndmf-overlay-slice-axis" />
+        </ui:VisualElement>
+        <ui:VisualElement name="slice-strip" class="ndmf-overlay-strip" />
+        <ui:VisualElement class="ndmf-row">
+            <ui:Label text="選択" class="ndmf-overlay-label" />
+            <ui:Button name="select-all" text="全" />
+            <ui:Button name="clear-selection" text="解除" />
+            <ui:Button name="invert-selection" text="反転" />
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>
