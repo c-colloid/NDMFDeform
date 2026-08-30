@@ -130,11 +130,11 @@ namespace MeshModifier.NDMFDeform.Editor
 
 		/// <summary>
 		/// メッシュ空間 → 軸空間の変換行列
-		/// (旧 DeformerUtils.GetMeshToAxisSpace 相当)。
+		/// (旧 DeformerUtils.GetMeshToAxisSpace 相当。SMR はボーン×バインドポーズ基準)。
 		/// </summary>
 		private static float4x4 GetMeshToAxis(Transform axis, Transform rendererTransform)
 		{
-			var m = axis.worldToLocalMatrix * rendererTransform.localToWorldMatrix;
+			var m = axis.worldToLocalMatrix * RendererMeshSpace.GetMeshToWorld(rendererTransform);
 			return ToFloat4x4(m);
 		}
 

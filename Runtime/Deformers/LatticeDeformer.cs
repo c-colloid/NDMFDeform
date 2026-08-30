@@ -144,19 +144,24 @@ namespace MeshModifier.NDMFDeform.Core
 			size.y = Mathf.Max(Mathf.Abs(size.y), 0.0001f);
 			size.z = Mathf.Max(Mathf.Abs(size.z), 0.0001f);
 
-			transform.position = stack.transform.TransformPoint(bounds.center);
-			transform.rotation = stack.transform.rotation;
+			// メッシュ空間→ワールドは RendererMeshSpace で計算する。
+			// SMR ではレンダラーの Transform はスキン結果に影響しない
+			// (ボーン×バインドポーズが実効変換)ため、Transform 基準だと
+			// レンダラー Transform がズレているアバターでフィットが見た目とズレる。
+			var meshToWorld = RendererMeshSpace.GetMeshToWorld(stack.transform);
+			transform.position = meshToWorld.MultiplyPoint3x4(bounds.center);
+			transform.rotation = meshToWorld.rotation;
 
 			// 目標はワールドで「レンダラーのバウンズと一致する箱」。
 			// localScale には自身の親チェーンのスケールが掛かるため、
 			// メッシュ空間のサイズをそのまま入れると、親の Transform が
 			// スタックとズレている(スケール・回転が違う)場合に箱がズレる。
 			// 目標ワールドサイズを親チェーン由来のスケールで割って設定する。
-			var stackScale = stack.transform.lossyScale;
+			var meshScale = meshToWorld.lossyScale;
 			var worldSize = new Vector3(
-				Mathf.Abs(stackScale.x) * size.x,
-				Mathf.Abs(stackScale.y) * size.y,
-				Mathf.Abs(stackScale.z) * size.z);
+				Mathf.Abs(meshScale.x) * size.x,
+				Mathf.Abs(meshScale.y) * size.y,
+				Mathf.Abs(meshScale.z) * size.z);
 			transform.localScale = Vector3.one;
 			var inherited = transform.lossyScale;
 			transform.localScale = new Vector3(

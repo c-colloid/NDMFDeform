@@ -130,7 +130,8 @@ namespace MeshModifier.NDMFDeform.Editor
 				return;
 
 			var e = Event.current;
-			var matrix = meshTransform.localToWorldMatrix;
+			// SMR はボーン×バインドポーズ基準(ベイクの写像と一致させる)
+			var matrix = RendererMeshSpace.GetMeshToWorld(meshTransform);
 
 			UpdatePreviewMesh(mask, mesh, meshTransform);
 			var pickMesh = _previewMesh != null ? _previewMesh : mesh;
@@ -219,7 +220,7 @@ namespace MeshModifier.NDMFDeform.Editor
 				var h = 17;
 				h = h * 31 + source.GetInstanceID();
 				h = h * 31 + source.vertexCount;
-				h = h * 31 + meshTransform.localToWorldMatrix.GetHashCode();
+				h = h * 31 + RendererMeshSpace.GetMeshToWorld(meshTransform).GetHashCode();
 				if (stack == null)
 					return h;
 

@@ -274,7 +274,8 @@ namespace MeshModifier.NDMFDeform.Editor
 
 		private static float4x4 GetMeshToAxis(Transform axis, Transform rendererTransform)
 		{
-			var m = axis.worldToLocalMatrix * rendererTransform.localToWorldMatrix;
+			// SMR はボーン×バインドポーズ基準(RendererMeshSpace 参照)
+			var m = axis.worldToLocalMatrix * RendererMeshSpace.GetMeshToWorld(rendererTransform);
 			return new float4x4(m.GetColumn(0), m.GetColumn(1), m.GetColumn(2), m.GetColumn(3));
 		}
 
