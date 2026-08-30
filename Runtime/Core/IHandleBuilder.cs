@@ -59,6 +59,18 @@ namespace MeshModifier.NDMFDeform.Core
 		/// <summary>表示専用の線分(軸空間)</summary>
 		void Line(Vector3 from, Vector3 to, HandleLineStyle style = HandleLineStyle.Solid);
 
+		/// <summary>表示専用の矢印付き線分(軸空間。減衰方向などの向きを示す)</summary>
+		void Arrow(Vector3 from, Vector3 to, HandleLineStyle style = HandleLineStyle.Solid);
+
+		/// <summary>
+		/// float プロパティ: along 軸上の距離 d = k / 値 の位置で編集するスライダー
+		/// (指数減衰の falloff 用。キャップは「減衰 50% の距離」等に置かれ、
+		/// ドラッグすると値が距離に反比例して変わる。キャップ位置には半径 ringRadius の
+		/// リングが描かれ、操作中は減衰カーブのリング列が表示される)。
+		/// </summary>
+		void DecaySlider(string property, HandleAxis along, float k, float ringRadius,
+			HandleLineStyle style = HandleLineStyle.Solid);
+
 		/// <summary>
 		/// 格子制御点編集(Lattice 等)。
 		/// pointsProperty は float3[] のシリアライズフィールド(軸空間 [-0.5,0.5] の位置)、

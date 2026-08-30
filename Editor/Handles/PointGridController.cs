@@ -142,6 +142,7 @@ namespace MeshModifier.NDMFDeform.Editor
 			{
 				DrawWireframe(resolution);
 				HandleEscape();
+				HandleSelectAllCommand(count);
 				HandleAxisGesture(resolution);
 				DrawPointsAndPick(resolution);
 				HandleMarquee(resolution);
@@ -405,6 +406,26 @@ namespace MeshModifier.NDMFDeform.Editor
 				}
 			}
 			_cacheDirty = true;
+		}
+
+		/// <summary>Ctrl+A(Select All コマンド)で全制御点を選択する</summary>
+		private void HandleSelectAllCommand(int count)
+		{
+			var evt = Event.current;
+			if (evt.commandName != "SelectAll")
+				return;
+
+			if (evt.type == EventType.ValidateCommand)
+			{
+				evt.Use();
+			}
+			else if (evt.type == EventType.ExecuteCommand)
+			{
+				for (var i = 0; i < count; i++)
+					_selection.Add(i);
+				evt.Use();
+				SceneView.RepaintAll();
+			}
 		}
 
 		/// <summary>Esc で選択解除(標準ギズモが戻る)</summary>
@@ -841,8 +862,15 @@ namespace MeshModifier.NDMFDeform.Editor
 				case EventType.Repaint:
 					if (_marqueeActive && GUIUtility.hotControl == control)
 					{
+						// Unity 標準の矩形選択と同じ見た目(半透明の青+白枠)
 						Handles.BeginGUI();
-						GUI.Box(RectFromPoints(_marqueeStart, _marqueeEnd), GUIContent.none, "SelectionRect");
+						var rect = RectFromPoints(_marqueeStart, _marqueeEnd);
+						var inner = new Color32(148, 184, 237, (byte)(0.33f * 255));
+						var border = new Color(1f, 1f, 1f, 0.67f);
+						GUI.DrawTexture(rect, Texture2D.whiteTexture, ScaleMode.StretchToFill,
+							true, 1f, inner, Vector4.zero, Vector4.zero);
+						GUI.DrawTexture(rect, Texture2D.whiteTexture, ScaleMode.StretchToFill,
+							true, 1f, border, Vector4.one, Vector4.zero);
 						Handles.EndGUI();
 					}
 					break;

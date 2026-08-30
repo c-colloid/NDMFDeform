@@ -54,6 +54,11 @@ namespace MeshModifier.NDMFDeform.Tests
 
 			public void Line(Vector3 from, Vector3 to, HandleLineStyle style) { }
 
+			public void Arrow(Vector3 from, Vector3 to, HandleLineStyle style) { }
+
+			public void DecaySlider(string property, HandleAxis along, float k, float ringRadius,
+				HandleLineStyle style) => Check(property);
+
 			public void PointGrid(string pointsProperty, Vector3Int resolution, string mirrorAxisProperty)
 			{
 				Check(pointsProperty);
