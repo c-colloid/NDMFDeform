@@ -15,8 +15,19 @@ namespace MeshModifier.NDMFDeform.Editor
 		public static void ApplyEditorUiFont(VisualElement root)
 		{
 #if UITK_FONT_FIX
-			if (Colloid.UitkFontFix.FontFix.ShouldPreferCjkUi(Application.systemLanguage))
-				Colloid.UitkFontFix.FontFix.ApplyCjkUi(root);
+			if (!Colloid.UitkFontFix.FontFix.ShouldPreferCjkUi(Application.systemLanguage))
+				return;
+
+			// プレイモードの出入りで動的フォントのアトラス(Texture2D / Material)だけが
+			// 破棄され、キャッシュされた FontAsset が残ることがある。
+			// その状態で適用するとテキスト描画のたびに MissingReferenceException が出て
+			// インスペクタが崩れるため、アトラスが生きている場合のみ適用する
+			// (適用しない場合はエディタ既定フォントのまま = 表示は崩れない)
+			var asset = Colloid.UitkFontFix.FontFix.CjkUiFontAsset;
+			if (asset == null || asset.atlasTexture == null)
+				return;
+
+			Colloid.UitkFontFix.FontFix.ApplyCjkUi(root);
 #endif
 		}
 	}

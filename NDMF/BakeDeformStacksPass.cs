@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using MeshModifier.NDMFDeform.Core;
 using MeshModifier.NDMFDeform.Editor;
 using nadena.dev.ndmf;
-using UnityEditor;
 using UnityEngine;
 
 namespace MeshModifier.NDMFDeform.NDMF
@@ -33,7 +32,11 @@ namespace MeshModifier.NDMFDeform.NDMF
 				if (baked == null)
 					continue;
 
-				AssetDatabase.AddObjectToAsset(baked, ctx.AssetContainer);
+				// プレイモード(Apply on Play)ではアセット保存が無効
+				// (NullAssetSaver / AssetContainer = null)のため、
+				// AssetContainer への直接追加ではなく AssetSaver 経由で保存する
+				// (プレイ中は no-op になり、ビルド時のみ永続化される)
+				ctx.AssetSaver.SaveAsset(baked);
 
 				if (smr != null)
 				{
