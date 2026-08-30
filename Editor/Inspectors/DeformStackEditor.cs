@@ -106,6 +106,20 @@ namespace MeshModifier.NDMFDeform.Editor
 			toggle.style.marginRight = 2;
 			toggle.style.flexShrink = 0;
 
+			// チェックボックスではなく目のアイコンで表示する(旧 Deformable と同じ視覚言語)
+			var checkmark = toggle.Q<VisualElement>("unity-checkmark");
+			if (checkmark != null)
+			{
+				checkmark.name = "row-eye";
+				checkmark.style.width = 16;
+				checkmark.style.height = 16;
+				checkmark.style.backgroundColor = Color.clear;
+				checkmark.style.borderTopWidth = 0;
+				checkmark.style.borderBottomWidth = 0;
+				checkmark.style.borderLeftWidth = 0;
+				checkmark.style.borderRightWidth = 0;
+			}
+
 			var field = new ObjectField
 			{
 				name = "row-deformer",
@@ -138,11 +152,7 @@ namespace MeshModifier.NDMFDeform.Editor
 			row.Add(field);
 			row.Add(badge);
 
-			// 無効な行は参照フィールドを淡色化して状態を見えるようにする
-			toggle.RegisterValueChangedCallback(evt =>
-			{
-				field.style.opacity = evt.newValue ? 1f : 0.45f;
-			});
+			toggle.RegisterValueChangedCallback(evt => ApplyEnabledVisual(row, evt.newValue));
 			field.RegisterValueChangedCallback(evt =>
 			{
 				UpdateBadge(badge, evt.newValue as DeformerBase);
@@ -159,8 +169,61 @@ namespace MeshModifier.NDMFDeform.Editor
 			var entry = serializedObject.FindProperty($"{DeformersPath}.Array.data[{index}]");
 			if (entry == null)
 				return;
-			row.Q<Toggle>("row-enabled").BindProperty(entry.FindPropertyRelative("enabled"));
+			var enabledProp = entry.FindPropertyRelative("enabled");
+			row.Q<Toggle>("row-enabled").BindProperty(enabledProp);
 			row.Q<ObjectField>("row-deformer").BindProperty(entry.FindPropertyRelative("deformer"));
+			ApplyEnabledVisual(row, enabledProp.boolValue);
+		}
+
+		/// <summary>行の有効状態の見た目(目アイコン・参照フィールドの淡色化)を反映する</summary>
+		private static void ApplyEnabledVisual(VisualElement row, bool enabled)
+		{
+			var field = row.Q<ObjectField>("row-deformer");
+			if (field != null)
+				field.style.opacity = enabled ? 1f : 0.45f;
+
+			var eye = row.Q<VisualElement>("row-eye");
+			if (eye != null)
+			{
+				var icon = enabled ? EyeOnIcon : EyeOffIcon;
+				if (icon != null)
+					eye.style.backgroundImage = new StyleBackground(icon);
+				eye.style.opacity = enabled ? 0.9f : 0.45f;
+			}
+		}
+
+		private static Texture2D _eyeOnIcon;
+		private static Texture2D _eyeOffIcon;
+
+		private static Texture2D EyeOnIcon
+		{
+			get
+			{
+				if (_eyeOnIcon == null)
+					_eyeOnIcon = LoadIcon("scenevis_visible_hover", "animationvisibilitytoggleon");
+				return _eyeOnIcon;
+			}
+		}
+
+		private static Texture2D EyeOffIcon
+		{
+			get
+			{
+				if (_eyeOffIcon == null)
+					_eyeOffIcon = LoadIcon("scenevis_hidden_hover", "animationvisibilitytoggleoff");
+				return _eyeOffIcon;
+			}
+		}
+
+		private static Texture2D LoadIcon(params string[] names)
+		{
+			foreach (var name in names)
+			{
+				var content = EditorGUIUtility.IconContent(name);
+				if (content?.image is Texture2D texture)
+					return texture;
+			}
+			return null;
 		}
 
 		private static void UpdateBadge(Label badge, DeformerBase deformer)
