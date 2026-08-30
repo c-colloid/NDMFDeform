@@ -52,6 +52,12 @@ namespace MeshModifier.NDMFDeform.Tests
 				},
 			};
 			_mesh.RecalculateBounds();
+			// BakeMesh がスキンを反映できるよう、ウェイトまで揃えた完全なスキン設定にする
+			_mesh.boneWeights = new[]
+			{
+				new BoneWeight { boneIndex0 = 0, weight0 = 1f },
+				new BoneWeight { boneIndex0 = 0, weight0 = 1f },
+			};
 			_mesh.bindposes = new[] { bone.transform.worldToLocalMatrix };
 			smr.bones = new[] { bone.transform };
 			smr.rootBone = bone.transform;

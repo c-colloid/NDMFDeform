@@ -41,7 +41,7 @@ namespace MeshModifier.NDMFDeform.Core
 			// 打ち消し 50% の距離のキャップをドラッグして falloff を編集する
 			// (操作中は減衰カーブのリング列が表示される)
 			var zTail = Mathf.Log(10f) / falloff;
-			h.Arrow(Vector3.zero, Vector3.forward * (zTail * 1.2f));
+			h.Arrow(Vector3.zero, Vector3.forward * (zTail * 1.2f), HandleLineStyle.Dotted);
 			h.Circle(HandleAxis.Z, 0f, 0.5f);
 			h.DecaySlider(nameof(falloff), HandleAxis.Z, Mathf.Log(2f), 0.5f);
 		}

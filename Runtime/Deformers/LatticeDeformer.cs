@@ -131,24 +131,38 @@ namespace MeshModifier.NDMFDeform.Core
 			var stack = GetComponentInParent<DeformStack>();
 			if (stack == null) return;
 
-			Mesh mesh = null;
-			if (stack.TryGetComponent<SkinnedMeshRenderer>(out var smr))
-				mesh = smr.sharedMesh;
-			else if (stack.TryGetComponent<MeshFilter>(out var mf))
-				mesh = mf.sharedMesh;
-			if (mesh == null) return;
+			Bounds bounds;
+			Matrix4x4 meshToWorld;
+			if (stack.TryGetComponent<SkinnedMeshRenderer>(out var smr) && smr.sharedMesh != null)
+			{
+				// SMR は実際のスキン結果からバウンズを取る。レンダラー Transform のズレは
+				// もちろん、Modular Avatar 等でボーンがバインド後に個別調整された衣装
+				// (代表ボーン近似では表せないケース)でも見た目のメッシュに一致する。
+				var baked = new Mesh();
+				smr.BakeMesh(baked, true);
+				baked.RecalculateBounds();
+				bounds = baked.bounds;
+				DestroyImmediate(baked);
 
-			var bounds = mesh.bounds;
+				// useScale ベイクの頂点はレンダラーのローカル空間
+				// (localToWorldMatrix で世界位置が復元される空間)で返る
+				meshToWorld = stack.transform.localToWorldMatrix;
+			}
+			else if (stack.TryGetComponent<MeshFilter>(out var mf) && mf.sharedMesh != null)
+			{
+				bounds = mf.sharedMesh.bounds;
+				meshToWorld = stack.transform.localToWorldMatrix;
+			}
+			else
+			{
+				return;
+			}
+
 			var size = bounds.size;
 			size.x = Mathf.Max(Mathf.Abs(size.x), 0.0001f);
 			size.y = Mathf.Max(Mathf.Abs(size.y), 0.0001f);
 			size.z = Mathf.Max(Mathf.Abs(size.z), 0.0001f);
 
-			// メッシュ空間→ワールドは RendererMeshSpace で計算する。
-			// SMR ではレンダラーの Transform はスキン結果に影響しない
-			// (ボーン×バインドポーズが実効変換)ため、Transform 基準だと
-			// レンダラー Transform がズレているアバターでフィットが見た目とズレる。
-			var meshToWorld = RendererMeshSpace.GetMeshToWorld(stack.transform);
 			transform.position = meshToWorld.MultiplyPoint3x4(bounds.center);
 			transform.rotation = meshToWorld.rotation;
 

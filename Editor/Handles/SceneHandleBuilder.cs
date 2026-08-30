@@ -73,13 +73,20 @@ namespace MeshModifier.NDMFDeform.Editor
 		}
 
 		public void RadiusSlider(string property, HandleAxis along, HandleLineStyle style = HandleLineStyle.Solid,
-			float scale = 1f)
+			float scale = 1f, string offsetProperty = null, HandleAxis offsetAxis = HandleAxis.Z)
 		{
-			SliderInternal(property, along, sign: -1f, style, scale);
+			var origin = Vector3.zero;
+			if (offsetProperty != null)
+			{
+				var op = Find(offsetProperty);
+				if (op != null)
+					origin = AxisVector(offsetAxis) * op.floatValue;
+			}
+			SliderInternal(property, along, sign: -1f, style, scale, origin);
 		}
 
 		private void SliderInternal(string property, HandleAxis along, float sign, HandleLineStyle style,
-			float scale = 1f)
+			float scale = 1f, Vector3 origin = default)
 		{
 			var p = Find(property);
 			if (p == null) return;
@@ -87,7 +94,7 @@ namespace MeshModifier.NDMFDeform.Editor
 
 			var m = Handles.matrix;
 			var dir = AxisVector(along);
-			var world = m.MultiplyPoint3x4(sign * dir * (p.floatValue * scale));
+			var world = m.MultiplyPoint3x4(origin + sign * dir * (p.floatValue * scale));
 			var worldDir = m.MultiplyVector(dir);
 			if (worldDir.sqrMagnitude < 1e-12f) return;
 			worldDir.Normalize();
@@ -114,7 +121,7 @@ namespace MeshModifier.NDMFDeform.Editor
 				var newWorld = Handles.Slider(id, world, worldDir, capSize, Handles.DotHandleCap, 0f);
 				if (EditorGUI.EndChangeCheck())
 				{
-					var newLocal = m.inverse.MultiplyPoint3x4(newWorld);
+					var newLocal = m.inverse.MultiplyPoint3x4(newWorld) - origin;
 					p.floatValue = sign * Vector3.Dot(newLocal, dir) / scale;
 					Changed = true;
 				}
@@ -125,7 +132,7 @@ namespace MeshModifier.NDMFDeform.Editor
 
 			// 半径スライダーのドラッグ中は実効範囲を面で提示(カメラ正対・軸空間ディスク)
 			if (sign < 0f && interaction == Interaction.Drag)
-				DrawRadiusFill(m, p.floatValue * scale, AccentColor(style));
+				DrawRadiusFill(m, origin, p.floatValue * scale, AccentColor(style));
 		}
 
 		public void Circle(HandleAxis normal, string offsetProperty, string radiusProperty,
@@ -284,7 +291,7 @@ namespace MeshModifier.NDMFDeform.Editor
 			{
 				Handles.DrawLine(worldFrom, worldTo);
 				Handles.ConeHandleCap(0, worldTo, Quaternion.LookRotation(dir),
-					HandleUtility.GetHandleSize(worldTo) * 0.18f, EventType.Repaint);
+					HandleUtility.GetHandleSize(worldTo) * 0.1f, EventType.Repaint);
 			}
 		}
 
@@ -299,7 +306,9 @@ namespace MeshModifier.NDMFDeform.Editor
 			var m = Handles.matrix;
 			var dir = AxisVector(along);
 			var distance = k / value;
-			var world = m.MultiplyPoint3x4(dir * distance);
+			// キャップは軸線上ではなくリングの縁に置く(軸線・矢印に埋もれないように)
+			var rim = AxisVector(along == HandleAxis.Y ? HandleAxis.Z : HandleAxis.Y) * ringRadius;
+			var world = m.MultiplyPoint3x4(dir * distance + rim);
 			var worldDir = m.MultiplyVector(dir);
 			if (worldDir.sqrMagnitude < 1e-12f) return;
 			worldDir.Normalize();
@@ -331,6 +340,7 @@ namespace MeshModifier.NDMFDeform.Editor
 				var newWorld = Handles.Slider(id, world, worldDir, capSize, Handles.DotHandleCap, 0f);
 				if (EditorGUI.EndChangeCheck())
 				{
+					// rim は dir と直交するため Dot で距離成分だけが残る
 					var newDistance = Vector3.Dot(m.inverse.MultiplyPoint3x4(newWorld), dir);
 					p.floatValue = k / Mathf.Max(newDistance, 1e-3f);
 					Changed = true;
@@ -413,7 +423,7 @@ namespace MeshModifier.NDMFDeform.Editor
 		}
 
 		/// <summary>半径ドラッグ中の実効範囲フィル(軸空間・カメラ正対ディスク)</summary>
-		private static void DrawRadiusFill(Matrix4x4 axisMatrix, float radius, Color accent)
+		private static void DrawRadiusFill(Matrix4x4 axisMatrix, Vector3 center, float radius, Color accent)
 		{
 			if (Event.current.type != EventType.Repaint)
 				return;
@@ -425,7 +435,7 @@ namespace MeshModifier.NDMFDeform.Editor
 				return;
 			using (new Handles.DrawingScope(new Color(accent.r, accent.g, accent.b, 0.08f), axisMatrix))
 			{
-				Handles.DrawSolidDisc(Vector3.zero, normalLocal.normalized, radius);
+				Handles.DrawSolidDisc(center, normalLocal.normalized, radius);
 			}
 		}
 

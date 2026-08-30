@@ -38,8 +38,11 @@ namespace MeshModifier.NDMFDeform.Core
 #if UNITY_EDITOR
 		public override void DescribeHandles(IHandleBuilder h)
 		{
-			h.RadiusSlider(nameof(radius), HandleAxis.Y);
-			h.RadiusSlider(nameof(scope), HandleAxis.Y, HandleLineStyle.Dotted);
+			// キャップは top リングの縁に載せる(中空に浮かせない)
+			h.RadiusSlider(nameof(radius), HandleAxis.Y, HandleLineStyle.Solid, 1f,
+				nameof(top), HandleAxis.Z);
+			h.RadiusSlider(nameof(scope), HandleAxis.Y, HandleLineStyle.Dotted, 1f,
+				nameof(top), HandleAxis.Z);
 			h.AxisSlider(nameof(top), HandleAxis.Z);
 			h.AxisSlider(nameof(bottom), HandleAxis.Z);
 			h.Circle(HandleAxis.Z, nameof(top), nameof(radius));

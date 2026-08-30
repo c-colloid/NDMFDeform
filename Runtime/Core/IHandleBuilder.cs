@@ -33,9 +33,11 @@ namespace MeshModifier.NDMFDeform.Core
 		/// <summary>
 		/// float プロパティ: along 軸の負方向・距離 value×scale の位置に置くスライダー(半径編集用)。
 		/// scale は「シリアライズ値と実効距離の比」(例: SphereMask は実効半径が値の 0.5 倍)。
+		/// offsetProperty を指定すると、キャップの基点を offsetAxis 軸上のその値へずらす
+		/// (円柱の top リングの縁にキャップを載せる等。中空に浮かせないため)。
 		/// </summary>
 		void RadiusSlider(string property, HandleAxis along, HandleLineStyle style = HandleLineStyle.Solid,
-			float scale = 1f);
+			float scale = 1f, string offsetProperty = null, HandleAxis offsetAxis = HandleAxis.Z);
 
 		/// <summary>表示専用の円: normal 軸まわり、offsetProperty の位置に radiusProperty の半径で描く</summary>
 		void Circle(HandleAxis normal, string offsetProperty, string radiusProperty, HandleLineStyle style = HandleLineStyle.Solid);
