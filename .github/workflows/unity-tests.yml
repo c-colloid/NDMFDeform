@@ -1,10 +1,11 @@
 name: Unity Tests
 
 on:
-  # タグ push は同一 SHA のブランチ実行と重複するため走らせない
-  # (リリースは release.yml が担当)
+  # 全ブランチを対象にし、タグ push は対象外にする(tags を未定義にすると
+  # タグでは起動しない)。タグ push は同一 SHA のブランチ実行と重複するため。
+  # tags-ignore だけを書くと branches が未定義扱いになりブランチでも走らない
   push:
-    tags-ignore: ["**"]
+    branches: ["**"]
   pull_request:
   workflow_dispatch:
 
