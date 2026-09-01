@@ -1,7 +1,11 @@
 name: Validate
 
 on:
+  # 全ブランチを対象にし、タグ push は対象外にする(tags を未定義にすると
+  # タグでは起動しない)。リリース時の検証は release.yml 内で行う。
+  # tags-ignore だけを書くと branches が未定義扱いになりブランチでも走らない
   push:
+    branches: ["**"]
   pull_request:
 
 jobs:

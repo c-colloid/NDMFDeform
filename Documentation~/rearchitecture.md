@@ -431,7 +431,7 @@ EditMode テスト(golden mesh: 入力メッシュ + パラメータ → 期待�
 | M3 | Lattice + PointGrid(選択・矩形・ミラー) | 0.3.0 |
 | M4 | UVIslandMask(マスク段 + UVIslandSelectorView) | 0.4.0 |
 | M5 | ブレンドシェイプ再ベイク + タンジェント + 法線保持オプション + golden mesh テスト整備 | 0.5.0 |
-| M6 | 移行ツール → フォーク削除 → パッケージング整備(vpmDependencies、タグ、VPM リスティング、THIRD-PARTY-NOTICES)。UITK Font Fix(jp.colloid.uitk-font-fix)も同じ VPM リスティングへ登録し、vpmDependencies による自動取得を成立させる。将来的には OpenUPM への登録も併用し、UPM 経路でも依存自動解決を可能にする(スコープドレジストリ追加が前提) | 0.1.0 / 0.2.0 |
+| M6 | 移行ツール → フォーク削除 → パッケージング整備(vpmDependencies、タグ、VPM リスティング、THIRD-PARTY-NOTICES)。UITK Font Fix(jp.colloid.uitk-font-fix)も同じ VPM リスティングへ登録し、vpmDependencies による自動取得を成立させる。リリースからリスティングへの通知(repository_dispatch)も両パッケージで揃える。将来的には OpenUPM への登録も併用し、UPM 経路でも依存自動解決を可能にする(スコープドレジストリ追加が前提) | 0.1.0 / 0.2.0 |
 | M7(候補) | **Bake as BlendShape**: デフォーマ効果をブレンドシェイプとして焼き込み、Animator / Udon から駆動(§2.1 の橋渡し機能) | 0.x |
 | M8(候補) | **非アバターメッシュの手動ベイク**: AvatarDescriptor の無いオブジェクトの DeformStack を、エディタ操作(インスペクタのボタン等)で静的メッシュアセットとしてベイク・保存する。0.1.1 でプレビュー / ビルド対象をアバタールート配下に限定したため、アバター外(小物・ワールド制作等)での利用経路はこの機能が担う | 0.x |
 | M9(候補) | **NDMF 非依存プロジェクト対応**: 変形コア(Runtime / Editor)は NDMF を参照していないため、NDMF 接続層(NDMFDeform.NDMF asmdef)を Version Defines で任意化し、NDMF の無いプロジェクトでは手動ベイク(M8)中心で動作させる。NDMF プレビュー(IRenderFilter)は使えないため簡易プレビューの代替を検討。`vpmDependencies` の必須依存の扱い(推奨依存化 / 配布チャネル分離)も要検討 | 0.x |
@@ -447,8 +447,14 @@ EditMode テスト(golden mesh: 入力メッシュ + パラメータ → 期待�
 リポジトリ由来で新旧同一のため、旧フォルダ削除 → パッケージ内フォークへの参照差し替えは
 GUID 一致でシーン参照が維持され、その状態で移行ツールを実行できる。
 上表 M1〜M5 の出荷物列は当初計画の番号であり、実際には 0.1.0 に一括で含まれる。
-VPM リスティングは新規リポジトリ(c-colloid/vpm-repos)から配信し、NDMFDeform と
-UITK Font Fix の両方を登録する。
+VPM リスティングは c-colloid/vpm から配信し(公開 URL は
+https://c-colloid.github.io/vpm/index.json)、NDMFDeform と UITK Font Fix の
+両方を登録する。リスティング側は各リポジトリの Releases を走査し、
+`package.json` と `{name}-{version}.zip` の両アセットを持つリリースだけを取り込む。
+収集はスケジュール実行(6 時間ごと)が基本だが、反映を待たせないため
+release.yml のリリース確定後に `repository_dispatch`(`event_type: package-released`)
+を送って即時再生成させる。通知はリリースの付随処理であり、
+失敗してもリリースは成功のまま(スケジュール実行が予備として拾う)。
 
 現行 main(v0.0.x 系)への Phase 0 的なバグ修正(GameObject 誤削除・SMR キャスト等)は、
 v2 完成まで既存ユーザーが v0.0.x を使い続ける場合にのみ適用を検討する(別作業)。

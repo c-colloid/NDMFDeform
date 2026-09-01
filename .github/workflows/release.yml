@@ -32,6 +32,11 @@ jobs:
             exit 1
           fi
 
+      # zip を作る前に .meta 欠落・JSON 破損を弾く(Unity 不要・数秒)。
+      # Unity テストはタグの元コミットのブランチ実行で通っている前提。
+      - name: Validate package (JSON + .meta consistency)
+        run: python3 .github/scripts/validate_package.py
+
       - name: Build package zip
         run: |
           NAME=$(jq -r .name package.json)
@@ -65,3 +70,26 @@ jobs:
             ${{ env.UNITYPACKAGE }}
             package.json
           generate_release_notes: true
+
+      # VPM リスティング(c-colloid/vpm)は cron でも収集するが反映が数時間遅れる
+      # ことがあるため、リリース確定時に repository_dispatch で即時再生成を促す。
+      # 通知は付随処理であり、失敗してもリリース自体は成功のまま(cron が予備で拾う)。
+      # アセットのアップロードを終える Create release の後段に置くことで、
+      # リスティングが読みに来た時点で zip と package.json が揃っていることを保証する。
+      # トークンは vpm の Contents 書き込みのみに絞った fine-grained PAT。
+      - name: Notify the VPM listing repository
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.VPM_DISPATCH_TOKEN }}
+          LISTING_REPO: c-colloid/vpm
+          SOURCE_REPO: ${{ github.repository }}
+          SOURCE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::warning::VPM_DISPATCH_TOKEN is not set; the listing will pick this release up on its next scheduled run."
+            exit 0
+          fi
+          gh api "repos/${LISTING_REPO}/dispatches" \
+            -f "event_type=package-released" \
+            -f "client_payload[repo]=${SOURCE_REPO}" \
+            -f "client_payload[version]=${SOURCE_VERSION}"
