@@ -87,7 +87,8 @@ namespace MeshModifier.NDMFDeform.Core
 
 		/// <summary>
 		/// 三角形ごとのパーツマスク(BVH 葉順。BodyPart のビット OR)。
-		/// 未構築(長さ 0)なら全三角形が全パーツに属するものとして扱う。
+		/// パーツ情報なしで構築した表面では全ビット(-1)= 全パーツに属する扱いで、
+		/// マスク付きの探索は絞り込みなしと同じ結果になる(ジョブに渡すため常に確保する)。
 		/// </summary>
 		[ReadOnly] public NativeArray<int> TrianglePartMasks;
 
@@ -505,12 +506,12 @@ namespace MeshModifier.NDMFDeform.Core
 			for (var i = 0; i < nodes.Count; i++)
 				surface.Data.Nodes[i] = nodes[i];
 
-			if (trianglePartMasks != null && trianglePartMasks.Length == triCount)
-			{
-				surface.Data.TrianglePartMasks = new NativeArray<int>(count, allocator, NativeArrayOptions.UninitializedMemory);
-				for (var slot = 0; slot < count; slot++)
-					surface.Data.TrianglePartMasks[slot] = trianglePartMasks[validTris[order[slot]]];
-			}
+			// ジョブの安全性検査は未構築の NativeArray をジョブに渡すことを許さないため、
+			// マスク未指定でも常に確保し、全ビット(-1 = 全パーツに属する)で埋める
+			var hasMasks = trianglePartMasks != null && trianglePartMasks.Length == triCount;
+			surface.Data.TrianglePartMasks = new NativeArray<int>(count, allocator, NativeArrayOptions.UninitializedMemory);
+			for (var slot = 0; slot < count; slot++)
+				surface.Data.TrianglePartMasks[slot] = hasMasks ? trianglePartMasks[validTris[order[slot]]] : -1;
 
 			return surface;
 		}

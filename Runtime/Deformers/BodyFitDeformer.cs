@@ -923,10 +923,14 @@ namespace MeshModifier.NDMFDeform.Core
 			public float innerRadius;
 			public float outerRadius;
 
-			/// <summary>頂点 × 4 スロット: (h, θ, r, スロット重み)。使わないスロットは重み 0</summary>
-			[WriteOnly] public NativeArray<float4> coords;
+			/// <summary>
+			/// 頂点 × 4 スロット: (h, θ, r, スロット重み)。使わないスロットは重み 0。
+			/// 要素 index*4 〜 index*4+3 へ書くため、並列ジョブの「自分の index のみ」制限を外す
+			/// (各頂点が書く範囲は重ならない)。
+			/// </summary>
+			[WriteOnly, NativeDisableParallelForRestriction] public NativeArray<float4> coords;
 
-			[WriteOnly] public NativeArray<float3> radialDirs;
+			[WriteOnly, NativeDisableParallelForRestriction] public NativeArray<float3> radialDirs;
 
 			/// <summary>最内層の集計に使う支配パーツ(重み 0.5 以上・軸が使える場合のみ。それ以外は 0)</summary>
 			[WriteOnly] public NativeArray<int> binPart;

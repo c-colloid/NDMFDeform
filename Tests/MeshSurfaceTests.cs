@@ -114,6 +114,44 @@ namespace MeshModifier.NDMFDeform.Tests
 		}
 
 		[Test]
+		public void Build_WithoutPartMasksTreatsEveryTriangleAsAllParts()
+		{
+			var (vertices, triangles) = MakeCube(true);
+			var surface = Build(vertices, triangles);
+
+			// パーツ情報なしでもジョブへ渡せるよう常に確保され、マスク付きの探索は絞り込みなしと同じ結果になる
+			Assert.That(surface.Data.TrianglePartMasks.IsCreated, Is.True);
+			Assert.That(surface.Data.TrianglePartMasks.Length, Is.EqualTo(surface.Data.TriangleCount));
+			Assert.That(surface.Data.FindClosest(new float3(0f, 0f, 2f), 5f, 1 << (int)BodyPart.LeftHand, out var hit), Is.True);
+			Assert.That(hit.Distance, Is.EqualTo(1.5f).Within(1e-5f));
+		}
+
+		[Test]
+		public void Build_WithPartMasksFiltersClosestSearch()
+		{
+			var (vertices, triangles) = MakeCube(true);
+			// +Z 面(z = 0.5)の三角形だけ LeftHand、他は Torso
+			var masks = new int[triangles.Length / 3];
+			for (var t = 0; t < masks.Length; t++)
+			{
+				var z = (vertices[triangles[t * 3]].z + vertices[triangles[t * 3 + 1]].z + vertices[triangles[t * 3 + 2]].z) / 3f;
+				masks[t] = z > 0.49f ? 1 << (int)BodyPart.LeftHand : 1 << (int)BodyPart.Torso;
+			}
+			var surface = MeshSurface.Build(vertices, triangles, Allocator.Persistent, masks);
+			_surfaces.Add(surface);
+
+			var p = new float3(0f, 0f, -2f); // −Z 面(Torso)が最寄り
+			Assert.That(surface.Data.FindClosest(p, 5f, 1 << (int)BodyPart.Torso, out var hit), Is.True);
+			Assert.That(hit.Distance, Is.EqualTo(1.5f).Within(1e-5f));
+			// LeftHand に絞ると +Z 面(距離 2.5)まで届く
+			Assert.That(surface.Data.FindClosest(p, 5f, 1 << (int)BodyPart.LeftHand, out hit), Is.True);
+			Assert.That(hit.Distance, Is.EqualTo(2.5f).Within(1e-5f));
+			// マスクの無い探索は従来どおり最寄り
+			Assert.That(surface.Data.FindClosest(p, 5f, out hit), Is.True);
+			Assert.That(hit.Distance, Is.EqualTo(1.5f).Within(1e-5f));
+		}
+
+		[Test]
 		public void FindClosest_OutsidePointOnFace()
 		{
 			var (v, t) = MakeCube(true);

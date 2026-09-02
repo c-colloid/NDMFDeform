@@ -242,7 +242,7 @@ namespace MeshModifier.NDMFDeform.Tests
 			var vertices = new[]
 			{
 				new Vector3(0.3f, 1.4f, 0f), new Vector3(0.35f, 1.3f, 0f), // 上腕の近く
-				new Vector3(0.1f, 0.5f, 0f),                               // 下腿の近く
+				new Vector3(0.1f, 0.3f, 0f),                               // 下腿の近く(膝 y=0.45 と足首 y=0.05 の間)
 			};
 			var weights = new PartWeights[3];
 			var groups = new[] { 0, 0, 1 };
