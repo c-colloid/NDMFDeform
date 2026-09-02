@@ -85,20 +85,38 @@ namespace MeshModifier.NDMFDeform.Core
 
 		[ReadOnly] public NativeArray<MeshSurfaceNode> Nodes;
 
+		/// <summary>
+		/// 三角形ごとのパーツマスク(BVH 葉順。BodyPart のビット OR)。
+		/// 未構築(長さ 0)なら全三角形が全パーツに属するものとして扱う。
+		/// </summary>
+		[ReadOnly] public NativeArray<int> TrianglePartMasks;
+
 		public bool IsCreated => Nodes.IsCreated && Nodes.Length > 0;
 
 		public int TriangleCount => Triangles.Length / 3;
+
+		public bool HasPartMasks => TrianglePartMasks.IsCreated && TrianglePartMasks.Length == TriangleCount;
 
 		/// <summary>
 		/// 点 p の最近接点を maxDistance 以内で探す。見つからなければ false。
 		/// </summary>
 		public bool FindClosest(float3 p, float maxDistance, out MeshSurfaceHit hit)
 		{
+			return FindClosest(p, maxDistance, 0, out hit);
+		}
+
+		/// <summary>
+		/// 点 p の最近接点を maxDistance 以内で探す(partMask が非 0 なら、
+		/// マスクと重なるパーツの三角形だけを対象にする)。見つからなければ false。
+		/// </summary>
+		public bool FindClosest(float3 p, float maxDistance, int partMask, out MeshSurfaceHit hit)
+		{
 			hit = default;
 			var bestSq = maxDistance * maxDistance;
 			var bestTri = -1;
 			var bestFeature = 0;
 			var bestPoint = float3.zero;
+			var filter = partMask != 0 && HasPartMasks;
 
 			var nodeCount = Nodes.Length;
 			var i = 0;
@@ -114,6 +132,8 @@ namespace MeshModifier.NDMFDeform.Core
 				var end = node.Start + node.Count;
 				for (var t = node.Start; t < end; t++)
 				{
+					if (filter && (TrianglePartMasks[t] & partMask) == 0)
+						continue;
 					var a = Vertices[Triangles[t * 3]];
 					var b = Vertices[Triangles[t * 3 + 1]];
 					var c = Vertices[Triangles[t * 3 + 2]];
@@ -156,6 +176,102 @@ namespace MeshModifier.NDMFDeform.Core
 		{
 			var d = max(max(boxMin - p, p - boxMax), float3.zero);
 			return dot(d, d);
+		}
+
+		/// <summary>
+		/// レイ(origin + direction·t、direction は単位ベクトル)と表面の最初の交点を求める。
+		/// 表裏は問わない(パーツ軸から外向きに飛ばして裏面に当てる用途)。
+		/// partMask が非 0 ならマスクと重なる三角形のみ対象。見つからなければ false。
+		/// </summary>
+		public bool Raycast(float3 origin, float3 direction, float maxDistance, int partMask,
+			out float distance, out int triangle)
+		{
+			distance = maxDistance;
+			triangle = -1;
+			var filter = partMask != 0 && HasPartMasks;
+			var invDir = 1f / direction;
+
+			var nodeCount = Nodes.Length;
+			var i = 0;
+			while (i < nodeCount)
+			{
+				var node = Nodes[i];
+				if (!RayIntersectsBox(origin, direction, invDir, node.Min, node.Max, distance))
+				{
+					i = node.Skip;
+					continue;
+				}
+
+				var end = node.Start + node.Count;
+				for (var t = node.Start; t < end; t++)
+				{
+					if (filter && (TrianglePartMasks[t] & partMask) == 0)
+						continue;
+					var a = Vertices[Triangles[t * 3]];
+					var b = Vertices[Triangles[t * 3 + 1]];
+					var c = Vertices[Triangles[t * 3 + 2]];
+					if (RayTriangle(origin, direction, a, b, c, out var hitT) && hitT < distance && hitT >= 0f)
+					{
+						distance = hitT;
+						triangle = t;
+					}
+				}
+				i++;
+			}
+			return triangle >= 0;
+		}
+
+		/// <summary>スラブ法によるレイと AABB の交差判定(t ∈ [0, maxT])</summary>
+		public static bool RayIntersectsBox(float3 origin, float3 direction, float3 invDir, float3 boxMin,
+			float3 boxMax, float maxT)
+		{
+			var tMin = 0f;
+			var tMax = maxT;
+			for (var axis = 0; axis < 3; axis++)
+			{
+				if (abs(direction[axis]) < 1e-12f)
+				{
+					if (origin[axis] < boxMin[axis] || origin[axis] > boxMax[axis])
+						return false;
+					continue;
+				}
+				var t1 = (boxMin[axis] - origin[axis]) * invDir[axis];
+				var t2 = (boxMax[axis] - origin[axis]) * invDir[axis];
+				if (t1 > t2)
+				{
+					var tmp = t1;
+					t1 = t2;
+					t2 = tmp;
+				}
+				tMin = max(tMin, t1);
+				tMax = min(tMax, t2);
+				if (tMin > tMax)
+					return false;
+			}
+			return true;
+		}
+
+		/// <summary>Möller–Trumbore(両面)</summary>
+		public static bool RayTriangle(float3 origin, float3 direction, float3 a, float3 b, float3 c, out float t)
+		{
+			t = 0f;
+			var e1 = b - a;
+			var e2 = c - a;
+			var p = cross(direction, e2);
+			var det = dot(e1, p);
+			if (abs(det) < 1e-12f)
+				return false;
+			var invDet = 1f / det;
+			var s = origin - a;
+			var u = dot(s, p) * invDet;
+			if (u < 0f || u > 1f)
+				return false;
+			var q = cross(s, e1);
+			var v = dot(direction, q) * invDet;
+			if (v < 0f || u + v > 1f)
+				return false;
+			t = dot(e2, q) * invDet;
+			return t >= 0f;
 		}
 
 		/// <summary>
@@ -260,6 +376,16 @@ namespace MeshModifier.NDMFDeform.Core
 		/// 退化三角形は除外する。三角形が 1 つも無い場合は IsCreated = false の空データを返す。
 		/// </summary>
 		public static MeshSurface Build(Vector3[] vertices, int[] triangles, Allocator allocator)
+		{
+			return Build(vertices, triangles, allocator, null);
+		}
+
+		/// <summary>
+		/// trianglePartMasks(入力の三角形順。BodyPart のビット OR)を渡すと、
+		/// パーツで絞った最近接点 / レイキャストができる。
+		/// </summary>
+		public static MeshSurface Build(Vector3[] vertices, int[] triangles, Allocator allocator,
+			int[] trianglePartMasks)
 		{
 			var surface = new MeshSurface();
 			if (vertices == null || triangles == null)
@@ -379,6 +505,13 @@ namespace MeshModifier.NDMFDeform.Core
 			for (var i = 0; i < nodes.Count; i++)
 				surface.Data.Nodes[i] = nodes[i];
 
+			if (trianglePartMasks != null && trianglePartMasks.Length == triCount)
+			{
+				surface.Data.TrianglePartMasks = new NativeArray<int>(count, allocator, NativeArrayOptions.UninitializedMemory);
+				for (var slot = 0; slot < count; slot++)
+					surface.Data.TrianglePartMasks[slot] = trianglePartMasks[validTris[order[slot]]];
+			}
+
 			return surface;
 		}
 
@@ -390,6 +523,7 @@ namespace MeshModifier.NDMFDeform.Core
 			if (Data.EdgeNormals.IsCreated) Data.EdgeNormals.Dispose();
 			if (Data.CornerNormals.IsCreated) Data.CornerNormals.Dispose();
 			if (Data.Nodes.IsCreated) Data.Nodes.Dispose();
+			if (Data.TrianglePartMasks.IsCreated) Data.TrianglePartMasks.Dispose();
 			Data = default;
 		}
 

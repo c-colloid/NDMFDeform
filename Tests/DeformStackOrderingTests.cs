@@ -20,11 +20,14 @@ namespace MeshModifier.NDMFDeform.Tests
 		public void TearDown()
 		{
 			if (_root != null) Object.DestroyImmediate(_root);
+			_root = null;
 		}
 
 		private DeformStack CreateStack(string name)
 		{
-			_root ??= new GameObject("OrderingRoot");
+			// ??= は Unity の破棄済み判定(== null)を通らないため明示的に比較する
+			if (_root == null)
+				_root = new GameObject("OrderingRoot");
 			var go = new GameObject(name);
 			go.transform.SetParent(_root.transform, false);
 			go.AddComponent<MeshFilter>();

@@ -66,6 +66,11 @@ namespace MeshModifier.NDMFDeform.NDMF
 				Object.DestroyImmediate(stack);
 			foreach (var deformer in root.GetComponentsInChildren<DeformerBase>(true))
 				Object.DestroyImmediate(deformer);
+
+			// ビルド用クローンのレンダラーを参照した表面データ(Body Fit の BVH 等)は
+			// クローン破棄後に不要になるため、ここで回収する(シーン側のエントリは残す)
+			foreach (var renderer in root.GetComponentsInChildren<Renderer>(true))
+				ReferenceSurfaceCache.Evict(renderer);
 		}
 
 		/// <summary>

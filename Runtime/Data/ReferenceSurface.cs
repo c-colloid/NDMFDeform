@@ -1,11 +1,247 @@
 using System;
 using System.Collections.Generic;
+using Unity.Burst;
 using Unity.Collections;
+using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 
 namespace MeshModifier.NDMFDeform.Core
 {
+	/// <summary>パーツ情報付きで参照表面を構築するための要求(Body Fit のパーツ円柱モード)</summary>
+	public sealed class PartRequest
+	{
+		public HumanoidSkeleton Skeleton;
+
+		/// <summary>衣装アーマチュアの関節をアバターの関節に対応付ける許容距離(m)</summary>
+		public float JointTolerance = 0.03f;
+
+		/// <summary>三角形のパーツマスクに含める重みの下限</summary>
+		public float MaskThreshold = 0.25f;
+
+		public int Hash()
+		{
+			unchecked
+			{
+				var h = Skeleton != null ? Skeleton.StateHash : 0;
+				h = h * 31 + JointTolerance.GetHashCode();
+				h = h * 31 + MaskThreshold.GetHashCode();
+				return h;
+			}
+		}
+	}
+
+	/// <summary>
+	/// パーツごとの円柱半径プロファイル R(h, θ)(ジョブから読める読み取り専用ビュー)。
+	/// 軸上の点から放射状にレイを飛ばし、そのパーツの三角形との最初の交点までの距離を格子に持つ。
+	/// レイが当たらない格子は近傍から補間済み。ヒットが無いパーツは Usable = 0 で、Radius は NaN。
+	/// </summary>
+	public struct BodyPartProfiles
+	{
+		public const int HCount = 32;
+		public const int ThetaCount = 32;
+
+		/// <summary>h の格子範囲(軸区間 [0, 1] の外側も少し覆う)</summary>
+		public const float HStart = -0.25f;
+		public const float HEnd = 1.25f;
+
+		[ReadOnly] public NativeArray<PartAxis> Axes;
+		[ReadOnly] public NativeArray<float> Radius;
+		[ReadOnly] public NativeArray<int> Usable;
+
+		public bool IsCreated => Radius.IsCreated && Radius.Length == HumanoidSkeleton.PartCount * HCount * ThetaCount;
+
+		public static int CellIndex(int part, int hi, int ti)
+		{
+			return (part * HCount + hi) * ThetaCount + ti;
+		}
+
+		/// <summary>格子の連続座標(u: h 方向、v: θ 方向。セル中心が整数)</summary>
+		public static void GridCoords(float h, float theta, out float u, out float v)
+		{
+			u = (h - HStart) / (HEnd - HStart) * HCount - 0.5f;
+			var vv = (theta + math.PI) / (2f * math.PI) * ThetaCount - 0.5f;
+			vv = vv % ThetaCount;
+			if (vv < 0f)
+				vv += ThetaCount;
+			v = vv;
+		}
+
+		/// <summary>格子値の双線形サンプル(h は端でクランプ、θ は周期)</summary>
+		public static float SampleGrid(in NativeArray<float> grid, int part, float h, float theta)
+		{
+			GridCoords(h, theta, out var u, out var v);
+			u = math.clamp(u, 0f, HCount - 1f);
+			var u0 = (int)math.floor(u);
+			var u1 = math.min(u0 + 1, HCount - 1);
+			var fu = u - u0;
+			var v0 = (int)math.floor(v) % ThetaCount;
+			var v1 = (v0 + 1) % ThetaCount;
+			var fv = v - math.floor(v);
+			var a = grid[CellIndex(part, u0, v0)];
+			var b = grid[CellIndex(part, u0, v1)];
+			var c = grid[CellIndex(part, u1, v0)];
+			var d = grid[CellIndex(part, u1, v1)];
+			return math.lerp(math.lerp(a, b, fv), math.lerp(c, d, fv), fu);
+		}
+
+		public bool IsUsable(int part)
+		{
+			return IsCreated && part > 0 && part < HumanoidSkeleton.PartCount && Usable[part] != 0 &&
+			       Axes[part].Valid != 0;
+		}
+
+		public float SampleRadius(int part, float h, float theta)
+		{
+			return SampleGrid(in Radius, part, h, theta);
+		}
+	}
+
+	/// <summary>BodyPartProfiles の所有者</summary>
+	public sealed class PartProfileData : IDisposable
+	{
+		public BodyPartProfiles Data;
+
+		public bool IsCreated => Data.IsCreated;
+
+		public void Dispose()
+		{
+			if (Data.Axes.IsCreated) Data.Axes.Dispose();
+			if (Data.Radius.IsCreated) Data.Radius.Dispose();
+			if (Data.Usable.IsCreated) Data.Usable.Dispose();
+			Data = default;
+		}
+
+		/// <summary>各格子から放射状レイを飛ばして半径を求める</summary>
+		[BurstCompile]
+		public struct ProfileRayJob : IJobParallelFor
+		{
+			public MeshSurfaceData surface;
+			[ReadOnly] public NativeArray<PartAxis> axes;
+			[WriteOnly] public NativeArray<float> radius;
+			public float maxDistance;
+
+			public void Execute(int index)
+			{
+				const int cellsPerPart = BodyPartProfiles.HCount * BodyPartProfiles.ThetaCount;
+				var part = index / cellsPerPart;
+				var rem = index % cellsPerPart;
+				var hi = rem / BodyPartProfiles.ThetaCount;
+				var ti = rem % BodyPartProfiles.ThetaCount;
+				var axis = axes[part];
+				if (part == 0 || axis.Valid == 0)
+				{
+					radius[index] = float.NaN;
+					return;
+				}
+
+				var h = BodyPartProfiles.HStart +
+				        (hi + 0.5f) / BodyPartProfiles.HCount * (BodyPartProfiles.HEnd - BodyPartProfiles.HStart);
+				var theta = -math.PI + (ti + 0.5f) / BodyPartProfiles.ThetaCount * (2f * math.PI);
+				axis.RayFrom(h, theta, out var origin, out var direction);
+				radius[index] = surface.Raycast(origin, direction, maxDistance, 1 << part, out var t, out _)
+					? t
+					: float.NaN;
+			}
+		}
+
+		/// <summary>
+		/// 表面データと骨格からプロファイルを構築する。
+		/// レイの当たらない格子は近傍平均で埋める(ヒットの無いパーツは NaN のまま・Usable = 0)。
+		/// </summary>
+		public static PartProfileData Build(in MeshSurfaceData surface, HumanoidSkeleton skeleton, Allocator allocator)
+		{
+			var result = new PartProfileData();
+			var partCount = HumanoidSkeleton.PartCount;
+			var cellCount = partCount * BodyPartProfiles.HCount * BodyPartProfiles.ThetaCount;
+			result.Data.Axes = new NativeArray<PartAxis>(partCount, allocator);
+			for (var p = 0; p < partCount; p++)
+				result.Data.Axes[p] = skeleton.Axes[p];
+			result.Data.Radius = new NativeArray<float>(cellCount, allocator, NativeArrayOptions.UninitializedMemory);
+			result.Data.Usable = new NativeArray<int>(partCount, allocator);
+
+			// レイの最大距離: 骨格の広がりから十分大きく取る
+			var extent = 0f;
+			foreach (var axis in skeleton.Axes)
+			{
+				if (axis.Valid != 0)
+					extent = math.max(extent, axis.Length);
+			}
+			new ProfileRayJob
+			{
+				surface = surface,
+				axes = result.Data.Axes,
+				radius = result.Data.Radius,
+				maxDistance = math.max(extent * 4f, 2f),
+			}.Schedule(cellCount, 64).Complete();
+
+			FillMissing(result.Data.Radius, result.Data.Usable);
+			return result;
+		}
+
+		/// <summary>
+		/// NaN の格子を有効な近傍(h 方向はクランプ、θ 方向は周期)の平均で繰り返し埋める。
+		/// ヒットが少なすぎるパーツは使えない扱いにして NaN のまま残す。
+		/// </summary>
+		public static void FillMissing(NativeArray<float> radius, NativeArray<int> usable)
+		{
+			const int H = BodyPartProfiles.HCount;
+			const int T = BodyPartProfiles.ThetaCount;
+			const int MinHits = 8;
+			var scratch = new float[H * T];
+			for (var part = 1; part < HumanoidSkeleton.PartCount; part++)
+			{
+				var baseIndex = BodyPartProfiles.CellIndex(part, 0, 0);
+				var hits = 0;
+				for (var i = 0; i < H * T; i++)
+				{
+					if (!float.IsNaN(radius[baseIndex + i]))
+						hits++;
+				}
+				if (hits < MinHits)
+				{
+					usable[part] = 0;
+					for (var i = 0; i < H * T; i++)
+						radius[baseIndex + i] = float.NaN;
+					continue;
+				}
+				usable[part] = 1;
+
+				for (var pass = 0; pass < H + T && hits < H * T; pass++)
+				{
+					for (var i = 0; i < H * T; i++)
+						scratch[i] = radius[baseIndex + i];
+					for (var hi = 0; hi < H; hi++)
+					for (var ti = 0; ti < T; ti++)
+					{
+						var i = hi * T + ti;
+						if (!float.IsNaN(scratch[i]))
+							continue;
+						var sum = 0f;
+						var count = 0;
+						void Add(int hh, int tt)
+						{
+							var v = scratch[hh * T + ((tt % T) + T) % T];
+							if (float.IsNaN(v))
+								return;
+							sum += v;
+							count++;
+						}
+						if (hi > 0) Add(hi - 1, ti);
+						if (hi < H - 1) Add(hi + 1, ti);
+						Add(hi, ti - 1);
+						Add(hi, ti + 1);
+						if (count > 0)
+						{
+							radius[baseIndex + i] = sum / count;
+							hits++;
+						}
+					}
+				}
+			}
+		}
+	}
+
 	/// <summary>
 	/// 参照レンダラー(体など)の「変形後メッシュ」の解決結果。
 	/// Editor 側のフックが、参照レンダラーに DeformStack がある場合に
@@ -123,23 +359,7 @@ namespace MeshModifier.NDMFDeform.Core
 			{
 				if (applyBlendShapes)
 					ApplyBlendShapeWeights(mesh, smr, vertices);
-
-				var skinning = VertexSkinning.Build(smr.transform, mesh, Allocator.TempJob);
-				var native = new NativeArray<float3>(vertices.Length, Allocator.TempJob,
-					NativeArrayOptions.UninitializedMemory);
-				try
-				{
-					for (var i = 0; i < vertices.Length; i++)
-						native[i] = vertices[i];
-					skinning.ScheduleToWorld(native, default).Complete();
-					for (var i = 0; i < vertices.Length; i++)
-						vertices[i] = native[i];
-				}
-				finally
-				{
-					native.Dispose();
-					skinning.Dispose();
-				}
+				SkinToWorld(smr.transform, mesh, vertices);
 			}
 			else
 			{
@@ -159,6 +379,30 @@ namespace MeshModifier.NDMFDeform.Core
 				}
 			}
 			return true;
+		}
+
+		/// <summary>
+		/// 頂点配列をレンダラーのスキン行列(頂点ごとの LBS)でワールド空間へ変換する(インプレース)。
+		/// 非スキンのレンダラーは localToWorldMatrix。
+		/// </summary>
+		public static void SkinToWorld(Transform rendererTransform, Mesh mesh, Vector3[] vertices)
+		{
+			var skinning = VertexSkinning.Build(rendererTransform, mesh, Allocator.TempJob);
+			var native = new NativeArray<float3>(vertices.Length, Allocator.TempJob,
+				NativeArrayOptions.UninitializedMemory);
+			try
+			{
+				for (var i = 0; i < vertices.Length; i++)
+					native[i] = vertices[i];
+				skinning.ScheduleToWorld(native, default).Complete();
+				for (var i = 0; i < vertices.Length; i++)
+					vertices[i] = native[i];
+			}
+			finally
+			{
+				native.Dispose();
+				skinning.Dispose();
+			}
 		}
 
 		/// <summary>メッシュ空間 → ワールドの写像が鏡映(行列式が負)かどうか</summary>
@@ -258,6 +502,7 @@ namespace MeshModifier.NDMFDeform.Core
 		{
 			public Renderer Renderer;
 			public MeshSurface Surface;
+			public PartProfileData Profiles;
 			public int Hash;
 
 			/// <summary>
@@ -271,9 +516,10 @@ namespace MeshModifier.NDMFDeform.Core
 		// 互いのエントリを作り直して、取得済みの MeshSurfaceData を無効化しないようにする)
 		private static readonly Dictionary<long, Entry> Entries = new Dictionary<long, Entry>();
 
-		private static long KeyOf(Renderer renderer, bool applyBlendShapes, bool flipNormals)
+		private static long KeyOf(Renderer renderer, bool applyBlendShapes, bool flipNormals, bool withParts)
 		{
-			return ((long)renderer.GetInstanceID() << 2) | (applyBlendShapes ? 2L : 0L) | (flipNormals ? 1L : 0L);
+			return ((long)renderer.GetInstanceID() << 3) | (withParts ? 4L : 0L) | (applyBlendShapes ? 2L : 0L) |
+			       (flipNormals ? 1L : 0L);
 		}
 
 		/// <summary>表面データを構築した回数(キャッシュの再利用を検証するテスト用)</summary>
@@ -292,19 +538,39 @@ namespace MeshModifier.NDMFDeform.Core
 		public static bool TryGet(Renderer renderer, bool applyBlendShapes, bool flipNormals,
 			out MeshSurfaceData data)
 		{
+			return TryGet(renderer, applyBlendShapes, flipNormals, null, out data, out _);
+		}
+
+		/// <summary>
+		/// parts を渡すと、三角形のパーツマスク付きの表面データと、パーツごとの半径プロファイルも構築する。
+		/// 体がスキンメッシュならボーンウェイトから、そうでなければ連結成分の重心に最も近い
+		/// 軸区間からパーツを決める。
+		/// </summary>
+		public static bool TryGet(Renderer renderer, bool applyBlendShapes, bool flipNormals, PartRequest parts,
+			out MeshSurfaceData data, out BodyPartProfiles profiles)
+		{
 			data = default;
+			profiles = default;
 			if (renderer == null)
 				return false;
+			if (parts != null && parts.Skeleton == null)
+				parts = null;
 
 			Sweep();
 
-			var key = KeyOf(renderer, applyBlendShapes, flipNormals);
+			var withParts = parts != null;
+			var key = KeyOf(renderer, applyBlendShapes, flipNormals, withParts);
 			Entries.TryGetValue(key, out var entry);
 			var bones = entry?.Bones ?? (renderer as SkinnedMeshRenderer)?.bones;
 			var hash = ComputeHash(renderer, bones, applyBlendShapes);
-			if (entry != null && entry.Hash == hash && entry.Surface != null && entry.Surface.IsCreated)
+			if (withParts)
+				hash = unchecked(hash * 31 + parts.Hash());
+			if (entry != null && entry.Hash == hash && entry.Surface != null && entry.Surface.IsCreated &&
+			    (!withParts || (entry.Profiles != null && entry.Profiles.IsCreated)))
 			{
 				data = entry.Surface.Data;
+				if (withParts)
+					profiles = entry.Profiles.Data;
 				return true;
 			}
 
@@ -316,7 +582,10 @@ namespace MeshModifier.NDMFDeform.Core
 			}
 
 			BuildCount++;
-			var surface = MeshSurface.Build(vertices, triangles, Allocator.Persistent);
+			int[] masks = null;
+			if (withParts)
+				masks = BuildPartMasks(renderer, vertices, triangles, parts);
+			var surface = MeshSurface.Build(vertices, triangles, Allocator.Persistent, masks);
 			if (!surface.IsCreated)
 			{
 				surface.Dispose();
@@ -331,6 +600,10 @@ namespace MeshModifier.NDMFDeform.Core
 			}
 			entry.Surface?.Dispose();
 			entry.Surface = surface;
+			entry.Profiles?.Dispose();
+			entry.Profiles = withParts ? PartProfileData.Build(in surface.Data, parts.Skeleton, Allocator.Persistent) : null;
+			if (withParts)
+				profiles = entry.Profiles.Data;
 			entry.Hash = hash;
 			// ボーン配列は構築時点のものを保持する(差し替えは次回のフルハッシュ不一致で検出されないため、
 			// 参照側は bones を差し替えたら Evict すること)
@@ -342,12 +615,35 @@ namespace MeshModifier.NDMFDeform.Core
 		/// <summary>キャッシュ済みエントリ数(テスト用)</summary>
 		public static int Count => Entries.Count;
 
+		/// <summary>
+		/// 三角形のパーツマスクを求める。スキンメッシュはボーン → パーツ対応とウェイトから、
+		/// ウェイトの無いメッシュは連結成分の重心に最も近い軸区間から決める。
+		/// </summary>
+		private static int[] BuildPartMasks(Renderer renderer, Vector3[] vertices, int[] triangles, PartRequest parts)
+		{
+			var mesh = ReferenceSurfaceUtility.ResolveMesh(renderer).Mesh;
+			PartWeights[] weights = null;
+			if (renderer is SkinnedMeshRenderer smr && mesh != null && mesh.GetBonesPerVertex().Length == vertices.Length)
+			{
+				var boneParts = parts.Skeleton.MapBones(smr.bones, parts.JointTolerance);
+				weights = PartAssignment.FromBoneWeights(mesh, boneParts);
+			}
+			else
+			{
+				weights = new PartWeights[vertices.Length];
+				var adjacency = MeshAdjacency.Build(vertices, triangles);
+				var groups = PartAssignment.ConnectedComponents(adjacency, triangles, out var groupCount);
+				PartAssignment.AssignGroupsBySegment(weights, vertices, groups, groupCount, parts.Skeleton);
+			}
+			return PartAssignment.TriangleMasks(triangles, weights, parts.MaskThreshold);
+		}
+
 		public static void Evict(Renderer renderer)
 		{
 			if (renderer == null)
 				return;
-			for (var variant = 0; variant < 4; variant++)
-				Evict(KeyOf(renderer, (variant & 2) != 0, (variant & 1) != 0));
+			for (var variant = 0; variant < 8; variant++)
+				Evict(KeyOf(renderer, (variant & 2) != 0, (variant & 1) != 0, (variant & 4) != 0));
 		}
 
 		private static void Evict(long key)
@@ -355,6 +651,7 @@ namespace MeshModifier.NDMFDeform.Core
 			if (!Entries.TryGetValue(key, out var entry))
 				return;
 			entry.Surface?.Dispose();
+			entry.Profiles?.Dispose();
 			Entries.Remove(key);
 		}
 
@@ -376,7 +673,10 @@ namespace MeshModifier.NDMFDeform.Core
 		public static void DisposeAll()
 		{
 			foreach (var entry in Entries.Values)
+			{
 				entry.Surface?.Dispose();
+				entry.Profiles?.Dispose();
+			}
 			Entries.Clear();
 		}
 

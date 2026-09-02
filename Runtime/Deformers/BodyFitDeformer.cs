@@ -56,6 +56,29 @@ namespace MeshModifier.NDMFDeform.Core
 			RefitEachFrame = 1,
 		}
 
+		public enum FitMode
+		{
+			/// <summary>
+			/// パーツ円柱: ヒューマノイド骨格のパーツごとに、ボーン軸からの放射方向へ移動する。
+			/// 装飾は下地との相対オフセットを保ち、腕の装飾が胴へ吸われない(推奨。ヒューマノイド必須)
+			/// </summary>
+			PartCylinder = 0,
+
+			/// <summary>最近接表面: 体表面の最近接点へ向けて移動する(骨格が無い場合のフォールバック)</summary>
+			NearestSurface = 1,
+		}
+
+		public enum PartGrouping
+		{
+			None = 0,
+
+			/// <summary>3D の連結成分(位置で溶接)ごとに所属パーツを揃える</summary>
+			ConnectedComponents = 1,
+
+			/// <summary>UV 島ごとに所属パーツを揃える</summary>
+			UVIslands = 2,
+		}
+
 		[SerializeField, Tooltip("沿わせる体のレンダラー(SkinnedMeshRenderer / MeshRenderer)。衣装と同じアバター上のものを指定する")]
 		private Renderer body;
 
@@ -101,6 +124,21 @@ namespace MeshModifier.NDMFDeform.Core
 		[SerializeField, Tooltip("体の表裏を反転する(法線が内向きのメッシュ用。負のスケールによる反転は自動で補正される)")]
 		private bool flipBodyNormals;
 
+		[SerializeField, Tooltip("フィット方式。PartCylinder はヒューマノイド骨格のパーツ軸から放射状に動かす(推奨)。骨格が無ければ NearestSurface に自動で切り替わる")]
+		private FitMode fitMode = FitMode.PartCylinder;
+
+		[SerializeField, Tooltip("小さな装飾(紐・リボン)の所属パーツを揃える単位。連結成分 / UV 島ごとに多数決で 1 パーツにする")]
+		private PartGrouping decorationGrouping = PartGrouping.ConnectedComponents;
+
+		[SerializeField, Min(0f), Tooltip("所属パーツを揃える装飾の大きさ上限(バウンズ対角、m)。これより大きい成分(服本体)は揃えない")]
+		private float decorationMaxSize = 0.25f;
+
+		[SerializeField, Tooltip("NearestSurface でも、自分のパーツの体表面だけを探す(腕の装飾が胴へ吸われるのを防ぐ)")]
+		private bool partFilter = true;
+
+		[SerializeField, Min(0f), Tooltip("衣装アーマチュアの関節をアバターの関節へ対応付ける許容距離(m)")]
+		private float jointTolerance = 0.03f;
+
 		[SerializeField] private Transform axisOverride;
 
 		public Renderer Body { get => body; set => body = value; }
@@ -118,6 +156,20 @@ namespace MeshModifier.NDMFDeform.Core
 		public bool EnforceMinGap { get => enforceMinGap; set => enforceMinGap = value; }
 		public BlendShapeFitMode BlendShapes { get => blendShapes; set => blendShapes = value; }
 		public bool FlipBodyNormals { get => flipBodyNormals; set => flipBodyNormals = value; }
+		public FitMode Mode { get => fitMode; set => fitMode = value; }
+		public PartGrouping DecorationGrouping { get => decorationGrouping; set => decorationGrouping = value; }
+		public float DecorationMaxSize { get => decorationMaxSize; set => decorationMaxSize = Mathf.Max(0f, value); }
+		public bool PartFilter { get => partFilter; set => partFilter = value; }
+		public float JointTolerance { get => jointTolerance; set => jointTolerance = Mathf.Max(0f, value); }
+
+		/// <summary>骨格の差し替え(テスト用。null なら体 / 衣装の親の Animator から作る)</summary>
+		[System.NonSerialized] public HumanoidSkeleton SkeletonOverride;
+
+		/// <summary>直近の PrepareBake でパーツ情報が使えたか</summary>
+		public bool PartsAvailable => _partsReady;
+
+		/// <summary>直近の PrepareBake で実際に使う方式</summary>
+		public FitMode EffectiveMode => _effectiveMode;
 
 		public override Transform Axis => axisOverride != null ? axisOverride : transform;
 
@@ -139,6 +191,14 @@ namespace MeshModifier.NDMFDeform.Core
 		[System.NonSerialized] private NativeArray<float3> _baseDisplacement;
 		[System.NonSerialized] private int _passIndex;
 		[System.NonSerialized] private int _vertexCount;
+
+		// パーツ情報(骨格が使える場合)。_costumeParts は骨格が無くても頂点数分確保する(全 None)
+		[System.NonSerialized] private BodyPartProfiles _profiles;
+		[System.NonSerialized] private bool _partsReady;
+		[System.NonSerialized] private FitMode _effectiveMode = FitMode.NearestSurface;
+		[System.NonSerialized] private NativeArray<PartWeights> _costumeParts;
+		[System.NonSerialized] private int _costumePartsKey;
+		[System.NonSerialized] private MeshAdjacency _adjacencyManaged;
 
 		private void OnValidate()
 		{
@@ -169,9 +229,13 @@ namespace MeshModifier.NDMFDeform.Core
 			if (_adjStart.IsCreated) _adjStart.Dispose();
 			if (_adjList.IsCreated) _adjList.Dispose();
 			if (_baseDisplacement.IsCreated) _baseDisplacement.Dispose();
+			if (_costumeParts.IsCreated) _costumeParts.Dispose();
 			_adjacencyMesh = null;
+			_adjacencyManaged = null;
 			_adjacencyVertexCount = 0;
+			_costumePartsKey = 0;
 			_surfaceReady = false;
+			_partsReady = false;
 		}
 
 #if UNITY_EDITOR
@@ -326,11 +390,22 @@ namespace MeshModifier.NDMFDeform.Core
 			if (body == GetOwnRenderer())
 				return;
 
-			_surfaceReady = ReferenceSurfaceCache.TryGet(body, useBodyBlendShapes, flipBodyNormals, out _surface);
+			// パーツ情報: ヒューマノイド骨格が見つかれば、体の表面にパーツマスクと半径プロファイルを付ける
+			var skeleton = ResolveSkeleton();
+			var request = skeleton != null
+				? new PartRequest { Skeleton = skeleton, JointTolerance = jointTolerance }
+				: null;
+			_surfaceReady = ReferenceSurfaceCache.TryGet(body, useBodyBlendShapes, flipBodyNormals, request,
+				out _surface, out _profiles);
 			if (!_surfaceReady)
 				return;
+			_partsReady = request != null && _profiles.IsCreated;
+			_effectiveMode = fitMode == FitMode.PartCylinder && _partsReady
+				? FitMode.PartCylinder
+				: FitMode.NearestSurface;
 
-			EnsureAdjacency(source);
+			EnsureAdjacency(source, _partsReady && decorationGrouping == PartGrouping.ConnectedComponents);
+			EnsureCostumeParts(source, _partsReady ? skeleton : null);
 
 			if (!_baseDisplacement.IsCreated || _baseDisplacement.Length != _vertexCount)
 			{
@@ -341,11 +416,27 @@ namespace MeshModifier.NDMFDeform.Core
 			}
 		}
 
-		private void EnsureAdjacency(Mesh source)
+		/// <summary>骨格の解決: 差し替え → 体の親の Animator → 衣装の親の Animator(ヒューマノイドのみ)</summary>
+		private HumanoidSkeleton ResolveSkeleton()
 		{
-			if (smoothIterations <= 0)
+			if (SkeletonOverride != null)
+				return SkeletonOverride;
+			var animator = body != null ? body.GetComponentInParent<Animator>() : null;
+			if (animator == null || !animator.isHuman)
+			{
+				var own = GetOwnRenderer();
+				if (own != null)
+					animator = own.GetComponentInParent<Animator>();
+			}
+			return HumanoidSkeleton.FromAnimator(animator);
+		}
+
+		private void EnsureAdjacency(Mesh source, bool force)
+		{
+			if (smoothIterations <= 0 && !force)
 				return;
-			if (_adjStart.IsCreated && _adjacencyMesh == source && _adjacencyVertexCount == source.vertexCount)
+			if (_adjStart.IsCreated && _adjacencyManaged != null && _adjacencyMesh == source &&
+			    _adjacencyVertexCount == source.vertexCount)
 				return;
 
 			if (_adjStart.IsCreated) _adjStart.Dispose();
@@ -354,8 +445,80 @@ namespace MeshModifier.NDMFDeform.Core
 			var adjacency = MeshAdjacency.Build(source.vertices, ReferenceSurfaceUtility.CollectTriangles(source));
 			_adjStart = new NativeArray<int>(adjacency.Start, Allocator.Persistent);
 			_adjList = new NativeArray<int>(adjacency.Neighbors, Allocator.Persistent);
+			_adjacencyManaged = adjacency;
 			_adjacencyMesh = source;
 			_adjacencyVertexCount = source.vertexCount;
+		}
+
+		/// <summary>
+		/// 衣装頂点のパーツ所属を用意する。骨格が無ければ全頂点 None(マスク 0 = 絞り込みなし)。
+		/// ソースメッシュ・骨格・設定が変わらない限り再利用する。
+		/// </summary>
+		private void EnsureCostumeParts(Mesh source, HumanoidSkeleton skeleton)
+		{
+			var n = source.vertexCount;
+			int key;
+			unchecked
+			{
+				key = 17;
+				key = key * 31 + source.GetInstanceID();
+				key = key * 31 + n;
+				key = key * 31 + (skeleton != null ? skeleton.StateHash : 0);
+				key = key * 31 + (int)decorationGrouping;
+				key = key * 31 + decorationMaxSize.GetHashCode();
+				key = key * 31 + jointTolerance.GetHashCode();
+				var own = GetOwnRenderer() as SkinnedMeshRenderer;
+				key = key * 31 + (own != null ? own.GetInstanceID() : 0);
+			}
+			if (_costumeParts.IsCreated && _costumeParts.Length == n && _costumePartsKey == key)
+				return;
+
+			if (_costumeParts.IsCreated)
+				_costumeParts.Dispose();
+			var weights = skeleton != null ? BuildCostumePartWeights(source, skeleton) : new PartWeights[n];
+			_costumeParts = new NativeArray<PartWeights>(weights, Allocator.Persistent);
+			_costumePartsKey = key;
+		}
+
+		private PartWeights[] BuildCostumePartWeights(Mesh source, HumanoidSkeleton skeleton)
+		{
+			var n = source.vertexCount;
+			var own = GetOwnRenderer();
+			var triangles = ReferenceSurfaceUtility.CollectTriangles(source);
+			PartWeights[] weights;
+			if (own is SkinnedMeshRenderer smr && source.GetBonesPerVertex().Length == n)
+			{
+				var boneParts = skeleton.MapBones(smr.bones, jointTolerance);
+				weights = PartAssignment.FromBoneWeights(source, boneParts);
+			}
+			else
+			{
+				// ウェイトの無い衣装: 連結成分の重心に最も近い軸区間へ
+				weights = new PartWeights[n];
+				var world = source.vertices;
+				if (own != null)
+					ReferenceSurfaceUtility.SkinToWorld(own.transform, source, world);
+				var adjacency = _adjacencyManaged ?? MeshAdjacency.Build(source.vertices, triangles);
+				var groups = PartAssignment.ConnectedComponents(adjacency, triangles, out var groupCount);
+				PartAssignment.AssignGroupsBySegment(weights, world, groups, groupCount, skeleton);
+			}
+
+			if (decorationGrouping != PartGrouping.None)
+			{
+				int[] groups;
+				int groupCount;
+				if (decorationGrouping == PartGrouping.UVIslands)
+				{
+					groups = PartAssignment.UVIslandGroups(source, out groupCount);
+				}
+				else
+				{
+					var adjacency = _adjacencyManaged ?? MeshAdjacency.Build(source.vertices, triangles);
+					groups = PartAssignment.ConnectedComponents(adjacency, triangles, out groupCount);
+				}
+				PartAssignment.ConsolidateGroups(weights, source.vertices, groups, groupCount, decorationMaxSize);
+			}
+			return weights;
 		}
 
 		public override JobHandle Schedule(in MeshBuffers buffers, in DeformSpace space, JobHandle dependency)
@@ -379,14 +542,22 @@ namespace MeshModifier.NDMFDeform.Core
 				}.Schedule(n, 128, dependency);
 			}
 
+			if (!_costumeParts.IsCreated || _costumeParts.Length != n)
+				return dependency;
+			if (_effectiveMode == FitMode.PartCylinder)
+				return SchedulePartCylinder(in buffers, in space, dependency);
+
 			var delta = new NativeArray<float3>(n, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
 			var weight = new NativeArray<float>(n, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
 			var valid = new NativeArray<byte>(n, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+			var usePartFilter = partFilter && _partsReady ? 1 : 0;
 
 			var handle = new QueryJob
 			{
 				surface = _surface,
 				vertices = buffers.Vertices,
+				parts = _costumeParts,
+				usePartFilter = usePartFilter,
 				meshToAxis = space.MeshToAxis,
 				wholeMesh = region == FitRegion.WholeMesh ? 1 : 0,
 				innerRadius = innerRadius,
@@ -440,6 +611,8 @@ namespace MeshModifier.NDMFDeform.Core
 				handle = new EnforceMinGapJob
 				{
 					surface = _surface,
+					parts = _costumeParts,
+					usePartFilter = usePartFilter,
 					weight = weight,
 					factor = factor,
 					minGap = minGap,
@@ -457,6 +630,100 @@ namespace MeshModifier.NDMFDeform.Core
 			return handle;
 		}
 
+		/// <summary>
+		/// パーツ円柱モードのジョブチェーン:
+		/// CylinderCoordJob(頂点をパーツ軸の円柱座標へ)→ RadialFieldJob(格子ごとの最内層半径から
+		/// 放射変位場 Δr(h, θ) を作り、補間・平滑化)→ RadialApplyJob(各頂点の所属パーツで Δr をサンプル)
+		/// → ApplyJob → EnforceMinGapJob(パーツ制限付きの最近接点で minGap を保証)
+		/// </summary>
+		private JobHandle SchedulePartCylinder(in MeshBuffers buffers, in DeformSpace space, JobHandle dependency)
+		{
+			var n = buffers.Length;
+			var cellCount = HumanoidSkeleton.PartCount * BodyPartProfiles.HCount * BodyPartProfiles.ThetaCount;
+			var coords = new NativeArray<float4>(n * 4, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+			var radialDirs = new NativeArray<float3>(n * 4, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+			var binPart = new NativeArray<int>(n, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+			var weight = new NativeArray<float>(n, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+			var valid = new NativeArray<byte>(n, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+			var delta = new NativeArray<float3>(n, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+			var grid = new NativeArray<float>(cellCount, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+			var scratch = new NativeArray<float>(cellCount, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+
+			var handle = new CylinderCoordJob
+			{
+				vertices = buffers.Vertices,
+				parts = _costumeParts,
+				profiles = _profiles,
+				meshToAxis = space.MeshToAxis,
+				wholeMesh = region == FitRegion.WholeMesh ? 1 : 0,
+				innerRadius = innerRadius,
+				outerRadius = outerRadius,
+				coords = coords,
+				radialDirs = radialDirs,
+				binPart = binPart,
+				weight = weight,
+			}.Schedule(n, 64, dependency);
+
+			handle = new RadialFieldJob
+			{
+				coords = coords,
+				binPart = binPart,
+				weight = weight,
+				profiles = _profiles,
+				minGap = minGap,
+				maxGap = pullIn ? Mathf.Max(maxGap, minGap) : float.MaxValue,
+				smoothIterations = smoothIterations,
+				smoothStrength = smoothStrength,
+				grid = grid,
+				scratch = scratch,
+			}.Schedule(handle);
+
+			handle = new RadialApplyJob
+			{
+				coords = coords,
+				radialDirs = radialDirs,
+				parts = _costumeParts,
+				grid = grid,
+				delta = delta,
+				valid = valid,
+			}.Schedule(n, 64, handle);
+
+			handle = new ApplyJob
+			{
+				delta = delta,
+				weight = weight,
+				factor = factor,
+				vertices = buffers.Vertices,
+				displacement = _baseDisplacement,
+			}.Schedule(n, 128, handle);
+
+			if (enforceMinGap)
+			{
+				handle = new EnforceMinGapJob
+				{
+					surface = _surface,
+					parts = _costumeParts,
+					usePartFilter = 1,
+					weight = weight,
+					factor = factor,
+					minGap = minGap,
+					searchDistance = searchDistance,
+					vertices = buffers.Vertices,
+					displacement = _baseDisplacement,
+				}.Schedule(n, 32, handle);
+			}
+
+			handle = coords.Dispose(handle);
+			handle = radialDirs.Dispose(handle);
+			handle = binPart.Dispose(handle);
+			handle = weight.Dispose(handle);
+			handle = valid.Dispose(handle);
+			handle = delta.Dispose(handle);
+			handle = grid.Dispose(handle);
+			handle = scratch.Dispose(handle);
+			return handle;
+		}
+
 		// ---- ジョブ ----
 
 		/// <summary>
@@ -471,6 +738,8 @@ namespace MeshModifier.NDMFDeform.Core
 			// 内包する NativeArray は MeshSurfaceData 側で [ReadOnly] 宣言済み
 			public MeshSurfaceData surface;
 			[ReadOnly] public NativeArray<float3> vertices;
+			[ReadOnly] public NativeArray<PartWeights> parts;
+			public int usePartFilter;
 			public float4x4 meshToAxis;
 			public int wholeMesh;
 			public float innerRadius;
@@ -494,7 +763,8 @@ namespace MeshModifier.NDMFDeform.Core
 					return;
 				}
 
-				if (!surface.FindClosest(p, searchDistance, out var hit))
+				var mask = usePartFilter != 0 ? PartMaskOf(parts[index]) : 0;
+				if (!surface.FindClosest(p, searchDistance, mask, out var hit))
 				{
 					delta[index] = float3.zero;
 					valid[index] = 0;
@@ -596,6 +866,8 @@ namespace MeshModifier.NDMFDeform.Core
 		public struct EnforceMinGapJob : IJobParallelFor
 		{
 			public MeshSurfaceData surface;
+			[ReadOnly] public NativeArray<PartWeights> parts;
+			public int usePartFilter;
 			[ReadOnly] public NativeArray<float> weight;
 			public float factor;
 			public float minGap;
@@ -610,7 +882,8 @@ namespace MeshModifier.NDMFDeform.Core
 					return;
 
 				var p = vertices[index];
-				if (!surface.FindClosest(p, searchDistance, out var hit))
+				var mask = usePartFilter != 0 ? PartMaskOf(parts[index]) : 0;
+				if (!surface.FindClosest(p, searchDistance, mask, out var hit))
 					return;
 
 				var d = hit.SignedDistance;
@@ -637,7 +910,225 @@ namespace MeshModifier.NDMFDeform.Core
 			}
 		}
 
+		/// <summary>頂点をパーツ軸の円柱座標へ分解する(所属スロットごと)。領域重みと最内層判定用の支配パーツも出す</summary>
+		[BurstCompile]
+		public struct CylinderCoordJob : IJobParallelFor
+		{
+			[ReadOnly] public NativeArray<float3> vertices;
+			[ReadOnly] public NativeArray<PartWeights> parts;
+			public BodyPartProfiles profiles;
+			public float4x4 meshToAxis;
+			public int wholeMesh;
+			public float innerRadius;
+			public float outerRadius;
+
+			/// <summary>頂点 × 4 スロット: (h, θ, r, スロット重み)。使わないスロットは重み 0</summary>
+			[WriteOnly] public NativeArray<float4> coords;
+
+			[WriteOnly] public NativeArray<float3> radialDirs;
+
+			/// <summary>最内層の集計に使う支配パーツ(重み 0.5 以上・軸が使える場合のみ。それ以外は 0)</summary>
+			[WriteOnly] public NativeArray<int> binPart;
+
+			[WriteOnly] public NativeArray<float> weight;
+
+			public void Execute(int index)
+			{
+				var p = vertices[index];
+				weight[index] = RegionWeight(p, meshToAxis, wholeMesh, innerRadius, outerRadius);
+				var pw = parts[index];
+				var dominant = 0;
+				for (var s = 0; s < 4; s++)
+				{
+					var part = pw.Parts[s];
+					var sw = pw.Weights[s];
+					if (part == 0 || sw <= 0f || !profiles.IsUsable(part))
+					{
+						coords[index * 4 + s] = float4.zero;
+						radialDirs[index * 4 + s] = float3.zero;
+						continue;
+					}
+					var axis = profiles.Axes[part];
+					axis.Decompose(p, out var h, out var theta, out var r, out var dir);
+					coords[index * 4 + s] = new float4(h, theta, r, sw);
+					radialDirs[index * 4 + s] = dir;
+					if (s == 0 && sw >= 0.5f)
+						dominant = part;
+				}
+				binPart[index] = dominant;
+			}
+		}
+
+		/// <summary>
+		/// パーツごとの放射変位場 Δr(h, θ) を作る(単一スレッド):
+		/// 1. 格子ごとに衣装の最内層半径 r_min(支配パーツの頂点の最小 r)
+		/// 2. Δr = clamp(r_min, R + minGap, R + maxGap) − r_min(R は体の半径プロファイル)
+		/// 3. 値の無い格子を近傍平均で 2 周だけ埋め(双線形補間の縁取り)、残りは 0
+		/// 4. 3×3 平均への補間で平滑化(θ 方向は周期)
+		/// </summary>
+		[BurstCompile]
+		public struct RadialFieldJob : IJob
+		{
+			[ReadOnly] public NativeArray<float4> coords;
+			[ReadOnly] public NativeArray<int> binPart;
+			[ReadOnly] public NativeArray<float> weight;
+			public BodyPartProfiles profiles;
+			public float minGap;
+			public float maxGap;
+			public int smoothIterations;
+			public float smoothStrength;
+			public NativeArray<float> grid;
+			public NativeArray<float> scratch;
+
+			public void Execute()
+			{
+				const int H = BodyPartProfiles.HCount;
+				const int T = BodyPartProfiles.ThetaCount;
+				const int P = HumanoidSkeleton.PartCount;
+				var cellCount = P * H * T;
+
+				for (var c = 0; c < cellCount; c++)
+					grid[c] = float.PositiveInfinity;
+
+				// 1. 最内層半径
+				var n = binPart.Length;
+				for (var i = 0; i < n; i++)
+				{
+					var part = binPart[i];
+					if (part == 0 || weight[i] <= 0f)
+						continue;
+					var c = coords[i * 4];
+					var hi = (int)floor((c.x - BodyPartProfiles.HStart) / (BodyPartProfiles.HEnd - BodyPartProfiles.HStart) * H);
+					if (hi < 0 || hi >= H)
+						continue;
+					var ti = (int)floor((c.y + PI) / (2f * PI) * T);
+					ti = ((ti % T) + T) % T;
+					var idx = BodyPartProfiles.CellIndex(part, hi, ti);
+					grid[idx] = min(grid[idx], c.z);
+				}
+
+				// 2. 放射変位
+				for (var part = 1; part < P; part++)
+				{
+					var usable = profiles.Usable[part] != 0;
+					for (var hi = 0; hi < H; hi++)
+					for (var ti = 0; ti < T; ti++)
+					{
+						var idx = BodyPartProfiles.CellIndex(part, hi, ti);
+						var rMin = grid[idx];
+						var radius = profiles.Radius[idx];
+						if (!usable || isinf(rMin) || isnan(radius))
+						{
+							grid[idx] = float.NaN;
+							continue;
+						}
+						var target = clamp(rMin, radius + minGap, radius + maxGap);
+						grid[idx] = target - rMin;
+					}
+				}
+
+				// 3. 縁取り
+				for (var pass = 0; pass < 2; pass++)
+				{
+					for (var c = 0; c < cellCount; c++)
+						scratch[c] = grid[c];
+					for (var part = 1; part < P; part++)
+					for (var hi = 0; hi < H; hi++)
+					for (var ti = 0; ti < T; ti++)
+					{
+						var idx = BodyPartProfiles.CellIndex(part, hi, ti);
+						if (!isnan(scratch[idx]))
+							continue;
+						var sum = 0f;
+						var count = 0;
+						if (hi > 0) Accumulate(scratch[BodyPartProfiles.CellIndex(part, hi - 1, ti)], ref sum, ref count);
+						if (hi < H - 1) Accumulate(scratch[BodyPartProfiles.CellIndex(part, hi + 1, ti)], ref sum, ref count);
+						Accumulate(scratch[BodyPartProfiles.CellIndex(part, hi, (ti + T - 1) % T)], ref sum, ref count);
+						Accumulate(scratch[BodyPartProfiles.CellIndex(part, hi, (ti + 1) % T)], ref sum, ref count);
+						if (count > 0)
+							grid[idx] = sum / count;
+					}
+				}
+				for (var c = 0; c < cellCount; c++)
+				{
+					if (isnan(grid[c]))
+						grid[c] = 0f;
+				}
+
+				// 4. 平滑化
+				for (var it = 0; it < smoothIterations; it++)
+				{
+					for (var c = 0; c < cellCount; c++)
+						scratch[c] = grid[c];
+					for (var part = 1; part < P; part++)
+					for (var hi = 0; hi < H; hi++)
+					for (var ti = 0; ti < T; ti++)
+					{
+						var idx = BodyPartProfiles.CellIndex(part, hi, ti);
+						var sum = 0f;
+						var count = 0;
+						if (hi > 0) Accumulate(scratch[BodyPartProfiles.CellIndex(part, hi - 1, ti)], ref sum, ref count);
+						if (hi < H - 1) Accumulate(scratch[BodyPartProfiles.CellIndex(part, hi + 1, ti)], ref sum, ref count);
+						Accumulate(scratch[BodyPartProfiles.CellIndex(part, hi, (ti + T - 1) % T)], ref sum, ref count);
+						Accumulate(scratch[BodyPartProfiles.CellIndex(part, hi, (ti + 1) % T)], ref sum, ref count);
+						if (count > 0)
+							grid[idx] = lerp(scratch[idx], sum / count, smoothStrength);
+					}
+				}
+			}
+
+			private static void Accumulate(float value, ref float sum, ref int count)
+			{
+				if (isnan(value))
+					return;
+				sum += value;
+				count++;
+			}
+		}
+
+		/// <summary>各頂点の所属スロットごとに Δr をサンプルし、放射方向の変位に合成する</summary>
+		[BurstCompile]
+		public struct RadialApplyJob : IJobParallelFor
+		{
+			[ReadOnly] public NativeArray<float4> coords;
+			[ReadOnly] public NativeArray<float3> radialDirs;
+			[ReadOnly] public NativeArray<PartWeights> parts;
+			[ReadOnly] public NativeArray<float> grid;
+			[WriteOnly] public NativeArray<float3> delta;
+			[WriteOnly] public NativeArray<byte> valid;
+
+			public void Execute(int index)
+			{
+				var sum = float3.zero;
+				byte any = 0;
+				var pw = parts[index];
+				for (var s = 0; s < 4; s++)
+				{
+					var c = coords[index * 4 + s];
+					if (c.w <= 0f)
+						continue;
+					var part = pw.Parts[s];
+					var d = BodyPartProfiles.SampleGrid(in grid, part, c.x, c.y);
+					if (isnan(d))
+						continue;
+					sum += radialDirs[index * 4 + s] * (d * c.w);
+					any = 1;
+				}
+				delta[index] = sum;
+				valid[index] = any;
+			}
+		}
+
 		// ---- ジョブ共通の数式 ----
+
+		/// <summary>頂点の所属パーツから検索マスクを作る(重み 0.25 以上 + 支配パーツ。所属なしは 0 = 絞らない)</summary>
+		public static int PartMaskOf(in PartWeights pw)
+		{
+			var mask = pw.Mask(0.25f);
+			if (pw.Parts.x != 0)
+				mask |= 1 << pw.Parts.x;
+			return mask;
+		}
 
 		/// <summary>
 		/// 二重球の領域重み(軸空間)。内半径の内側で 1、外半径で 0、間は smoothstep で減衰。

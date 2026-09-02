@@ -147,7 +147,7 @@ namespace MeshModifier.NDMFDeform.Tests
 		{
 			// 面ごとに頂点を分割した立方体でも、角の擬似法線は 3 面の合成(1,1,1)/√3 になる
 			var (v, t) = MakeCube(false);
-			Assert.That(v.Length, Is.EqualTo(24));
+			Assert.That(v.Length, Is.EqualTo(36), "三角形ごとに頂点を分割した立方体");
 			var surface = Build(v, t);
 
 			var found = surface.Data.FindClosest(new float3(1f, 1f, 1f), 10f, out var hit);

@@ -315,15 +315,16 @@ namespace MeshModifier.NDMFDeform.Tests
 		[Test]
 		public void Fit_FixedDisplacementPreservesCostumeBlendShape()
 		{
-			var s = CreateSetup(new[] { new Vector3(0.8f, 0f, 0f) });
-			s.Source.AddBlendShapeFrame("puff", 100f, new[] { new Vector3(0.3f, 0f, 0f) }, null, null);
+			// 2 頂点目は探索圏外の固定点(バウンズを 0 にしないため。1 頂点だと非線形判定の閾値が 0 になる)
+			var s = CreateSetup(new[] { new Vector3(0.8f, 0f, 0f), new Vector3(3f, 0f, 0f) });
+			s.Source.AddBlendShapeFrame("puff", 100f, new[] { new Vector3(0.3f, 0f, 0f), Vector3.zero }, null, null);
 			s.Fit.BlendShapes = BodyFitDeformer.BlendShapeFitMode.FixedDisplacement;
 
 			var v = Bake(s);
 			AssertNear(v[0], new Vector3(0.52f, 0f, 0f), "基本形状はフィットする");
 
 			var last = _baked.GetBlendShapeFrameCount(0) - 1;
-			var dv = new Vector3[1];
+			var dv = new Vector3[2];
 			_baked.GetBlendShapeFrameVertices(0, last, dv, null, null);
 			AssertNear(dv[0], new Vector3(0.3f, 0f, 0f), "FixedDisplacement では衣装のシェイプデルタが維持される");
 			Assert.That(_baked.GetBlendShapeFrameCount(0), Is.EqualTo(1), "変位が一定なので中間フレームは増えない");
@@ -494,6 +495,243 @@ namespace MeshModifier.NDMFDeform.Tests
 			var v = Bake(s);
 			AssertNear(v[0], new Vector3(0.52f, 0f, 0f), "鏡映された体でも外側へフィットする");
 			AssertNear(v[1], new Vector3(0.52f, 0f, 0f), "鏡映された体でもめり込みは外へ押し出される");
+		}
+
+		// ---- パーツ円柱モード ----
+
+		/// <summary>
+		/// 底面中心 baseCenter・半径 radius・高さ height の閉じた円柱(法線外向き)を頂点 / 三角形に追加する。
+		/// 追加した頂点は全て boneIndex にウェイト 1 で割り当てる。
+		/// </summary>
+		private static void AppendCylinder(List<Vector3> vertices, List<int> triangles, List<BoneWeight> weights,
+			Vector3 baseCenter, float radius, float height, int boneIndex, int segments = 24, int rings = 8)
+		{
+			var start = vertices.Count;
+			for (var ring = 0; ring <= rings; ring++)
+			{
+				var y = baseCenter.y + height * ring / rings;
+				for (var seg = 0; seg < segments; seg++)
+				{
+					var angle = 2f * Mathf.PI * seg / segments;
+					vertices.Add(new Vector3(baseCenter.x + radius * Mathf.Cos(angle), y, baseCenter.z + radius * Mathf.Sin(angle)));
+				}
+			}
+			var bottomCenter = vertices.Count;
+			vertices.Add(new Vector3(baseCenter.x, baseCenter.y, baseCenter.z));
+			var topCenter = vertices.Count;
+			vertices.Add(new Vector3(baseCenter.x, baseCenter.y + height, baseCenter.z));
+			for (var i = start; i < vertices.Count; i++)
+				weights.Add(new BoneWeight { boneIndex0 = boneIndex, weight0 = 1f });
+
+			void AddTriangle(int a, int b, int c, Vector3 outward)
+			{
+				var n = Vector3.Cross(vertices[b] - vertices[a], vertices[c] - vertices[a]);
+				if (Vector3.Dot(n, outward) < 0f)
+				{
+					var tmp = b;
+					b = c;
+					c = tmp;
+				}
+				triangles.Add(a);
+				triangles.Add(b);
+				triangles.Add(c);
+			}
+
+			for (var ring = 0; ring < rings; ring++)
+			for (var seg = 0; seg < segments; seg++)
+			{
+				var a = start + ring * segments + seg;
+				var b = start + ring * segments + (seg + 1) % segments;
+				var c = a + segments;
+				var d = b + segments;
+				var outward = vertices[a] - new Vector3(baseCenter.x, vertices[a].y, baseCenter.z);
+				AddTriangle(a, b, d, outward);
+				AddTriangle(a, d, c, outward);
+			}
+			for (var seg = 0; seg < segments; seg++)
+			{
+				var a = start + seg;
+				var b = start + (seg + 1) % segments;
+				AddTriangle(bottomCenter, a, b, Vector3.down);
+				var ta = start + rings * segments + seg;
+				var tb = start + rings * segments + (seg + 1) % segments;
+				AddTriangle(topCenter, ta, tb, Vector3.up);
+			}
+		}
+
+		private struct PartSetup
+		{
+			public SkinnedMeshRenderer Body;
+			public GameObject CostumeGo;
+			public DeformStack Stack;
+			public BodyFitDeformer Fit;
+			public Mesh Source;
+		}
+
+		/// <summary>
+		/// 体 = 胴の円柱(軸 x=0、半径 0.2、y 0〜1.4)+ 左上腕の円柱(軸 x=0.35、半径 0.06、y 0.6〜1.3)。
+		/// 骨格 = Hips(0,0,0) → Neck(0,1.4,0)、LeftUpperArm(0.35,1.3,0) → LeftLowerArm(0.35,0.6,0)。
+		/// 衣装 = 指定頂点(ボーン 0 = Hips、1 = LeftUpperArm にウェイト)。両方とも同じボーンを使う。
+		/// </summary>
+		private PartSetup CreatePartSetup(Vector3[] costumeVertices, int[] costumeBones)
+		{
+			_root = new GameObject("Avatar");
+			var hips = new GameObject("Hips").transform;
+			hips.SetParent(_root.transform, false);
+			hips.position = new Vector3(0f, 0f, 0f);
+			var neck = new GameObject("Neck").transform;
+			neck.SetParent(hips, false);
+			neck.position = new Vector3(0f, 1.4f, 0f);
+			var upperArm = new GameObject("LeftUpperArm").transform;
+			upperArm.SetParent(neck, false);
+			upperArm.position = new Vector3(0.35f, 1.3f, 0f);
+			var lowerArm = new GameObject("LeftLowerArm").transform;
+			lowerArm.SetParent(upperArm, false);
+			lowerArm.position = new Vector3(0.35f, 0.6f, 0f);
+			var bones = new[] { hips, upperArm };
+			var bindposes = new[] { hips.worldToLocalMatrix, upperArm.worldToLocalMatrix };
+
+			var skeleton = HumanoidSkeleton.FromBones(new Dictionary<HumanBodyBones, Transform>
+			{
+				{ HumanBodyBones.Hips, hips },
+				{ HumanBodyBones.Neck, neck },
+				{ HumanBodyBones.LeftUpperArm, upperArm },
+				{ HumanBodyBones.LeftLowerArm, lowerArm },
+			});
+
+			// 体
+			var bv = new List<Vector3>();
+			var bt = new List<int>();
+			var bw = new List<BoneWeight>();
+			AppendCylinder(bv, bt, bw, new Vector3(0f, 0f, 0f), 0.2f, 1.4f, 0);
+			AppendCylinder(bv, bt, bw, new Vector3(0.35f, 0.6f, 0f), 0.06f, 0.7f, 1);
+			var bodyMesh = Track(new Mesh { vertices = bv.ToArray(), triangles = bt.ToArray() });
+			bodyMesh.boneWeights = bw.ToArray();
+			bodyMesh.bindposes = bindposes;
+			bodyMesh.RecalculateBounds();
+			var bodyGo = new GameObject("Body");
+			bodyGo.transform.SetParent(_root.transform, false);
+			var body = bodyGo.AddComponent<SkinnedMeshRenderer>();
+			body.bones = bones;
+			body.rootBone = hips;
+			body.sharedMesh = bodyMesh;
+
+			// 衣装
+			var source = Track(new Mesh { vertices = costumeVertices });
+			var cw = new BoneWeight[costumeVertices.Length];
+			for (var i = 0; i < cw.Length; i++)
+				cw[i] = new BoneWeight { boneIndex0 = costumeBones[i], weight0 = 1f };
+			source.boneWeights = cw;
+			source.bindposes = bindposes;
+			source.RecalculateBounds();
+			var costumeGo = new GameObject("Costume");
+			costumeGo.transform.SetParent(_root.transform, false);
+			var costume = costumeGo.AddComponent<SkinnedMeshRenderer>();
+			costume.bones = bones;
+			costume.rootBone = hips;
+			costume.sharedMesh = source;
+			var stack = costumeGo.AddComponent<DeformStack>();
+
+			var fitGo = new GameObject("BodyFit");
+			fitGo.transform.SetParent(costumeGo.transform, false);
+			var fit = fitGo.AddComponent<BodyFitDeformer>();
+			fit.Body = body;
+			fit.SkeletonOverride = skeleton;
+			fit.Mode = BodyFitDeformer.FitMode.PartCylinder;
+			fit.Region = BodyFitDeformer.FitRegion.WholeMesh;
+			fit.SmoothIterations = 0;
+			fit.SearchDistance = 1f;
+			fit.MinGap = 0.02f;
+			fit.MaxGap = 0.02f;
+			fit.PullIn = true;
+			fit.Factor = 1f;
+			fit.DecorationGrouping = BodyFitDeformer.PartGrouping.None;
+			stack.AddDeformer(fit);
+
+			return new PartSetup { Body = body, CostumeGo = costumeGo, Stack = stack, Fit = fit, Source = source };
+		}
+
+		private Vector3[] BakePart(in PartSetup s)
+		{
+			if (_baked != null)
+				Object.DestroyImmediate(_baked);
+			_baked = DeformBakeCore.Bake(s.Stack, s.Source, s.CostumeGo.transform);
+			Assert.That(_baked, Is.Not.Null);
+			return _baked.vertices;
+		}
+
+		[Test]
+		public void PartCylinder_MovesRadiallyPerPartAndKeepsDecorationOffset()
+		{
+			// 0: 袖の内層(腕軸から r=0.10)、1: 袖の装飾(r=0.14、同じ h / θ)、
+			// 2: 腕と胴の間の紐(腕軸の −X 側 r=0.14。胴の壁 x=0.2 のすぐ外側)、3: 胴の衣装(x=0.25)
+			var s = CreatePartSetup(new[]
+			{
+				new Vector3(0.45f, 0.95f, 0f), new Vector3(0.49f, 0.95f, 0f),
+				new Vector3(0.21f, 0.95f, 0f), new Vector3(0.25f, 0.7f, 0f),
+			}, new[] { 1, 1, 1, 0 });
+
+			var v = BakePart(s);
+			Assert.That(s.Fit.PartsAvailable, Is.True);
+			Assert.That(s.Fit.EffectiveMode, Is.EqualTo(BodyFitDeformer.FitMode.PartCylinder));
+
+			// 腕の半径 0.06 + 隙間 0.02 = 0.08 へ、腕軸(x=0.35)基準で放射状に動く
+			AssertNear(v[0], new Vector3(0.43f, 0.95f, 0f), "袖の内層は腕の半径 + 隙間へ", 2e-3f);
+			AssertNear(v[1], new Vector3(0.47f, 0.95f, 0f), "装飾は内層との相対オフセット(0.04)を保つ", 2e-3f);
+			AssertNear(v[2], new Vector3(0.27f, 0.95f, 0f), "腕の装飾は胴ではなく腕の軸基準で動く", 2e-3f);
+			AssertNear(v[3], new Vector3(0.22f, 0.7f, 0f), "胴の衣装は胴の半径 + 隙間へ", 2e-3f);
+		}
+
+		[Test]
+		public void NearestSurface_PartFilterKeepsArmDecorationOnArm()
+		{
+			var s = CreatePartSetup(new[]
+			{
+				new Vector3(0.21f, 0.95f, 0f), new Vector3(0.49f, 0.95f, 0f),
+			}, new[] { 1, 1 });
+			s.Fit.Mode = BodyFitDeformer.FitMode.NearestSurface;
+
+			// パーツ制限なし: 最寄りの胴の壁(x=0.2)へ押し出され、装飾は腕の表面へ潰れる
+			s.Fit.PartFilter = false;
+			var v = BakePart(s);
+			Assert.That(s.Fit.EffectiveMode, Is.EqualTo(BodyFitDeformer.FitMode.NearestSurface));
+			AssertNear(v[0], new Vector3(0.22f, 0.95f, 0f), "制限なしでは胴に吸われる", 2e-3f);
+			AssertNear(v[1], new Vector3(0.43f, 0.95f, 0f), "制限なしでは装飾が潰れる", 2e-3f);
+
+			// パーツ制限あり: 腕の三角形だけを探すので腕の表面(x=0.29)基準になる
+			s.Fit.PartFilter = true;
+			v = BakePart(s);
+			AssertNear(v[0], new Vector3(0.27f, 0.95f, 0f), "腕の頂点は腕の表面へ", 2e-3f);
+		}
+
+		[Test]
+		public void PartCylinder_FallsBackWithoutSkeleton()
+		{
+			var s = CreatePartSetup(new[] { new Vector3(0.45f, 0.95f, 0f) }, new[] { 1 });
+			s.Fit.SkeletonOverride = null; // Animator が無いので骨格なし
+
+			var v = BakePart(s);
+			Assert.That(s.Fit.PartsAvailable, Is.False);
+			Assert.That(s.Fit.EffectiveMode, Is.EqualTo(BodyFitDeformer.FitMode.NearestSurface));
+			// 最近接(腕の壁 x=0.41 から 0.04)→ 隙間 0.02 へ
+			AssertNear(v[0], new Vector3(0.43f, 0.95f, 0f), "骨格が無ければ最近接表面でフィットする", 2e-3f);
+		}
+
+		[Test]
+		public void PartCylinder_DecorationGroupingUnifiesSmallComponents()
+		{
+			// 紐の 3 頂点(小さな連結成分)のうち 1 つだけ胴にウェイトがあっても、多数決で腕に揃う
+			var s = CreatePartSetup(new[]
+			{
+				new Vector3(0.21f, 0.95f, 0f), new Vector3(0.21f, 0.97f, 0f), new Vector3(0.21f, 0.99f, 0f),
+			}, new[] { 1, 1, 0 });
+			s.Source.triangles = new[] { 0, 1, 2 };
+			s.Fit.DecorationGrouping = BodyFitDeformer.PartGrouping.ConnectedComponents;
+			s.Fit.DecorationMaxSize = 0.25f;
+
+			var v = BakePart(s);
+			for (var i = 0; i < 3; i++)
+				Assert.That(v[i].x, Is.EqualTo(0.27f).Within(3e-3f), $"vertex {i} は腕の軸基準で動く");
 		}
 
 		// ---- テスト用デフォーマ ----
