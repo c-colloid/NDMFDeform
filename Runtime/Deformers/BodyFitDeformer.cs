@@ -236,6 +236,12 @@ namespace MeshModifier.NDMFDeform.Core
 		[System.NonSerialized] private int _costumePartsKey;
 		[System.NonSerialized] private int _surfaceHash;
 		[System.NonSerialized] private readonly List<PartGroupReport> _partReports = new List<PartGroupReport>();
+
+		// 直近のパーツ所属計算のグループ分け(上書きの参照をベイクと同じ規則でグループへ解決するため)
+		[System.NonSerialized] private int[] _lastGroups;
+		[System.NonSerialized] private int _lastGroupCount;
+		[System.NonSerialized] private UVIslandAnalysis _lastAnalysis;
+		[System.NonSerialized] private Vector3[] _lastVertices;
 		[System.NonSerialized] private MeshAdjacency _adjacencyManaged;
 		[System.NonSerialized] private HumanoidSkeleton _cachedSkeleton;
 		[System.NonSerialized] private Animator _cachedAnimator;
@@ -279,7 +285,29 @@ namespace MeshModifier.NDMFDeform.Core
 			_cachedAvatar = null;
 			_costumePartsKey = 0;
 			_surfaceReady = false;
+			ResetPartsState();
+		}
+
+		/// <summary>
+		/// パーツ情報が使えない結果(Body 未設定・自己参照・表面の構築失敗)を反映する。
+		/// PrepareBake の途中終了でも PartsAvailable / EffectiveMode / PartReports が
+		/// 「直近の呼び出し」を表すように、各早期 return の直前で呼ぶ。
+		/// (EnsureCostumeParts のキャッシュ命中ではレポートを保つため、成功経路の先頭では呼ばない)
+		/// </summary>
+		private void ResetPartsState()
+		{
 			_partsReady = false;
+			_effectiveMode = FitMode.NearestSurface;
+			ClearPartReports();
+		}
+
+		private void ClearPartReports()
+		{
+			_partReports.Clear();
+			_lastGroups = null;
+			_lastGroupCount = 0;
+			_lastAnalysis = null;
+			_lastVertices = null;
 		}
 
 #if UNITY_EDITOR
@@ -428,11 +456,17 @@ namespace MeshModifier.NDMFDeform.Core
 			_vertexCount = source != null ? source.vertexCount : 0;
 
 			if (body == null || source == null || _vertexCount == 0)
+			{
+				ResetPartsState();
 				return;
+			}
 
 			// 自分自身(衣装のレンダラー)を参照している場合は何もしない
 			if (body == GetOwnRenderer())
+			{
+				ResetPartsState();
 				return;
+			}
 
 			// パーツ情報: ヒューマノイド骨格が見つかれば、体の表面にパーツマスクと半径プロファイルを付ける
 			var skeleton = ResolveSkeleton();
@@ -442,7 +476,10 @@ namespace MeshModifier.NDMFDeform.Core
 			_surfaceReady = ReferenceSurfaceCache.TryGet(body, useBodyBlendShapes, flipBodyNormals, request,
 				out _surface, out _profiles, out _surfaceHash);
 			if (!_surfaceReady)
+			{
+				ResetPartsState();
 				return;
+			}
 			_partsReady = request != null && _profiles.IsCreated;
 			_effectiveMode = fitMode == FitMode.PartCylinder && _partsReady
 				? FitMode.PartCylinder
@@ -553,7 +590,7 @@ namespace MeshModifier.NDMFDeform.Core
 
 			if (_costumeParts.IsCreated)
 				_costumeParts.Dispose();
-			_partReports.Clear();
+			ClearPartReports();
 			var weights = skeleton != null ? BuildCostumePartWeights(source, skeleton, _partReports) : new PartWeights[n];
 			_costumeParts = new NativeArray<PartWeights>(weights, Allocator.Persistent);
 			_costumePartsKey = key;
@@ -650,6 +687,12 @@ namespace MeshModifier.NDMFDeform.Core
 			if (groups == null && partGrouping != PartGrouping.None)
 				groups = PartAssignment.ConnectedComponents(adjacency, triangles, out groupCount);
 
+			// インスペクタの上書き操作がベイクと同じ規則でグループを特定できるよう、分け方を保持する
+			_lastGroups = groups;
+			_lastGroupCount = groupCount;
+			_lastAnalysis = analysis;
+			_lastVertices = local;
+
 			// 手動上書き → グループ番号
 			Dictionary<int, BodyPart> overrides = null;
 			if (groups != null && partOverrides.Count > 0)
@@ -726,19 +769,33 @@ namespace MeshModifier.NDMFDeform.Core
 			return _partsReady;
 		}
 
+		/// <summary>
+		/// 上書きの参照を、直近のパーツ所属計算のグループ番号へ解決する(ベイクと同じ規則)。
+		/// グループ分けの方式(UV 島 / 連結成分)を切り替えても、島シードで記録した上書きは
+		/// 代表点で、代表点で記録した上書きは最寄り頂点の島で追従する。解決できなければ -1
+		/// </summary>
+		public int ResolveOverrideGroup(in PartOverride o)
+		{
+			if (_lastGroups == null || _lastVertices == null)
+				return -1;
+			return ResolveOverrideGroup(o, _lastAnalysis, _lastVertices, _lastGroups, _lastGroupCount);
+		}
+
 		/// <summary>グループの現在の上書き(無ければ None)</summary>
 		public BodyPart GetPartOverride(PartGroupReport report)
 		{
+			if (report == null)
+				return BodyPart.None;
 			foreach (var o in partOverrides)
 			{
-				if (OverrideMatches(o, report))
+				if (ResolveOverrideGroup(o) == report.Group)
 					return o.part;
 			}
 			return BodyPart.None;
 		}
 
 		/// <summary>
-		/// グループの上書きを設定する(part = None で解除)。
+		/// グループの上書きを設定する(part = None で解除)。同じグループへ解決される既存の上書きは置き換える。
 		/// UV 島グループは島シードで、連結成分グループは代表点で記録する(頂点順が変わっても追従する)。
 		/// </summary>
 		public void SetPartOverride(PartGroupReport report, BodyPart part)
@@ -747,7 +804,7 @@ namespace MeshModifier.NDMFDeform.Core
 				return;
 			for (var i = partOverrides.Count - 1; i >= 0; i--)
 			{
-				if (OverrideMatches(partOverrides[i], report))
+				if (ResolveOverrideGroup(partOverrides[i]) == report.Group)
 					partOverrides.RemoveAt(i);
 			}
 			if (part != BodyPart.None)
@@ -760,15 +817,6 @@ namespace MeshModifier.NDMFDeform.Core
 					part = part,
 				});
 			}
-		}
-
-		private static bool OverrideMatches(in PartOverride o, PartGroupReport r)
-		{
-			if (o.useIsland != r.IsIsland)
-				return false;
-			if (o.useIsland)
-				return o.island.uv == r.Island.uv && o.island.subMesh == r.Island.subMesh && o.island.index == r.Island.index;
-			return o.point == r.Point;
 		}
 
 		public override JobHandle Schedule(in MeshBuffers buffers, in DeformSpace space, JobHandle dependency)

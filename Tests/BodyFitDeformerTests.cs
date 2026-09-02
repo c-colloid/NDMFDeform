@@ -876,6 +876,81 @@ namespace MeshModifier.NDMFDeform.Tests
 			AssertNear(v[0], new Vector3(0.43f, 0.95f, 0f), "袖の島はそのまま腕", 2e-3f);
 		}
 
+		[Test]
+		public void PartLabel_StateResetsWhenBodyIsCleared()
+		{
+			var s = CreatePartSetup(new[]
+			{
+				new Vector3(0.21f, 0.95f, 0f), new Vector3(0.21f, 0.97f, 0f), new Vector3(0.21f, 0.99f, 0f),
+			}, new[] { 1, 1, 1 });
+			s.Source.triangles = new[] { 0, 1, 2 };
+			s.Fit.Grouping = BodyFitDeformer.PartGrouping.ConnectedComponents;
+
+			BakePart(s);
+			Assert.That(s.Fit.PartsAvailable, Is.True);
+			Assert.That(s.Fit.PartReports, Has.Count.EqualTo(1));
+
+			// Body を外すと、途中終了でも「直近の呼び出し」の状態になる
+			s.Fit.Body = null;
+			Assert.That(s.Fit.AnalyzeParts(), Is.False);
+			Assert.That(s.Fit.PartsAvailable, Is.False);
+			Assert.That(s.Fit.EffectiveMode, Is.EqualTo(BodyFitDeformer.FitMode.NearestSurface));
+			Assert.That(s.Fit.PartReports, Is.Empty);
+
+			// 自己参照でも同様
+			s.Fit.Body = s.CostumeGo.GetComponent<Renderer>();
+			Assert.That(s.Fit.AnalyzeParts(), Is.False);
+			Assert.That(s.Fit.PartReports, Is.Empty);
+		}
+
+		[Test]
+		public void PartLabel_OverrideSurvivesGroupingSwitch()
+		{
+			// 連結成分モードで記録した上書きは、UV 島モードでも同じグループへ解決され、UI から見え、解除できる
+			var s = CreatePartSetup(new[]
+			{
+				new Vector3(0.45f, 0.95f, 0f), new Vector3(0.45f, 0.97f, 0f), new Vector3(0.47f, 0.96f, 0f),
+				new Vector3(0.21f, 0.95f, 0f), new Vector3(0.21f, 0.97f, 0f), new Vector3(0.21f, 0.99f, 0f),
+			}, new[] { 1, 1, 1, 1, 1, 1 });
+			s.Source.triangles = new[] { 0, 1, 2, 3, 4, 5 };
+			s.Source.uv = new[]
+			{
+				new Vector2(0.1f, 0.1f), new Vector2(0.2f, 0.1f), new Vector2(0.15f, 0.2f),
+				new Vector2(0.6f, 0.6f), new Vector2(0.7f, 0.6f), new Vector2(0.65f, 0.7f),
+			};
+			s.Fit.Grouping = BodyFitDeformer.PartGrouping.ConnectedComponents;
+			BakePart(s);
+
+			PartGroupReport stringGroup = null;
+			foreach (var r in s.Fit.PartReports)
+			{
+				if (r.NeedsReview)
+					stringGroup = r;
+			}
+			Assert.That(stringGroup, Is.Not.Null);
+			Assert.That(stringGroup.IsIsland, Is.False);
+			s.Fit.SetPartOverride(stringGroup, BodyPart.Torso);
+			Assert.That(s.Fit.PartOverrides[0].useIsland, Is.False);
+
+			s.Fit.Grouping = BodyFitDeformer.PartGrouping.UVIslands;
+			var v = BakePart(s);
+			Assert.That(v[3].x, Is.EqualTo(0.22f).Within(3e-3f), "代表点で島へ解決され、上書きが効く");
+			PartGroupReport stringIsland = null;
+			foreach (var r in s.Fit.PartReports)
+			{
+				if (r.Decision == PartDecision.Override)
+					stringIsland = r;
+			}
+			Assert.That(stringIsland, Is.Not.Null, "上書きされた島が報告される");
+			Assert.That(stringIsland.IsIsland, Is.True);
+			Assert.That(s.Fit.GetPartOverride(stringIsland), Is.EqualTo(BodyPart.Torso), "方式が違っても UI から見える");
+
+			s.Fit.SetPartOverride(stringIsland, BodyPart.None);
+			Assert.That(s.Fit.PartOverrides, Is.Empty, "方式が違っても解除できる");
+			v = BakePart(s);
+			Assert.That(v[3].x, Is.EqualTo(0.27f).Within(3e-3f));
+		}
+
 		// ---- テスト用デフォーマ ----
 
 		/// <summary>全頂点を +X に 0.5 動かす</summary>

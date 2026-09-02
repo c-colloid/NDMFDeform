@@ -297,6 +297,18 @@ namespace MeshModifier.NDMFDeform.Tests
 		}
 
 		[Test]
+		public void FromBones_RecordsSourceAnimator()
+		{
+			var (skeleton, bones) = CreateSkeleton();
+			Assert.That(skeleton.SourceAnimator, Is.Null);
+
+			var animator = _root.AddComponent<Animator>();
+			var withSource = HumanoidSkeleton.FromBones(bones, animator);
+			Assert.That(withSource.SourceAnimator, Is.SameAs(animator));
+			Assert.That(withSource.StateHash, Is.EqualTo(skeleton.StateHash), "骨格の内容は同じ");
+		}
+
+		[Test]
 		public void AssignGroupsBySegment_UsesNearestAxis()
 		{
 			var (skeleton, _) = CreateSkeleton();

@@ -152,11 +152,7 @@ namespace MeshModifier.NDMFDeform.Core
 			if (animator == null || !animator.isHuman)
 				return null;
 
-			var bones = CollectHumanoidBones(animator);
-			var skeleton = FromBones(bones);
-			if (skeleton != null)
-				skeleton.SourceAnimator = animator;
-			return skeleton;
+			return FromBones(CollectHumanoidBones(animator), animator);
 		}
 
 		/// <summary>Animator のヒューマノイド対応(存在するボーンのみ)</summary>
@@ -176,12 +172,17 @@ namespace MeshModifier.NDMFDeform.Core
 			return bones;
 		}
 
-		public static HumanoidSkeleton FromBones(IReadOnlyDictionary<HumanBodyBones, Transform> bones)
+		/// <summary>
+		/// ボーン辞書から骨格を作る。sourceAnimator にはボーンの属するアバターの Animator を渡す
+		/// (衣装側の Animator と同じかどうかの判定に使う。無ければ null)。
+		/// </summary>
+		public static HumanoidSkeleton FromBones(IReadOnlyDictionary<HumanBodyBones, Transform> bones,
+			Animator sourceAnimator = null)
 		{
 			if (bones == null)
 				return null;
 
-			var skeleton = new HumanoidSkeleton();
+			var skeleton = new HumanoidSkeleton { SourceAnimator = sourceAnimator };
 			foreach (var pair in bones)
 			{
 				if (pair.Value == null)
