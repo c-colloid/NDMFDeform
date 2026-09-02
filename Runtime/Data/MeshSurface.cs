@@ -4,6 +4,9 @@ using Unity.Collections;
 using Unity.Mathematics;
 using UnityEngine;
 using static Unity.Mathematics.math;
+// using static math 下では式中の float3 がメソッド群(math.float3)に解決されるため、
+// float3.zero などの静的メンバ参照用に型エイリアスを明示する(LatticeDeformer と同じ対処)
+using float3 = Unity.Mathematics.float3;
 
 namespace MeshModifier.NDMFDeform.Core
 {

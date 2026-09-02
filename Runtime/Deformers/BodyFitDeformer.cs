@@ -5,6 +5,8 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 using static Unity.Mathematics.math;
+using float3 = Unity.Mathematics.float3;
+using float4x4 = Unity.Mathematics.float4x4;
 
 namespace MeshModifier.NDMFDeform.Core
 {
@@ -81,7 +83,7 @@ namespace MeshModifier.NDMFDeform.Core
 		[SerializeField, Tooltip("体との最大の隙間(m)。これより遠い頂点を引き寄せる(pullIn が有効なとき)")]
 		private float maxGap = 0.005f;
 
-		[SerializeField, Min(0f), Tooltip("体表面を探す距離の上限(m)。これより体から離れた頂点は対象外")]
+		[SerializeField, Min(0f), Tooltip("体表面を探す距離の上限(m)。これより体から離れた頂点は対象外(上限の 75% から滑らかに効きが減る)")]
 		private float searchDistance = 0.1f;
 
 		[SerializeField, Range(0, 30), Tooltip("変位の平滑化回数。凹んだ部位で布が折れるのを抑える(0 で無効)")]
@@ -499,6 +501,16 @@ namespace MeshModifier.NDMFDeform.Core
 					return;
 				}
 
+				// 探索距離の境界で段差が出ないよう、上限の 75% から 100% にかけて効きを減衰させる
+				w *= SearchFalloff(hit.Distance, searchDistance);
+				weight[index] = w;
+				if (w <= 0f)
+				{
+					delta[index] = float3.zero;
+					valid[index] = 0;
+					return;
+				}
+
 				valid[index] = 1;
 				var d = hit.SignedDistance;
 				var target = clamp(d, minGap, maxGap);
@@ -642,6 +654,15 @@ namespace MeshModifier.NDMFDeform.Core
 			if (dist <= innerRadius)
 				return 1f;
 			return smoothstep(0f, 1f, unlerp(outerRadius, innerRadius, dist));
+		}
+
+		/// <summary>探索距離の上限付近(75%〜100%)で 1 → 0 へ滑らかに減衰する係数</summary>
+		public static float SearchFalloff(float distance, float searchDistance)
+		{
+			var fadeStart = searchDistance * 0.75f;
+			if (searchDistance <= 0f || distance <= fadeStart)
+				return 1f;
+			return 1f - smoothstep(fadeStart, searchDistance, distance);
 		}
 
 		/// <summary>

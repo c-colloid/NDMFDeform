@@ -234,10 +234,16 @@ namespace MeshModifier.NDMFDeform.Tests
 		[Test]
 		public void Fit_RespectsSearchDistance()
 		{
-			var s = CreateSetup(new[] { new Vector3(0.8f, 0f, 0f) });
+			var s = CreateSetup(new[] { new Vector3(0.8f, 0f, 0f), new Vector3(0.78f, 0f, 0f) });
 			s.Fit.SearchDistance = 0.1f;
 			var v = Bake(s);
 			AssertNear(v[0], new Vector3(0.8f, 0f, 0f), "探索距離より遠い頂点は対象外");
+
+			// 上限の 75%〜100% では滑らかに効きが減る:
+			// 距離 0.28 / 上限 0.32(減衰開始 0.24)→ t = 0.5 → 1 − smoothstep = 0.5 → 目標 0.52 との中点
+			s.Fit.SearchDistance = 0.32f;
+			v = Bake(s);
+			AssertNear(v[1], new Vector3(0.65f, 0f, 0f), "探索距離の境界付近では部分的に効く", 1e-3f);
 		}
 
 		[Test]
@@ -452,6 +458,7 @@ namespace MeshModifier.NDMFDeform.Tests
 			shirtStack.AddDeformer(translateGo.AddComponent<TestTranslateXDeformer>());
 
 			s.Fit.Body = shirt;
+			s.Fit.SearchDistance = 2f;
 			var v = Bake(s);
 			AssertNear(v[0], new Vector3(1.12f, 0f, 0f), "参照先の変形後(x = 1.1)の形状へフィットする");
 
