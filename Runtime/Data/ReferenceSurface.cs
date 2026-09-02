@@ -557,8 +557,19 @@ namespace MeshModifier.NDMFDeform.Core
 		public static bool TryGet(Renderer renderer, bool applyBlendShapes, bool flipNormals, PartRequest parts,
 			out MeshSurfaceData data, out BodyPartProfiles profiles)
 		{
+			return TryGet(renderer, applyBlendShapes, flipNormals, parts, out data, out profiles, out _);
+		}
+
+		/// <summary>
+		/// surfaceHash に表面データの内容を表すハッシュ(メッシュ・ボーン・シェイプ重み・パーツ要求)を返す。
+		/// 参照側が表面に依存する派生データ(衣装のパーツ所属など)のキャッシュキーに使う。
+		/// </summary>
+		public static bool TryGet(Renderer renderer, bool applyBlendShapes, bool flipNormals, PartRequest parts,
+			out MeshSurfaceData data, out BodyPartProfiles profiles, out int surfaceHash)
+		{
 			data = default;
 			profiles = default;
+			surfaceHash = 0;
 			if (renderer == null)
 				return false;
 			if (parts != null && parts.Skeleton == null)
@@ -581,6 +592,7 @@ namespace MeshModifier.NDMFDeform.Core
 				data = entry.Surface.Data;
 				if (withParts)
 					profiles = entry.Profiles.Data;
+				surfaceHash = hash;
 				return true;
 			}
 
@@ -619,6 +631,7 @@ namespace MeshModifier.NDMFDeform.Core
 			// 参照側は bones を差し替えたら Evict すること)
 			entry.Bones = (renderer as SkinnedMeshRenderer)?.bones;
 			data = surface.Data;
+			surfaceHash = hash;
 			return true;
 		}
 

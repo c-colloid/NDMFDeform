@@ -7,8 +7,16 @@
         <ui:Button name="detect-body" text="体を自動検出" tooltip="同じアバター内の Body(SkinnedMeshRenderer)を探して設定します" />
         <ui:Button name="fit-sphere" text="球を衣装に合わせる" tooltip="二重球を衣装全体を覆う位置・大きさにします" />
     </ui:VisualElement>
+    <ui:Foldout name="bodyfit-parts" text="パーツ所属" value="true">
+        <ui:VisualElement class="ndmf-row ndmf-bodyfit-buttons">
+            <ui:Button name="analyze-parts" text="解析を更新" tooltip="衣装メッシュのグループ(UV 島 / 連結成分)ごとに所属パーツを計算します" />
+            <ui:Toggle name="parts-show-all" text="すべて表示" tooltip="要確認と上書き済みのグループだけでなく、全グループを表示します" />
+        </ui:VisualElement>
+        <ui:Label name="parts-summary" class="ndmf-guide-text" text="「解析を更新」でグループごとの所属パーツを確認できます。" />
+        <ui:VisualElement name="parts-list" />
+    </ui:Foldout>
     <ui:Foldout name="bodyfit-guide" text="操作ガイド" value="false" class="ndmf-guide">
         <ui:Label class="ndmf-guide-text"
-                  text="Body に沿わせたい体のレンダラーを指定します(衣装と同じアバター上のもの)。&#10;シーンの二重球が適用範囲です: 実線の内側は 100%、点線まで滑らかに減衰します。&#10;球を衣装全体に広げれば衣装全体を、狭めれば胸や腰など部分的にフィットさせられます。&#10;&#10;隙間(Gap)で体との距離を決めます:&#10;・ぴったり … Min Gap = Max Gap(例 0.003〜0.005 m)&#10;・少し余裕 … Min Gap 0.005 / Max Gap 0.02 など(帯の中は動かしません)&#10;・ブカッと … Pull In を切る(めり込みだけを押し出し、ドレープは維持)&#10;Factor を下げると「目標までの途中」で止まり、元の形を残せます。&#10;&#10;Smooth Iterations は脇・股などで布が折れるのを抑えます。&#10;めり込みが残る場合は Enforce Min Gap を有効にしてください。&#10;衣装のブレンドシェイプは既定(Fixed Displacement)で形状が維持されます。&#10;体側のシェイプは Use Body Blend Shapes で現在の重みを反映します。&#10;&#10;体に DeformStack が付いている場合(重ね着)は、体側を先にベイクしてから&#10;その変形後の形へフィットします。ボーンウェイトは変更しません。&#10;範囲をさらに絞るには UV Island Mask / Vertex Color Mask を後段に重ねてください。" />
+                  text="Body に沿わせたい体のレンダラーを指定します(衣装と同じアバター上のもの)。&#10;シーンの二重球が適用範囲です: 実線の内側は 100%、点線まで滑らかに減衰します。&#10;球を衣装全体に広げれば衣装全体を、狭めれば胸や腰など部分的にフィットさせられます。&#10;&#10;隙間(Gap)で体との距離を決めます:&#10;・ぴったり … Min Gap = Max Gap(例 0.003〜0.005 m)&#10;・少し余裕 … Min Gap 0.005 / Max Gap 0.02 など(帯の中は動かしません)&#10;・ブカッと … Pull In を切る(めり込みだけを押し出し、ドレープは維持)&#10;Factor を下げると「目標までの途中」で止まり、元の形を残せます。&#10;&#10;Smooth Iterations は脇・股などで布が折れるのを抑えます。&#10;めり込みが残る場合は Enforce Min Gap を有効にしてください。&#10;衣装のブレンドシェイプは既定(Fixed Displacement)で形状が維持されます。&#10;体側のシェイプは Use Body Blend Shapes で現在の重みを反映します。&#10;&#10;体に DeformStack が付いている場合(重ね着)は、体側を先にベイクしてから&#10;その変形後の形へフィットします。ボーンウェイトは変更しません。&#10;範囲をさらに絞るには UV Island Mask / Vertex Color Mask を後段に重ねてください。&#10;&#10;パーツ所属: Part Cylinder では衣装の各グループ(UV 島 / 連結成分)がどの体のパーツに属するかを、&#10;ボーンウェイトと体の形状の投票で決めます。⚠ の付いたグループは両者が食い違うか&#10;複数パーツにまたがっているので、必要なら右のドロップダウンでパーツを指定してください。" />
     </ui:Foldout>
 </ui:UXML>

@@ -645,7 +645,7 @@ namespace MeshModifier.NDMFDeform.Tests
 			fit.MaxGap = 0.02f;
 			fit.PullIn = true;
 			fit.Factor = 1f;
-			fit.DecorationGrouping = BodyFitDeformer.PartGrouping.None;
+			fit.Grouping = BodyFitDeformer.PartGrouping.None;
 			stack.AddDeformer(fit);
 
 			return new PartSetup { Body = body, CostumeGo = costumeGo, Stack = stack, Fit = fit, Source = source };
@@ -726,12 +726,154 @@ namespace MeshModifier.NDMFDeform.Tests
 				new Vector3(0.21f, 0.95f, 0f), new Vector3(0.21f, 0.97f, 0f), new Vector3(0.21f, 0.99f, 0f),
 			}, new[] { 1, 1, 0 });
 			s.Source.triangles = new[] { 0, 1, 2 };
-			s.Fit.DecorationGrouping = BodyFitDeformer.PartGrouping.ConnectedComponents;
+			s.Fit.Grouping = BodyFitDeformer.PartGrouping.ConnectedComponents;
 			s.Fit.DecorationMaxSize = 0.25f;
 
 			var v = BakePart(s);
 			for (var i = 0; i < 3; i++)
 				Assert.That(v[i].x, Is.EqualTo(0.27f).Within(3e-3f), $"vertex {i} は腕の軸基準で動く");
+
+			// 判定: ウェイトは腕(信頼度 1)、形状は胴 → 腕に揃うが要確認
+			Assert.That(s.Fit.PartReports, Has.Count.EqualTo(1));
+			var report = s.Fit.PartReports[0];
+			Assert.That(report.Decision, Is.EqualTo(PartDecision.Unified));
+			Assert.That(report.Part, Is.EqualTo(BodyPart.LeftUpperArm));
+			Assert.That(report.GeometryPart, Is.EqualTo(BodyPart.Torso));
+			Assert.That(report.NeedsReview, Is.True);
+		}
+
+		[Test]
+		public void PartLabel_GeometrySourceIgnoresWrongBoneWeights()
+		{
+			// ウェイトは逆(袖 → 胴、胴 → 腕)だが、Source = Geometry なら体の形状で所属を決める
+			var s = CreatePartSetup(new[]
+			{
+				new Vector3(0.47f, 0.95f, 0f), new Vector3(-0.25f, 0.7f, 0f),
+			}, new[] { 0, 1 });
+			s.Fit.Source = BodyFitDeformer.PartSource.Geometry;
+
+			var v = BakePart(s);
+			AssertNear(v[0], new Vector3(0.43f, 0.95f, 0f), "腕の近くの頂点は腕の軸基準(r 0.12 → 0.08)", 2e-3f);
+			AssertNear(v[1], new Vector3(-0.22f, 0.7f, 0f), "胴の近くの頂点は胴の軸基準(r 0.25 → 0.22)", 2e-3f);
+		}
+
+		[Test]
+		public void PartLabel_LowConfidenceBonesYieldToGeometryAndFlagReview()
+		{
+			// 衣装だけの浮いたボーン(名前も関節一致も無し → 最寄り区間 = 胴、信頼度 0.25)にウェイトを持つ
+			// 袖の 3 頂点。形状は腕なので腕に揃い、食い違いは要確認として報告される
+			var s = CreatePartSetup(new[]
+			{
+				new Vector3(0.47f, 0.95f, 0f), new Vector3(0.47f, 0.97f, 0f), new Vector3(0.47f, 0.99f, 0f),
+			}, new[] { 0, 0, 0 });
+			var floating = new GameObject("Floating").transform;
+			floating.SetParent(_root.transform, false);
+			floating.position = new Vector3(0.3f, 0.2f, 0f);
+			var costume = s.CostumeGo.GetComponent<SkinnedMeshRenderer>();
+			costume.bones = new[] { floating, costume.bones[1] };
+			s.Source.bindposes = new[] { floating.worldToLocalMatrix, s.Source.bindposes[1] };
+			s.Source.triangles = new[] { 0, 1, 2 };
+			s.Fit.Grouping = BodyFitDeformer.PartGrouping.ConnectedComponents;
+
+			var v = BakePart(s);
+			for (var i = 0; i < 3; i++)
+				Assert.That(v[i].x, Is.EqualTo(0.43f).Within(3e-3f), $"vertex {i} は腕の軸基準で動く");
+
+			Assert.That(s.Fit.PartReports, Has.Count.EqualTo(1));
+			var r = s.Fit.PartReports[0];
+			Assert.That(r.Part, Is.EqualTo(BodyPart.LeftUpperArm));
+			Assert.That(r.BonePart, Is.EqualTo(BodyPart.Torso));
+			Assert.That(r.BoneMapConfidence, Is.EqualTo(HumanoidSkeleton.ConfidenceSegment).Within(1e-5f));
+			Assert.That(r.GeometryPart, Is.EqualTo(BodyPart.LeftUpperArm));
+			Assert.That(r.NeedsReview, Is.True);
+		}
+
+		[Test]
+		public void PartLabel_OverrideForcesGroupPart()
+		{
+			// 紐(ウェイトは腕、位置は胴のすぐ外)を胴に上書きすると胴の軸基準で動く
+			var s = CreatePartSetup(new[]
+			{
+				new Vector3(0.21f, 0.95f, 0f), new Vector3(0.21f, 0.97f, 0f), new Vector3(0.21f, 0.99f, 0f),
+			}, new[] { 1, 1, 1 });
+			s.Source.triangles = new[] { 0, 1, 2 };
+			s.Fit.Grouping = BodyFitDeformer.PartGrouping.ConnectedComponents;
+
+			var v = BakePart(s);
+			Assert.That(v[0].x, Is.EqualTo(0.27f).Within(3e-3f), "上書き前は腕");
+			var report = s.Fit.PartReports[0];
+			Assert.That(report.NeedsReview, Is.True, "ウェイト(腕)と形状(胴)が食い違う");
+
+			s.Fit.SetPartOverride(report, BodyPart.Torso);
+			Assert.That(s.Fit.GetPartOverride(report), Is.EqualTo(BodyPart.Torso));
+			v = BakePart(s);
+			for (var i = 0; i < 3; i++)
+				Assert.That(v[i].x, Is.EqualTo(0.22f).Within(3e-3f), $"vertex {i} は胴の半径 + 隙間へ");
+			Assert.That(s.Fit.PartReports[0].Decision, Is.EqualTo(PartDecision.Override));
+			Assert.That(s.Fit.PartReports[0].NeedsReview, Is.False);
+
+			s.Fit.SetPartOverride(report, BodyPart.None);
+			Assert.That(s.Fit.PartOverrides, Is.Empty);
+			v = BakePart(s);
+			Assert.That(v[0].x, Is.EqualTo(0.27f).Within(3e-3f), "解除すると元の判定");
+		}
+
+		[Test]
+		public void PartLabel_LargeMixedGroupKeepsPerVertexParts()
+		{
+			// 袖(腕)と身頃(胴)がつながった 1 成分(対角 > 0.25)。比率 0.5 で頂点ごとの所属のまま
+			var s = CreatePartSetup(new[]
+			{
+				new Vector3(0.45f, 0.95f, 0f), new Vector3(0.45f, 0.97f, 0f),
+				new Vector3(0.25f, 0.7f, 0f), new Vector3(0.25f, 0.72f, 0f),
+			}, new[] { 1, 1, 0, 0 });
+			s.Source.triangles = new[] { 0, 1, 2, 1, 3, 2 };
+			s.Fit.Grouping = BodyFitDeformer.PartGrouping.ConnectedComponents;
+			s.Fit.SeamBlend = 0;
+
+			var v = BakePart(s);
+			AssertNear(v[0], new Vector3(0.43f, 0.95f, 0f), "袖は腕の軸基準", 2e-3f);
+			AssertNear(v[2], new Vector3(0.22f, 0.7f, 0f), "身頃は胴の軸基準", 2e-3f);
+			var r = s.Fit.PartReports[0];
+			Assert.That(r.Decision, Is.EqualTo(PartDecision.PerVertex));
+			Assert.That(r.NeedsReview, Is.True);
+		}
+
+		[Test]
+		public void PartLabel_UVIslandGroupingUsesIslandsAndSeedOverrides()
+		{
+			// 2 つの UV 島(袖 / 紐)。紐の島を胴に上書きする
+			var s = CreatePartSetup(new[]
+			{
+				new Vector3(0.45f, 0.95f, 0f), new Vector3(0.45f, 0.97f, 0f), new Vector3(0.47f, 0.96f, 0f),
+				new Vector3(0.21f, 0.95f, 0f), new Vector3(0.21f, 0.97f, 0f), new Vector3(0.21f, 0.99f, 0f),
+			}, new[] { 1, 1, 1, 1, 1, 1 });
+			s.Source.triangles = new[] { 0, 1, 2, 3, 4, 5 };
+			s.Source.uv = new[]
+			{
+				new Vector2(0.1f, 0.1f), new Vector2(0.2f, 0.1f), new Vector2(0.15f, 0.2f),
+				new Vector2(0.6f, 0.6f), new Vector2(0.7f, 0.6f), new Vector2(0.65f, 0.7f),
+			};
+			s.Fit.Grouping = BodyFitDeformer.PartGrouping.UVIslands;
+
+			var v = BakePart(s);
+			Assert.That(s.Fit.PartReports, Has.Count.EqualTo(2));
+			Assert.That(s.Fit.PartReports[0].IsIsland, Is.True);
+			Assert.That(v[3].x, Is.EqualTo(0.27f).Within(3e-3f), "紐の島は腕(ウェイト)");
+
+			PartGroupReport stringIsland = null;
+			foreach (var r in s.Fit.PartReports)
+			{
+				if (r.NeedsReview)
+					stringIsland = r;
+			}
+			Assert.That(stringIsland, Is.Not.Null, "紐の島はウェイト(腕)と形状(胴)が食い違う");
+			s.Fit.SetPartOverride(stringIsland, BodyPart.Torso);
+			Assert.That(s.Fit.PartOverrides[0].useIsland, Is.True);
+
+			v = BakePart(s);
+			Assert.That(v[3].x, Is.EqualTo(0.22f).Within(3e-3f), "上書き後は胴");
+			AssertNear(v[0], new Vector3(0.43f, 0.95f, 0f), "袖の島はそのまま腕", 2e-3f);
 		}
 
 		// ---- テスト用デフォーマ ----

@@ -135,12 +135,36 @@ namespace MeshModifier.NDMFDeform.Core
 		/// <summary>構築に使ったヒューマノイドボーン(Refresh で現在位置を読み直す)</summary>
 		private readonly Dictionary<HumanBodyBones, Transform> _bones = new Dictionary<HumanBodyBones, Transform>();
 
+		/// <summary>この骨格の元になった Animator(FromAnimator のとき。衣装側の Animator と区別する)</summary>
+		public Animator SourceAnimator { get; private set; }
+
+		/// <summary>ボーン対応付けの信頼度: ヒューマノイド / 祖先 / 名前 / 対応済みの親</summary>
+		public const float ConfidenceStructural = 1f;
+
+		/// <summary>ボーン対応付けの信頼度: 関節位置の一致</summary>
+		public const float ConfidenceJoint = 0.5f;
+
+		/// <summary>ボーン対応付けの信頼度: 最寄りの軸区間</summary>
+		public const float ConfidenceSegment = 0.25f;
+
 		public static HumanoidSkeleton FromAnimator(Animator animator)
 		{
 			if (animator == null || !animator.isHuman)
 				return null;
 
+			var bones = CollectHumanoidBones(animator);
+			var skeleton = FromBones(bones);
+			if (skeleton != null)
+				skeleton.SourceAnimator = animator;
+			return skeleton;
+		}
+
+		/// <summary>Animator のヒューマノイド対応(存在するボーンのみ)</summary>
+		public static Dictionary<HumanBodyBones, Transform> CollectHumanoidBones(Animator animator)
+		{
 			var bones = new Dictionary<HumanBodyBones, Transform>();
+			if (animator == null || !animator.isHuman)
+				return bones;
 			foreach (HumanBodyBones bone in Enum.GetValues(typeof(HumanBodyBones)))
 			{
 				if (bone == HumanBodyBones.LastBone)
@@ -149,7 +173,7 @@ namespace MeshModifier.NDMFDeform.Core
 				if (t != null)
 					bones[bone] = t;
 			}
-			return FromBones(bones);
+			return bones;
 		}
 
 		public static HumanoidSkeleton FromBones(IReadOnlyDictionary<HumanBodyBones, Transform> bones)
@@ -356,6 +380,32 @@ namespace MeshModifier.NDMFDeform.Core
 			return Axes[(int)part].Valid != 0;
 		}
 
+		/// <summary>
+		/// 軸の無いパーツを、軸のある近いパーツへ寄せる。
+		/// ヒューマノイドの任意ボーン(Shoulder / Neck / UpperChest など)は有無がアバターごとに違うため、
+		/// 衣装ボーンの名前やヒューマノイド対応がそれらを指しても、この骨格に軸が無ければ
+		/// Shoulder → UpperArm、Neck → Torso、Head → Neck → Torso に丸める。
+		/// </summary>
+		public BodyPart Canonical(BodyPart part)
+		{
+			if (part == BodyPart.None || HasAxis(part))
+				return part;
+			switch (part)
+			{
+				case BodyPart.LeftShoulder:
+					return HasAxis(BodyPart.LeftUpperArm) ? BodyPart.LeftUpperArm : part;
+				case BodyPart.RightShoulder:
+					return HasAxis(BodyPart.RightUpperArm) ? BodyPart.RightUpperArm : part;
+				case BodyPart.Neck:
+					return HasAxis(BodyPart.Torso) ? BodyPart.Torso : part;
+				case BodyPart.Head:
+					if (HasAxis(BodyPart.Neck)) return BodyPart.Neck;
+					return HasAxis(BodyPart.Torso) ? BodyPart.Torso : part;
+				default:
+					return part;
+			}
+		}
+
 		/// <summary>ボーン(とその祖先)がヒューマノイドボーンに対応していればそのパーツ</summary>
 		public BodyPart ResolveByAncestor(Transform bone)
 		{
@@ -406,52 +456,111 @@ namespace MeshModifier.NDMFDeform.Core
 			return best;
 		}
 
-		/// <summary>
-		/// レンダラーのボーン配列をパーツへ対応付ける。
-		/// 1. ヒューマノイドボーンの子孫(体・マージ済みの衣装)→ 祖先のパーツ
-		/// 2. 関節位置の一致(アバターに重ねた衣装アーマチュア)
-		/// 3. 衣装アーマチュア内で対応済みの祖先(スカート・リボンなど補助ボーン)
-		/// 4. 最寄りの軸区間
-		/// </summary>
 		public BodyPart[] MapBones(Transform[] bones, float jointTolerance)
+		{
+			return MapBones(bones, jointTolerance, null, null);
+		}
+
+		/// <summary>
+		/// レンダラーのボーン配列をパーツへ対応付ける。位置に頼る段は最後に回す:
+		/// 1. ヒューマノイドボーンとその子孫(この骨格の Animator、または衣装自身のヒューマノイド Animator。
+		///    体、マージ済みの衣装、胸・尻尾などの補助ボーン)
+		/// 2. ボーン名(UpperArm_L / 左腕 など。<see cref="BoneNameMatcher"/>)
+		/// 3. 衣装アーマチュア内で対応済みの祖先(スカート・リボンなどの補助ボーン)。親の信頼度を引き継ぐ
+		/// 4. 関節位置の一致(信頼度 0.5。体と衣装の骨格の比率が違うと外れる)
+		/// 5. 最寄りの軸区間(信頼度 0.25)
+		/// 任意ボーン(Shoulder / Neck)はこの骨格に軸が無ければ近いパーツへ丸める(<see cref="Canonical"/>)。
+		/// confidence(null 可)にボーンごとの信頼度を書く。
+		/// </summary>
+		public BodyPart[] MapBones(Transform[] bones, float jointTolerance, Animator costumeAnimator, float[] confidence)
 		{
 			var count = bones?.Length ?? 0;
 			var result = new BodyPart[count];
 			if (count == 0)
 				return result;
 
-			var mapped = new Dictionary<Transform, BodyPart>();
+			// 衣装自身のヒューマノイド対応(この骨格の Animator と別のもののみ)
+			Dictionary<Transform, BodyPart> costumeParts = null;
+			if (costumeAnimator != null && costumeAnimator.isHuman && costumeAnimator != SourceAnimator)
+			{
+				costumeParts = new Dictionary<Transform, BodyPart>();
+				foreach (var pair in CollectHumanoidBones(costumeAnimator))
+				{
+					if (!costumeParts.ContainsKey(pair.Value))
+						costumeParts[pair.Value] = PartOf(pair.Key);
+				}
+			}
+
+			var mapped = new Dictionary<Transform, (BodyPart part, float confidence)>();
+			var remaining = new List<int>();
 			for (var i = 0; i < count; i++)
 			{
 				var bone = bones[i];
 				if (bone == null)
 					continue;
-				var part = ResolveByAncestor(bone);
-				if (part == BodyPart.None)
-					part = ResolveByJoint(bone.position, jointTolerance);
-				if (part != BodyPart.None)
-				{
-					result[i] = part;
-					mapped[bone] = part;
-				}
-			}
-
-			for (var i = 0; i < count; i++)
-			{
-				var bone = bones[i];
-				if (bone == null || result[i] != BodyPart.None)
-					continue;
 				var part = BodyPart.None;
-				for (var t = bone.parent; t != null; t = t.parent)
+				for (var t = bone; t != null; t = t.parent)
 				{
-					if (mapped.TryGetValue(t, out part))
+					if (costumeParts != null && costumeParts.TryGetValue(t, out part))
+						break;
+					if (BoneParts.TryGetValue(t, out part))
 						break;
 				}
 				if (part == BodyPart.None)
-					part = ResolveBySegment(bone.position);
+					part = BoneNameMatcher.Match(bone.name);
+				part = Canonical(part);
+				if (part == BodyPart.None)
+				{
+					remaining.Add(i);
+					continue;
+				}
 				result[i] = part;
+				mapped[bone] = (part, ConfidenceStructural);
+				if (confidence != null)
+					confidence[i] = ConfidenceStructural;
+			}
+
+			// 残りは階層の浅い順に(親の結果を子が引き継げるように)
+			remaining.Sort((a, b) => Depth(bones[a]).CompareTo(Depth(bones[b])));
+			foreach (var i in remaining)
+			{
+				var bone = bones[i];
+				var part = BodyPart.None;
+				var conf = 0f;
+				for (var t = bone.parent; t != null; t = t.parent)
+				{
+					if (mapped.TryGetValue(t, out var parentEntry))
+					{
+						part = parentEntry.part;
+						conf = parentEntry.confidence;
+						break;
+					}
+				}
+				if (part == BodyPart.None)
+				{
+					part = Canonical(ResolveByJoint(bone.position, jointTolerance));
+					conf = ConfidenceJoint;
+				}
+				if (part == BodyPart.None)
+				{
+					part = ResolveBySegment(bone.position);
+					conf = ConfidenceSegment;
+				}
+				result[i] = part;
+				if (part != BodyPart.None)
+					mapped[bone] = (part, conf);
+				if (confidence != null)
+					confidence[i] = part != BodyPart.None ? conf : 0f;
 			}
 			return result;
+		}
+
+		private static int Depth(Transform t)
+		{
+			var depth = 0;
+			for (var p = t != null ? t.parent : null; p != null; p = p.parent)
+				depth++;
+			return depth;
 		}
 	}
 
@@ -463,8 +572,19 @@ namespace MeshModifier.NDMFDeform.Core
 		/// </summary>
 		public static PartWeights[] FromBoneWeights(Mesh mesh, BodyPart[] boneParts)
 		{
+			return FromBoneWeights(mesh, boneParts, null, out _);
+		}
+
+		/// <summary>
+		/// ボーンウェイトからパーツ重みを求める。boneConfidence(ボーンごとの対応付けの信頼度、null 可)を
+		/// ウェイトで平均した頂点ごとの信頼度も返す(対応の無いボーンのウェイトは信頼度 0)。
+		/// </summary>
+		public static PartWeights[] FromBoneWeights(Mesh mesh, BodyPart[] boneParts, float[] boneConfidence,
+			out float[] vertexConfidence)
+		{
 			var n = mesh.vertexCount;
 			var result = new PartWeights[n];
+			vertexConfidence = new float[n];
 			var weights = mesh.GetAllBoneWeights();
 			var perVertex = mesh.GetBonesPerVertex();
 			if (boneParts == null || boneParts.Length == 0 || weights.Length == 0 || perVertex.Length != n)
@@ -476,14 +596,23 @@ namespace MeshModifier.NDMFDeform.Core
 			{
 				Array.Clear(accum, 0, accum.Length);
 				var count = perVertex[v];
+				var weightSum = 0f;
+				var confidenceSum = 0f;
 				for (var k = 0; k < count; k++)
 				{
 					var w = weights[offset + k];
-					var part = w.boneIndex >= 0 && w.boneIndex < boneParts.Length ? boneParts[w.boneIndex] : BodyPart.None;
+					var valid = w.boneIndex >= 0 && w.boneIndex < boneParts.Length;
+					var part = valid ? boneParts[w.boneIndex] : BodyPart.None;
 					accum[(int)part] += w.weight;
+					weightSum += w.weight;
+					if (part != BodyPart.None)
+						confidenceSum += w.weight * (boneConfidence != null && w.boneIndex < boneConfidence.Length
+							? boneConfidence[w.boneIndex]
+							: 1f);
 				}
 				offset += count;
 				result[v] = TopWeights(accum);
+				vertexConfidence[v] = weightSum > 0f ? confidenceSum / weightSum : 0f;
 			}
 			return result;
 		}

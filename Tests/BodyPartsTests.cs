@@ -255,6 +255,48 @@ namespace MeshModifier.NDMFDeform.Tests
 		}
 
 		[Test]
+		public void MapBones_UsesNamesAndParentsBeforePositions()
+		{
+			var (skeleton, _) = CreateSkeleton();
+			var costumeRoot = Bone("CostumeArmature", Vector3.zero);
+			// 名前で解決: 位置は脚の近くだが名前が上腕
+			var upperArm = Bone("UpperArm_L", new Vector3(0.1f, 0.6f, 0f), costumeRoot);
+			// 名前の無い子: 親(名前で解決済み)を引き継ぐ
+			var child = Bone("Bone.001", new Vector3(0.1f, 0.4f, 0f), upperArm);
+			// 任意ボーン: この骨格に Shoulder の軸が無いので UpperArm へ丸める
+			var shoulder = Bone("Shoulder_L", new Vector3(0.05f, 1.3f, 0f), costumeRoot);
+			// 何も手掛かりが無い: 最寄り区間(信頼度 0.25)
+			var floating = Bone("Floating", new Vector3(0.1f, 0.3f, 0f), costumeRoot);
+			// 関節位置の一致(信頼度 0.5)
+			var joint = Bone("J_01", new Vector3(0.45f, 1.35f, 0f), costumeRoot);
+
+			var bones = new[] { upperArm, child, shoulder, floating, joint };
+			var confidence = new float[bones.Length];
+			var mapped = skeleton.MapBones(bones, 0.03f, null, confidence);
+
+			Assert.That(mapped[0], Is.EqualTo(BodyPart.LeftUpperArm));
+			Assert.That(confidence[0], Is.EqualTo(HumanoidSkeleton.ConfidenceStructural));
+			Assert.That(mapped[1], Is.EqualTo(BodyPart.LeftUpperArm), "名前の無い子は親を引き継ぐ");
+			Assert.That(confidence[1], Is.EqualTo(HumanoidSkeleton.ConfidenceStructural));
+			Assert.That(mapped[2], Is.EqualTo(BodyPart.LeftUpperArm), "Shoulder の軸が無ければ UpperArm");
+			Assert.That(mapped[3], Is.EqualTo(BodyPart.LeftLowerLeg));
+			Assert.That(confidence[3], Is.EqualTo(HumanoidSkeleton.ConfidenceSegment));
+			Assert.That(mapped[4], Is.EqualTo(BodyPart.LeftLowerArm), "関節位置の一致");
+			Assert.That(confidence[4], Is.EqualTo(HumanoidSkeleton.ConfidenceJoint));
+		}
+
+		[Test]
+		public void Canonical_FoldsOptionalPartsWithoutAxis()
+		{
+			var (skeleton, _) = CreateSkeleton();
+			Assert.That(skeleton.Canonical(BodyPart.LeftShoulder), Is.EqualTo(BodyPart.LeftUpperArm));
+			Assert.That(skeleton.Canonical(BodyPart.Neck), Is.EqualTo(BodyPart.Neck), "Neck → Head の軸があるのでそのまま");
+			Assert.That(skeleton.Canonical(BodyPart.Torso), Is.EqualTo(BodyPart.Torso));
+			Assert.That(skeleton.Canonical(BodyPart.RightShoulder), Is.EqualTo(BodyPart.RightShoulder), "右腕が無ければ丸められない");
+			Assert.That(skeleton.Canonical(BodyPart.None), Is.EqualTo(BodyPart.None));
+		}
+
+		[Test]
 		public void AssignGroupsBySegment_UsesNearestAxis()
 		{
 			var (skeleton, _) = CreateSkeleton();

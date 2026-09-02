@@ -4,6 +4,7 @@ using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
+using UnityEngine.Serialization;
 using static Unity.Mathematics.math;
 using float3 = Unity.Mathematics.float3;
 using float4 = Unity.Mathematics.float4;
@@ -71,13 +72,26 @@ namespace MeshModifier.NDMFDeform.Core
 
 		public enum PartGrouping
 		{
+			/// <summary>グループ化しない(頂点ごとの所属)</summary>
 			None = 0,
 
-			/// <summary>3D の連結成分(位置で溶接)ごとに所属パーツを揃える</summary>
+			/// <summary>3D の連結成分(位置で溶接)を単位に投票して所属パーツを揃える</summary>
 			ConnectedComponents = 1,
 
-			/// <summary>UV 島ごとに所属パーツを揃える</summary>
+			/// <summary>UV 島を単位に投票して所属パーツを揃える(推奨。UV が無ければ連結成分)</summary>
 			UVIslands = 2,
+		}
+
+		public enum PartSource
+		{
+			/// <summary>ボーンウェイトと体の形状を、ボーン対応付けの信頼度で混ぜて投票する(推奨)</summary>
+			Auto = 0,
+
+			/// <summary>ボーンウェイトのみ(ウェイトの無い衣装は所属なし)</summary>
+			BoneWeights = 1,
+
+			/// <summary>体の形状(パーツ表面からの隙間)のみ。ウェイトを無視する</summary>
+			Geometry = 2,
 		}
 
 		[SerializeField, Tooltip("沿わせる体のレンダラー(SkinnedMeshRenderer / MeshRenderer)。衣装と同じアバター上のものを指定する")]
@@ -128,11 +142,23 @@ namespace MeshModifier.NDMFDeform.Core
 		[SerializeField, Tooltip("フィット方式。PartCylinder はヒューマノイド骨格のパーツ軸から放射状に動かす(推奨)。骨格が無ければ NearestSurface に自動で切り替わる")]
 		private FitMode fitMode = FitMode.PartCylinder;
 
-		[SerializeField, Tooltip("小さな装飾(紐・リボン)の所属パーツを揃える単位。連結成分 / UV 島ごとに多数決で 1 パーツにする")]
-		private PartGrouping decorationGrouping = PartGrouping.ConnectedComponents;
+		[SerializeField, Tooltip("パーツ所属の根拠。Auto はボーンウェイトと体の形状を、ボーン対応付けの信頼度で混ぜて投票する")]
+		private PartSource partSource = PartSource.Auto;
 
-		[SerializeField, Min(0f), Tooltip("所属パーツを揃える装飾の大きさ上限(バウンズ対角、m)。これより大きい成分(服本体)は揃えない")]
+		[SerializeField, FormerlySerializedAs("decorationGrouping"),
+		 Tooltip("所属を揃える単位。UV 島(推奨)/ 3D の連結成分 / なし(頂点ごと)")]
+		private PartGrouping partGrouping = PartGrouping.UVIslands;
+
+		[SerializeField, Min(0f), Tooltip("この大きさ(バウンズ対角、m)以下のグループ(紐・リボンなどの装飾)は投票の比率に関わらず 1 パーツに揃える")]
 		private float decorationMaxSize = 0.25f;
+
+		[SerializeField, Range(0.5f, 1f), Tooltip("大きなグループ(袖・身頃)を 1 パーツに揃えるのに必要な投票の比率。届かないグループ(ボディスーツなど)は頂点ごとの所属になる")]
+		private float islandConfidence = 0.7f;
+
+		[SerializeField, Range(0, 10), Tooltip("グループ境界(縫い目)で所属を混ぜる回数。0 でも同じ位置の頂点は揃える")]
+		private int seamBlend = 3;
+
+		[SerializeField, HideInInspector] private List<PartOverride> partOverrides = new List<PartOverride>();
 
 		[SerializeField, Tooltip("NearestSurface でも、自分のパーツの体表面だけを探す(腕の装飾が胴へ吸われるのを防ぐ)")]
 		private bool partFilter = true;
@@ -158,8 +184,17 @@ namespace MeshModifier.NDMFDeform.Core
 		public BlendShapeFitMode BlendShapes { get => blendShapes; set => blendShapes = value; }
 		public bool FlipBodyNormals { get => flipBodyNormals; set => flipBodyNormals = value; }
 		public FitMode Mode { get => fitMode; set => fitMode = value; }
-		public PartGrouping DecorationGrouping { get => decorationGrouping; set => decorationGrouping = value; }
+		public PartSource Source { get => partSource; set => partSource = value; }
+		public PartGrouping Grouping { get => partGrouping; set => partGrouping = value; }
 		public float DecorationMaxSize { get => decorationMaxSize; set => decorationMaxSize = Mathf.Max(0f, value); }
+		public float IslandConfidence { get => islandConfidence; set => islandConfidence = Mathf.Clamp(value, 0.5f, 1f); }
+		public int SeamBlend { get => seamBlend; set => seamBlend = Mathf.Clamp(value, 0, 10); }
+
+		/// <summary>グループ(UV 島 / 連結成分)ごとのパーツ所属の手動上書き</summary>
+		public List<PartOverride> PartOverrides => partOverrides;
+
+		/// <summary>直近のパーツ所属計算のグループごとの判定(インスペクタ用。グループ化なしでは空)</summary>
+		public IReadOnlyList<PartGroupReport> PartReports => _partReports;
 		public bool PartFilter { get => partFilter; set => partFilter = value; }
 		public float JointTolerance { get => jointTolerance; set => jointTolerance = Mathf.Max(0f, value); }
 
@@ -199,6 +234,8 @@ namespace MeshModifier.NDMFDeform.Core
 		[System.NonSerialized] private FitMode _effectiveMode = FitMode.NearestSurface;
 		[System.NonSerialized] private NativeArray<PartWeights> _costumeParts;
 		[System.NonSerialized] private int _costumePartsKey;
+		[System.NonSerialized] private int _surfaceHash;
+		[System.NonSerialized] private readonly List<PartGroupReport> _partReports = new List<PartGroupReport>();
 		[System.NonSerialized] private MeshAdjacency _adjacencyManaged;
 		[System.NonSerialized] private HumanoidSkeleton _cachedSkeleton;
 		[System.NonSerialized] private Animator _cachedAnimator;
@@ -403,7 +440,7 @@ namespace MeshModifier.NDMFDeform.Core
 				? new PartRequest { Skeleton = skeleton, JointTolerance = jointTolerance }
 				: null;
 			_surfaceReady = ReferenceSurfaceCache.TryGet(body, useBodyBlendShapes, flipBodyNormals, request,
-				out _surface, out _profiles);
+				out _surface, out _profiles, out _surfaceHash);
 			if (!_surfaceReady)
 				return;
 			_partsReady = request != null && _profiles.IsCreated;
@@ -411,7 +448,8 @@ namespace MeshModifier.NDMFDeform.Core
 				? FitMode.PartCylinder
 				: FitMode.NearestSurface;
 
-			EnsureAdjacency(source, _partsReady && decorationGrouping == PartGrouping.ConnectedComponents);
+			// パーツ所属(連結成分・縫い目の混合)には隣接が要る
+			EnsureAdjacency(source, _partsReady);
 			EnsureCostumeParts(source, _partsReady ? skeleton : null);
 
 			if (!_baseDisplacement.IsCreated || _baseDisplacement.Length != _vertexCount)
@@ -487,7 +525,7 @@ namespace MeshModifier.NDMFDeform.Core
 
 		/// <summary>
 		/// 衣装頂点のパーツ所属を用意する。骨格が無ければ全頂点 None(マスク 0 = 絞り込みなし)。
-		/// ソースメッシュ・骨格・設定が変わらない限り再利用する。
+		/// ソースメッシュ・骨格・体の表面・設定・上書きが変わらない限り再利用する。
 		/// </summary>
 		private void EnsureCostumeParts(Mesh source, HumanoidSkeleton skeleton)
 		{
@@ -499,10 +537,15 @@ namespace MeshModifier.NDMFDeform.Core
 				key = key * 31 + source.GetInstanceID();
 				key = key * 31 + n;
 				key = key * 31 + (skeleton != null ? skeleton.StateHash : 0);
-				key = key * 31 + (int)decorationGrouping;
+				key = key * 31 + (skeleton != null ? _surfaceHash : 0);
+				key = key * 31 + (int)partSource;
+				key = key * 31 + (int)partGrouping;
 				key = key * 31 + decorationMaxSize.GetHashCode();
+				key = key * 31 + islandConfidence.GetHashCode();
+				key = key * 31 + seamBlend;
 				key = key * 31 + jointTolerance.GetHashCode();
-				var own = GetOwnRenderer() as SkinnedMeshRenderer;
+				key = key * 31 + OverridesHash();
+				var own = GetOwnRenderer();
 				key = key * 31 + (own != null ? own.GetInstanceID() : 0);
 			}
 			if (_costumeParts.IsCreated && _costumeParts.Length == n && _costumePartsKey == key)
@@ -510,50 +553,222 @@ namespace MeshModifier.NDMFDeform.Core
 
 			if (_costumeParts.IsCreated)
 				_costumeParts.Dispose();
-			var weights = skeleton != null ? BuildCostumePartWeights(source, skeleton) : new PartWeights[n];
+			_partReports.Clear();
+			var weights = skeleton != null ? BuildCostumePartWeights(source, skeleton, _partReports) : new PartWeights[n];
 			_costumeParts = new NativeArray<PartWeights>(weights, Allocator.Persistent);
 			_costumePartsKey = key;
 		}
 
-		private PartWeights[] BuildCostumePartWeights(Mesh source, HumanoidSkeleton skeleton)
+		private int OverridesHash()
+		{
+			unchecked
+			{
+				var h = partOverrides.Count;
+				foreach (var o in partOverrides)
+				{
+					h = h * 31 + (o.useIsland ? 1 : 0);
+					h = h * 31 + o.island.uv.GetHashCode();
+					h = h * 31 + o.island.subMesh;
+					h = h * 31 + o.island.index;
+					h = h * 31 + o.point.GetHashCode();
+					h = h * 31 + (int)o.part;
+				}
+				return h;
+			}
+		}
+
+		/// <summary>
+		/// 衣装頂点のパーツ所属を決める(<see cref="PartLabeler"/>):
+		/// 証拠 = ボーンウェイト(対応付けの信頼度付き)+ 体の形状(パーツ表面からの隙間)、
+		/// 単位 = UV 島 / 連結成分、投票で揃え、手動上書きを適用し、縫い目で所属を混ぜる。
+		/// </summary>
+		private PartWeights[] BuildCostumePartWeights(Mesh source, HumanoidSkeleton skeleton, List<PartGroupReport> reports)
 		{
 			var n = source.vertexCount;
 			var own = GetOwnRenderer();
 			var triangles = ReferenceSurfaceUtility.CollectTriangles(source);
-			PartWeights[] weights;
-			if (own is SkinnedMeshRenderer smr && source.GetBonesPerVertex().Length == n)
+			var local = source.vertices;
+			var adjacency = _adjacencyManaged != null && _adjacencyManaged.VertexCount == n
+				? _adjacencyManaged
+				: MeshAdjacency.Build(local, triangles);
+
+			// 証拠 1: ボーンウェイト(衣装ボーン → パーツの対応付けと、その信頼度)
+			PartWeights[] boneWeights = null;
+			float[] boneConfidence = null;
+			if (partSource != PartSource.Geometry && own is SkinnedMeshRenderer smr && smr.bones != null &&
+			    smr.bones.Length > 0 && source.GetBonesPerVertex().Length == n)
 			{
-				var boneParts = skeleton.MapBones(smr.bones, jointTolerance);
-				weights = PartAssignment.FromBoneWeights(source, boneParts);
-			}
-			else
-			{
-				// ウェイトの無い衣装: 連結成分の重心に最も近い軸区間へ
-				weights = new PartWeights[n];
-				var world = source.vertices;
-				if (own != null)
-					ReferenceSurfaceUtility.SkinToWorld(own.transform, source, world);
-				var adjacency = _adjacencyManaged ?? MeshAdjacency.Build(source.vertices, triangles);
-				var groups = PartAssignment.ConnectedComponents(adjacency, triangles, out var groupCount);
-				PartAssignment.AssignGroupsBySegment(weights, world, groups, groupCount, skeleton);
+				var mapConfidence = new float[smr.bones.Length];
+				var boneParts = skeleton.MapBones(smr.bones, jointTolerance, own.GetComponentInParent<Animator>(), mapConfidence);
+				boneWeights = PartAssignment.FromBoneWeights(source, boneParts, mapConfidence, out boneConfidence);
 			}
 
-			if (decorationGrouping != PartGrouping.None)
+			// 証拠 2: 体の形状(ワールド空間の頂点と体のプロファイル)
+			PartWeights[] geometryWeights = null;
+			if (partSource != PartSource.BoneWeights && _profiles.IsCreated)
 			{
-				int[] groups;
-				int groupCount;
-				if (decorationGrouping == PartGrouping.UVIslands)
+				var world = (Vector3[])local.Clone();
+				if (own != null)
+					ReferenceSurfaceUtility.SkinToWorld(own.transform, source, world);
+				geometryWeights = PartLabeler.EvaluateGeometry(world, in _profiles);
+			}
+
+			// 単位: UV 島(無ければ連結成分)/ 連結成分 / なし
+			int[] groups = null;
+			var groupCount = 0;
+			IslandSeed[] seeds = null;
+			UVIslandAnalysis analysis = null;
+			if (partGrouping == PartGrouping.UVIslands)
+			{
+				analysis = UVIslandAnalysis.Analyze(source);
+				if (analysis.Islands.Count > 0)
 				{
-					groups = PartAssignment.UVIslandGroups(source, out groupCount);
+					groupCount = analysis.Islands.Count;
+					groups = new int[n];
+					for (var i = 0; i < n; i++)
+						groups[i] = -1;
+					seeds = new IslandSeed[groupCount];
+					var overlapping = new List<UVIslandAnalysis.Island>();
+					foreach (var island in analysis.Islands)
+					{
+						foreach (var v in island.Vertices)
+						{
+							if (v >= 0 && v < n)
+								groups[v] = island.Id;
+						}
+						overlapping.Clear();
+						analysis.FindIslandsAt(island.Seed, island.SubMesh, overlapping);
+						var ordinal = Mathf.Max(0, overlapping.IndexOf(island));
+						seeds[island.Id] = new IslandSeed(island.Seed, island.SubMesh, ordinal);
+					}
 				}
 				else
 				{
-					var adjacency = _adjacencyManaged ?? MeshAdjacency.Build(source.vertices, triangles);
-					groups = PartAssignment.ConnectedComponents(adjacency, triangles, out groupCount);
+					analysis = null;
 				}
-				PartAssignment.ConsolidateGroups(weights, source.vertices, groups, groupCount, decorationMaxSize);
 			}
+			if (groups == null && partGrouping != PartGrouping.None)
+				groups = PartAssignment.ConnectedComponents(adjacency, triangles, out groupCount);
+
+			// 手動上書き → グループ番号
+			Dictionary<int, BodyPart> overrides = null;
+			if (groups != null && partOverrides.Count > 0)
+			{
+				overrides = new Dictionary<int, BodyPart>();
+				foreach (var o in partOverrides)
+				{
+					var g = ResolveOverrideGroup(o, analysis, local, groups, groupCount);
+					if (g >= 0 && o.part != BodyPart.None)
+						overrides[g] = o.part;
+				}
+			}
+
+			var weights = PartLabeler.Label(new PartLabelInput
+			{
+				Vertices = local,
+				BoneWeights = boneWeights,
+				BoneConfidence = boneConfidence,
+				GeometryWeights = geometryWeights,
+				GroupOfVertex = groups,
+				GroupCount = groupCount,
+				GroupSeeds = seeds,
+				DecorationMaxSize = decorationMaxSize,
+				ConfidenceThreshold = islandConfidence,
+				Overrides = overrides,
+			}, reports);
+
+			// 縫い目: 同位置の頂点を揃え、境界で所属を混ぜる
+			PartLabeler.BlendSeams(weights, adjacency, seamBlend);
 			return weights;
+		}
+
+		/// <summary>上書きの参照(島シード / 代表点)を現在のグループ番号へ解決する。見つからなければ -1</summary>
+		private static int ResolveOverrideGroup(in PartOverride o, UVIslandAnalysis analysis, Vector3[] vertices,
+			int[] groups, int groupCount)
+		{
+			if (o.useIsland && analysis != null)
+			{
+				var island = analysis.ResolveSeed(o.island);
+				return island != null && island.Id < groupCount ? island.Id : -1;
+			}
+			var best = -1;
+			var bestDist = float.MaxValue;
+			for (var v = 0; v < vertices.Length; v++)
+			{
+				var d = (vertices[v] - o.point).sqrMagnitude;
+				if (d < bestDist)
+				{
+					bestDist = d;
+					best = v;
+				}
+			}
+			if (best < 0)
+				return -1;
+			var g = groups[best];
+			return g >= 0 && g < groupCount ? g : -1;
+		}
+
+		/// <summary>
+		/// インスペクタ用: 衣装メッシュに対してパーツ所属を計算し、<see cref="PartReports"/> を更新する。
+		/// 体・骨格が使えなければ false。
+		/// </summary>
+		public bool AnalyzeParts()
+		{
+			var own = GetOwnRenderer();
+			Mesh mesh = null;
+			if (own is SkinnedMeshRenderer smr)
+				mesh = smr.sharedMesh;
+			else if (own != null && own.TryGetComponent<MeshFilter>(out var filter))
+				mesh = filter.sharedMesh;
+			if (mesh == null)
+				return false;
+			PrepareBake(mesh);
+			return _partsReady;
+		}
+
+		/// <summary>グループの現在の上書き(無ければ None)</summary>
+		public BodyPart GetPartOverride(PartGroupReport report)
+		{
+			foreach (var o in partOverrides)
+			{
+				if (OverrideMatches(o, report))
+					return o.part;
+			}
+			return BodyPart.None;
+		}
+
+		/// <summary>
+		/// グループの上書きを設定する(part = None で解除)。
+		/// UV 島グループは島シードで、連結成分グループは代表点で記録する(頂点順が変わっても追従する)。
+		/// </summary>
+		public void SetPartOverride(PartGroupReport report, BodyPart part)
+		{
+			if (report == null)
+				return;
+			for (var i = partOverrides.Count - 1; i >= 0; i--)
+			{
+				if (OverrideMatches(partOverrides[i], report))
+					partOverrides.RemoveAt(i);
+			}
+			if (part != BodyPart.None)
+			{
+				partOverrides.Add(new PartOverride
+				{
+					useIsland = report.IsIsland,
+					island = report.Island,
+					point = report.Point,
+					part = part,
+				});
+			}
+		}
+
+		private static bool OverrideMatches(in PartOverride o, PartGroupReport r)
+		{
+			if (o.useIsland != r.IsIsland)
+				return false;
+			if (o.useIsland)
+				return o.island.uv == r.Island.uv && o.island.subMesh == r.Island.subMesh && o.island.index == r.Island.index;
+			return o.point == r.Point;
 		}
 
 		public override JobHandle Schedule(in MeshBuffers buffers, in DeformSpace space, JobHandle dependency)
