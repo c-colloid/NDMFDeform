@@ -47,15 +47,15 @@ namespace MeshModifier.NDMFDeform.Tests
 			var n1 = NeighborGroups(adjacency, 1);
 			var n4 = NeighborGroups(adjacency, 4);
 			Assert.That(n1.SetEquals(n4), Is.True, "シームの両側で隣接が共有される");
-			Assert.That(n1, Does.Contain(adjacency.GroupOf[0]));
-			Assert.That(n1, Does.Contain(adjacency.GroupOf[2]));
-			Assert.That(n1, Does.Contain(adjacency.GroupOf[6]));
-			Assert.That(n1, Does.Not.Contain(adjacency.GroupOf[1]), "同一位置の頂点は隣接に含めない");
+			Assert.That(n1, Has.Member(adjacency.GroupOf[0]));
+			Assert.That(n1, Has.Member(adjacency.GroupOf[2]));
+			Assert.That(n1, Has.Member(adjacency.GroupOf[6]));
+			Assert.That(n1, Has.No.Member(adjacency.GroupOf[1]), "同一位置の頂点は隣接に含めない");
 
 			// 隣接リストは代表頂点を指す
 			var representatives = new HashSet<int>(adjacency.Representative);
 			foreach (var neighbor in adjacency.Neighbors)
-				Assert.That(representatives, Does.Contain(neighbor));
+				Assert.That(representatives, Has.Member(neighbor));
 
 			// 端の頂点 0 の隣接は 1(=4) と 2(=5) と 3
 			var n0 = NeighborGroups(adjacency, 0);
