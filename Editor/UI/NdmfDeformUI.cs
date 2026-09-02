@@ -22,6 +22,7 @@ namespace MeshModifier.NDMFDeform.Editor
 		public const string UVIslandSelectorGuid = "5630c7e07510451587ecfefd0f0cb48a";
 		public const string BlendShapeOverrideRowGuid = "875cdc4a28af48989f3e3a314fe17368";
 		public const string PointGridOverlayGuid = "5ac14dd6496842d3a69729e522890fe8";
+		public const string BodyFitInspectorGuid = "577847c3c47747ee94b2a914fef9e1b7";
 
 		private static StyleSheet _commonStyle;
 

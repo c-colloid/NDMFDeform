@@ -29,6 +29,11 @@ namespace MeshModifier.NDMFDeform.Core
 		/// (UV 島解析など、NativeArray 化されない情報が必要な場合に使う)。
 		/// ベイクコアが Schedule より前にメインスレッドで呼ぶ。
 		/// 結果はインスタンス内にキャッシュし、Schedule で参照すること。
+		///
+		/// 契約: PrepareBake はベイク 1 回につき 1 度呼ばれ、その直後の最初の Schedule は
+		/// 基本形状のパス、以降はブレンドシェイプフレーム(base + delta)のパスである
+		/// (フルベイク・プレビューのホットパスとも共通)。基本形状で求めた結果を
+		/// フレームでも使い回すデフォーマ(Body Fit の FixedDisplacement)はこの順序に依存する。
 		/// </summary>
 		public virtual void PrepareBake(Mesh source) { }
 

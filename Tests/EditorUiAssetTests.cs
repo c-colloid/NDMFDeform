@@ -27,6 +27,7 @@ namespace MeshModifier.NDMFDeform.Tests
 		[TestCase(NdmfDeformUI.UVIslandSelectorGuid, TestName = "UVIslandSelector")]
 		[TestCase(NdmfDeformUI.BlendShapeOverrideRowGuid, TestName = "BlendShapeOverrideRow")]
 		[TestCase(NdmfDeformUI.PointGridOverlayGuid, TestName = "PointGridOverlay")]
+		[TestCase(NdmfDeformUI.BodyFitInspectorGuid, TestName = "BodyFitInspector")]
 		public void VisualTreeResolves(string guid)
 		{
 			var tree = NdmfDeformUI.Load<VisualTreeAsset>(guid);

@@ -54,12 +54,35 @@ namespace MeshModifier.NDMFDeform.NDMF
 
 			// スタック構成・各デフォーマのパラメータ・軸 Transform を監視する
 			context.Observe(stack);
+			var referenced = new List<Renderer>();
 			foreach (var entry in stack.Deformers)
 			{
 				if (entry.deformer == null)
 					continue;
 				context.Observe(entry.deformer);
 				context.Observe(entry.deformer.Axis);
+				if (entry.deformer is IRendererReferences refs)
+					refs.CollectReferencedRenderers(referenced);
+			}
+
+			// 参照レンダラー(Body Fit の体など)とその Transform、参照先にも Deform Stack が
+			// あればその構成も監視する(重ね着: 参照先の変形が変わったら再ベイク)
+			foreach (var renderer in referenced)
+			{
+				if (renderer == null)
+					continue;
+				context.Observe(renderer);
+				context.Observe(renderer.transform);
+				if (!renderer.TryGetComponent<DeformStack>(out var referencedStack))
+					continue;
+				context.Observe(referencedStack);
+				foreach (var entry in referencedStack.Deformers)
+				{
+					if (entry.deformer == null)
+						continue;
+					context.Observe(entry.deformer);
+					context.Observe(entry.deformer.Axis);
+				}
 			}
 
 			var source = BakeDeformStacksPass.GetSourceMesh(stack, out _, out _);
@@ -73,7 +96,7 @@ namespace MeshModifier.NDMFDeform.NDMF
 			if (original is SkinnedMeshRenderer originalSmr)
 			{
 				activeShapes = context.Observe(originalSmr,
-					smr => GetActiveShapeNames(smr),
+					smr => DeformPreviewBakeCache.GetActiveShapeNames(smr),
 					(a, b) => a.SetEquals(b));
 			}
 
@@ -81,21 +104,6 @@ namespace MeshModifier.NDMFDeform.NDMF
 			// メッシュ複製なしで頂点更新のみになる(キャッシュがメッシュを所有する)
 			var previewEntry = DeformPreviewBakeCache.Bake(stack, source, original.transform, activeShapes);
 			return Task.FromResult<IRenderFilterNode>(new Node(previewEntry));
-		}
-
-		private static HashSet<string> GetActiveShapeNames(SkinnedMeshRenderer smr)
-		{
-			var names = new HashSet<string>();
-			var mesh = smr.sharedMesh;
-			if (mesh == null)
-				return names;
-
-			for (var i = 0; i < mesh.blendShapeCount; i++)
-			{
-				if (!Mathf.Approximately(smr.GetBlendShapeWeight(i), 0f))
-					names.Add(mesh.GetBlendShapeName(i));
-			}
-			return names;
 		}
 
 		private class Node : IRenderFilterNode

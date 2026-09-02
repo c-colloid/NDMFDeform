@@ -44,6 +44,12 @@ namespace MeshModifier.NDMFDeform.Editor
 			public bool ShapesStale;
 			public double LastBakeTime;
 
+			/// <summary>
+			/// ベイクのたびに増える通し番号。ホットパスは同じ Mesh インスタンスの頂点だけを
+			/// 更新するため、Baked を参照する側(重ね着の参照表面キャッシュ)はこれで更新を検知する
+			/// </summary>
+			public int BakeSerial;
+
 			// 追いかけフルベイク用に最後の呼び出しコンテキストを保持する
 			public DeformStack Stack;
 			public Transform RendererTransform;
@@ -156,6 +162,7 @@ namespace MeshModifier.NDMFDeform.Editor
 			}
 			entry.Baked.RecalculateBounds();
 
+			entry.BakeSerial++;
 			entry.LastBakeTime = EditorApplication.timeSinceStartup;
 			entry.Stack = stack;
 			entry.RendererTransform = rendererTransform;
@@ -220,11 +227,32 @@ namespace MeshModifier.NDMFDeform.Editor
 			entry.VertexCount = source.vertexCount;
 			entry.ShapeStateHash = shapeHash;
 			entry.ShapesStale = false;
+			entry.BakeSerial++;
 			entry.LastBakeTime = EditorApplication.timeSinceStartup;
 			entry.Stack = stack;
 			entry.RendererTransform = rendererTransform;
 			entry.ActiveShapes = activeShapes;
 			return entry;
+		}
+
+		/// <summary>
+		/// 現在重みが非 0 のシェイプ名の集合(プレビューで再ベイクする対象)。
+		/// NDMF プレビューと、参照先スタックをプレビューと同じ引数でベイクする
+		/// DeformedReferenceResolver が同じ判定を使う。
+		/// </summary>
+		public static HashSet<string> GetActiveShapeNames(SkinnedMeshRenderer smr)
+		{
+			var names = new HashSet<string>();
+			var mesh = smr != null ? smr.sharedMesh : null;
+			if (mesh == null)
+				return names;
+
+			for (var i = 0; i < mesh.blendShapeCount; i++)
+			{
+				if (!Mathf.Approximately(smr.GetBlendShapeWeight(i), 0f))
+					names.Add(mesh.GetBlendShapeName(i));
+			}
+			return names;
 		}
 
 		private static void EnsureColors(Entry entry, Mesh source)

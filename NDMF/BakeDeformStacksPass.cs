@@ -11,17 +11,23 @@ namespace MeshModifier.NDMFDeform.NDMF
 	/// 直後に自前コンポーネントを component 単位で破棄する。
 	/// GameObject は一切削除しない(旧実装の誤削除バグの構造的な再発防止)。
 	/// アバター外のオブジェクトには決して触れない。
+	///
+	/// 他のレンダラーを参照するデフォーマ(Body Fit の体など)があり、参照先にも
+	/// DeformStack が付いている場合は参照先を先にベイクする(重ね着)。
+	/// 各スタックはベイク直後に破棄するため、後続のスタックから見た参照先は
+	/// 「ベイク済みの sharedMesh を持ち、DeformStack の無いレンダラー」になる
+	/// (参照先の変形後メッシュを解決するフックが二重に変形しない)。
 	/// </summary>
 	internal static class BakeDeformStacksPass
 	{
 		public static void Run(BuildContext ctx)
 		{
 			var root = ctx.AvatarRootTransform;
-			var stacks = root.GetComponentsInChildren<DeformStack>(true);
+			var stacks = DeformStackOrdering.Sort(root.GetComponentsInChildren<DeformStack>(true));
 
 			foreach (var stack in stacks)
 			{
-				if (IsEditorOnly(stack.transform, root))
+				if (stack == null || IsEditorOnly(stack.transform, root))
 					continue;
 
 				var source = GetSourceMesh(stack, out var smr, out var meshFilter);
@@ -30,7 +36,10 @@ namespace MeshModifier.NDMFDeform.NDMF
 
 				var baked = DeformBakeCore.Bake(stack, source, stack.transform);
 				if (baked == null)
+				{
+					Object.DestroyImmediate(stack);
 					continue;
+				}
 
 				// プレイモード(Apply on Play)ではアセット保存が無効
 				// (NullAssetSaver / AssetContainer = null)のため、
@@ -47,6 +56,8 @@ namespace MeshModifier.NDMFDeform.NDMF
 				{
 					meshFilter.sharedMesh = baked;
 				}
+
+				Object.DestroyImmediate(stack);
 			}
 
 			// クリーンアップ: アバター配下の自前コンポーネントのみを破棄する。

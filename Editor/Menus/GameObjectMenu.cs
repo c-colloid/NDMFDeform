@@ -46,6 +46,9 @@ namespace MeshModifier.NDMFDeform.Editor
 		[MenuItem(Root + "Deformers/Scale", false, 25)]
 		private static void CreateScale(MenuCommand c) => Create<ScaleDeformer>(c);
 
+		[MenuItem(Root + "Deformers/Body Fit", false, 26)]
+		private static void CreateBodyFit(MenuCommand c) => Create<BodyFitDeformer>(c);
+
 		[MenuItem(Root + "Deformers/Mask/UV Island Mask", false, 37)]
 		private static void CreateUvIslandMask(MenuCommand c) => Create<UVIslandMaskDeformer>(c);
 
@@ -69,6 +72,7 @@ namespace MeshModifier.NDMFDeform.Editor
 		[MenuItem(Root + "Deformers/Cylindrical Vertex Transform", true)]
 		[MenuItem(Root + "Deformers/Transform", true)]
 		[MenuItem(Root + "Deformers/Scale", true)]
+		[MenuItem(Root + "Deformers/Body Fit", true)]
 		[MenuItem(Root + "Deformers/Mask/UV Island Mask", true)]
 		[MenuItem(Root + "Deformers/Mask/Sphere Mask", true)]
 		[MenuItem(Root + "Deformers/Mask/Box Mask", true)]

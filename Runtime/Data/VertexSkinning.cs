@@ -4,7 +4,7 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 
-namespace MeshModifier.NDMFDeform.Editor
+namespace MeshModifier.NDMFDeform.Core
 {
 	/// <summary>
 	/// 頂点ごとのスキン行列(LBS: Σ weight × bone.localToWorld × bindpose)。
@@ -14,8 +14,11 @@ namespace MeshModifier.NDMFDeform.Editor
 	/// ボーンがバインド後に個別調整されたアバター・衣装(単一のアフィン行列では
 	/// 表せないケース)でも、ワールドのギズモと変形対象が一致する。
 	/// 非スキンのレンダラーは全頂点一様に localToWorldMatrix。
+	///
+	/// Runtime アセンブリに置くのは、参照メッシュ(Body Fit の体など)を
+	/// 同じ数式でワールド空間へ持ち上げるためにデフォーマ側からも使うため。
 	/// </summary>
-	internal struct VertexSkinning : System.IDisposable
+	public struct VertexSkinning : System.IDisposable
 	{
 		public NativeArray<float4x4> ToWorld;
 		public NativeArray<float4x4> ToMesh;

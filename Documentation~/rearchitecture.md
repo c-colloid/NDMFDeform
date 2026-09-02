@@ -434,6 +434,7 @@ EditMode テスト(golden mesh: 入力メッシュ + パラメータ → 期待�
 | M6 | 移行ツール → フォーク削除 → パッケージング整備(vpmDependencies、タグ、VPM リスティング、THIRD-PARTY-NOTICES)。UITK Font Fix(jp.colloid.uitk-font-fix)も同じ VPM リスティングへ登録し、vpmDependencies による自動取得を成立させる。リリースからリスティングへの通知(repository_dispatch)も両パッケージで揃える。将来的には OpenUPM への登録も併用し、UPM 経路でも依存自動解決を可能にする(スコープドレジストリ追加が前提) | 0.1.0 / 0.2.0 |
 | M7(候補) | **Bake as BlendShape**: デフォーマ効果をブレンドシェイプとして焼き込み、Animator / Udon から駆動(§2.1 の橋渡し機能) | 0.x |
 | M8(候補) | **非アバターメッシュの手動ベイク**: AvatarDescriptor の無いオブジェクトの DeformStack を、エディタ操作(インスペクタのボタン等)で静的メッシュアセットとしてベイク・保存する。0.1.1 でプレビュー / ビルド対象をアバタールート配下に限定したため、アバター外(小物・ワールド制作等)での利用経路はこの機能が担う | 0.x |
+| M10(候補) | **Weight Transfer**: Body Fit の最近接点クエリを流用し、体のボーンウェイトを衣装へ転写する Utility デフォーマ。`MeshBuffers` へのボーンウェイトチャンネル追加、衣装 / 体のボーン対応付け、Modular Avatar のマージとの順序保証が前提(設計メモは [body-fit-deformer.md](body-fit-deformer.md) §6.2) | 0.x |
 | M9(候補) | **NDMF 非依存プロジェクト対応**: 変形コア(Runtime / Editor)は NDMF を参照していないため、NDMF 接続層(NDMFDeform.NDMF asmdef)を Version Defines で任意化し、NDMF の無いプロジェクトでは手動ベイク(M8)中心で動作させる。NDMF プレビュー(IRenderFilter)は使えないため簡易プレビューの代替を検討。`vpmDependencies` の必須依存の扱い(推奨依存化 / 配布チャネル分離)も要検討 | 0.x |
 
 リリース経路(2026-08-29 決定、同日 0.x 管理へ改訂): 旧パッケージと同名(`jp.colloid.nemfdeform`)の

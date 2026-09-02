@@ -14,6 +14,12 @@ Non-destructive mesh deformation plugin for VRChat avatars, built on NDMF.
   - UV マップ上のクリック選択(ズーム / パン / サブメッシュフィルタ付き)
   - シーンビューのメッシュ面クリックでも選択可能(変形後の形状に追従してハイライト)
 - **Cylindrical Scale / Cylindrical Vertex Transform** — 円柱コントローラによる範囲変形
+- **Body Fit** — 参照した体のメッシュに沿って衣装を寄せる / 離す(非対応衣装の体合わせ)
+  - 二重球で適用範囲を指定し、体との隙間の帯(最小 / 最大)で「ぴったり」「ブカッと」を調整
+  - めり込んだ頂点は体の外側へ押し出し、凹んだ部位で布が折れないよう変位を平滑化
+  - 衣装のブレンドシェイプは形状を維持したまま再ベイク。体側のシェイプ重みも反映
+  - 重ね着(下着 → 服 → コート)は参照先を先にベイクする順序を自動解決
+  - 設計の詳細は [Documentation~/body-fit-deformer.md](Documentation~/body-fit-deformer.md)
 - **Transform / Scale** — Transform への補間・軸スケール(旧 Deform 互換)
 - **Sphere / Box / Vertical Gradient / Vertex Color Mask** — 領域・グラデーション・頂点カラーによるマスク(旧 Deform 互換)
 - **正しいベイク**
@@ -61,6 +67,8 @@ Non-destructive mesh deformation plugin for VRChat avatars, built on NDMF.
 ## 既知の制限
 
 - ボーン・バインドポーズの補正は行いません(大きく骨格を動かす用途は対象外)
+- Body Fit はボーンウェイトを変更しません(体のウェイトを衣装へ転写する機能は別途検討中)。
+  三角形単位の交差や衣装の自己交差は保証しません(隙間と平滑化で緩和します)
 - シーンビューの島選択などは、バインドポーズから大きく外れたポーズでは判定がずれることがあります
 
 ## ライセンス
