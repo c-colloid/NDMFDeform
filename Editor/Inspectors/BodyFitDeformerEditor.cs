@@ -5,6 +5,8 @@ using UnityEditor;
 using UnityEditor.UIElements;
 using UnityEngine;
 using UnityEngine.UIElements;
+// UnityEditor.BodyPart(アバター設定 UI の列挙)と衝突するため明示する
+using BodyPart = MeshModifier.NDMFDeform.Core.BodyPart;
 
 namespace MeshModifier.NDMFDeform.Editor
 {
