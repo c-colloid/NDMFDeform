@@ -45,10 +45,14 @@ namespace MeshModifier.NDMFDeform.Editor
 			public double LastBakeTime;
 
 			/// <summary>
-			/// ベイクのたびに増える通し番号。ホットパスは同じ Mesh インスタンスの頂点だけを
-			/// 更新するため、Baked を参照する側(重ね着の参照表面キャッシュ)はこれで更新を検知する
+			/// ベイク結果が変わるたびに増える通し番号。ホットパスは同じ Mesh インスタンスの頂点だけを
+			/// 更新するため、Baked を参照する側(重ね着の参照表面キャッシュ)はこれで更新を検知する。
+			/// 呼ばれただけでは増えない(頂点の内容ハッシュが変わった時のみ)。
 			/// </summary>
 			public int BakeSerial;
+
+			/// <summary>直近のベイク結果(頂点)の内容ハッシュ</summary>
+			public int ContentHash;
 
 			// 追いかけフルベイク用に最後の呼び出しコンテキストを保持する
 			public DeformStack Stack;
@@ -162,7 +166,13 @@ namespace MeshModifier.NDMFDeform.Editor
 			}
 			entry.Baked.RecalculateBounds();
 
-			entry.BakeSerial++;
+			// 内容が変わった時だけ通し番号を進める(参照側のキャッシュが無駄に作り直されないように)
+			var contentHash = HashVertices(entry.Work);
+			if (contentHash != entry.ContentHash)
+			{
+				entry.ContentHash = contentHash;
+				entry.BakeSerial++;
+			}
 			entry.LastBakeTime = EditorApplication.timeSinceStartup;
 			entry.Stack = stack;
 			entry.RendererTransform = rendererTransform;
@@ -228,6 +238,13 @@ namespace MeshModifier.NDMFDeform.Editor
 			entry.ShapeStateHash = shapeHash;
 			entry.ShapesStale = false;
 			entry.BakeSerial++;
+			var bakedVertices = new NativeArray<float3>(baked.vertexCount, Allocator.Temp,
+				NativeArrayOptions.UninitializedMemory);
+			var bakedArray = baked.vertices;
+			for (var i = 0; i < bakedArray.Length; i++)
+				bakedVertices[i] = bakedArray[i];
+			entry.ContentHash = HashVertices(bakedVertices);
+			bakedVertices.Dispose();
 			entry.LastBakeTime = EditorApplication.timeSinceStartup;
 			entry.Stack = stack;
 			entry.RendererTransform = rendererTransform;
@@ -253,6 +270,23 @@ namespace MeshModifier.NDMFDeform.Editor
 					names.Add(mesh.GetBlendShapeName(i));
 			}
 			return names;
+		}
+
+		/// <summary>頂点配列の内容ハッシュ(ビット表現の合成)</summary>
+		private static int HashVertices(NativeArray<float3> vertices)
+		{
+			unchecked
+			{
+				var h = 17;
+				for (var i = 0; i < vertices.Length; i++)
+				{
+					var v = vertices[i];
+					h = h * 31 + math.asint(v.x);
+					h = h * 31 + math.asint(v.y);
+					h = h * 31 + math.asint(v.z);
+				}
+				return h;
+			}
 		}
 
 		private static void EnsureColors(Entry entry, Mesh source)

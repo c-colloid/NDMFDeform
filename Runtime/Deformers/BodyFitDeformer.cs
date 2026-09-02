@@ -6,6 +6,7 @@ using Unity.Mathematics;
 using UnityEngine;
 using static Unity.Mathematics.math;
 using float3 = Unity.Mathematics.float3;
+using float4 = Unity.Mathematics.float4;
 using float4x4 = Unity.Mathematics.float4x4;
 
 namespace MeshModifier.NDMFDeform.Core

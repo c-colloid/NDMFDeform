@@ -17,6 +17,9 @@ namespace MeshModifier.NDMFDeform.NDMF
 	/// 各スタックはベイク直後に破棄するため、後続のスタックから見た参照先は
 	/// 「ベイク済みの sharedMesh を持ち、DeformStack の無いレンダラー」になる
 	/// (参照先の変形後メッシュを解決するフックが二重に変形しない)。
+	/// EditorOnly 配下のスタックもこの不変条件を保つため同じ経路でベイクする
+	/// (EditorOnly の参照用ダミー素体に Deform Stack を付けて衣装を合わせる用途を含む。
+	/// そのオブジェクト自体はビルド後に取り除かれる)。
 	/// </summary>
 	internal static class BakeDeformStacksPass
 	{
@@ -27,7 +30,7 @@ namespace MeshModifier.NDMFDeform.NDMF
 
 			foreach (var stack in stacks)
 			{
-				if (stack == null || IsEditorOnly(stack.transform, root))
+				if (stack == null)
 					continue;
 
 				var source = GetSourceMesh(stack, out var smr, out var meshFilter);
@@ -104,14 +107,5 @@ namespace MeshModifier.NDMFDeform.NDMF
 			return meshFilter != null ? meshFilter.sharedMesh : null;
 		}
 
-		private static bool IsEditorOnly(Transform t, Transform root)
-		{
-			for (var current = t; current != null && current != root; current = current.parent)
-			{
-				if (current.CompareTag("EditorOnly"))
-					return true;
-			}
-			return false;
-		}
 	}
 }

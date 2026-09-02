@@ -346,9 +346,17 @@ namespace MeshModifier.NDMFDeform.Core
 			triangles = null;
 			if (renderer == null)
 				return false;
+			return TryBuildWorldGeometry(renderer, ResolveMesh(renderer).Mesh, applyBlendShapes, flipNormals,
+				out vertices, out triangles);
+		}
 
-			var mesh = ResolveMesh(renderer).Mesh;
-			if (mesh == null || mesh.vertexCount == 0)
+		/// <summary>解決済みのメッシュを渡す版(呼び出し側で ResolveMesh を 1 回だけ行う)</summary>
+		public static bool TryBuildWorldGeometry(Renderer renderer, Mesh mesh, bool applyBlendShapes, bool flipNormals,
+			out Vector3[] vertices, out int[] triangles)
+		{
+			vertices = null;
+			triangles = null;
+			if (renderer == null || mesh == null || mesh.vertexCount == 0)
 				return false;
 
 			vertices = mesh.vertices;
@@ -562,7 +570,9 @@ namespace MeshModifier.NDMFDeform.Core
 			var key = KeyOf(renderer, applyBlendShapes, flipNormals, withParts);
 			Entries.TryGetValue(key, out var entry);
 			var bones = entry?.Bones ?? (renderer as SkinnedMeshRenderer)?.bones;
-			var hash = ComputeHash(renderer, bones, applyBlendShapes);
+			// 参照メッシュの解決(重ね着では参照先のベイクを伴う)は 1 回だけ行い、ハッシュと構築で共有する
+			var info = ReferenceSurfaceUtility.ResolveMesh(renderer);
+			var hash = ComputeHash(renderer, info, bones, applyBlendShapes);
 			if (withParts)
 				hash = unchecked(hash * 31 + parts.Hash());
 			if (entry != null && entry.Hash == hash && entry.Surface != null && entry.Surface.IsCreated &&
@@ -574,7 +584,7 @@ namespace MeshModifier.NDMFDeform.Core
 				return true;
 			}
 
-			if (!ReferenceSurfaceUtility.TryBuildWorldGeometry(renderer, applyBlendShapes, flipNormals,
+			if (!ReferenceSurfaceUtility.TryBuildWorldGeometry(renderer, info.Mesh, applyBlendShapes, flipNormals,
 				    out var vertices, out var triangles))
 			{
 				Evict(key);
@@ -584,7 +594,7 @@ namespace MeshModifier.NDMFDeform.Core
 			BuildCount++;
 			int[] masks = null;
 			if (withParts)
-				masks = BuildPartMasks(renderer, vertices, triangles, parts);
+				masks = BuildPartMasks(renderer, info.Mesh, vertices, triangles, parts);
 			var surface = MeshSurface.Build(vertices, triangles, Allocator.Persistent, masks);
 			if (!surface.IsCreated)
 			{
@@ -619,9 +629,9 @@ namespace MeshModifier.NDMFDeform.Core
 		/// 三角形のパーツマスクを求める。スキンメッシュはボーン → パーツ対応とウェイトから、
 		/// ウェイトの無いメッシュは連結成分の重心に最も近い軸区間から決める。
 		/// </summary>
-		private static int[] BuildPartMasks(Renderer renderer, Vector3[] vertices, int[] triangles, PartRequest parts)
+		private static int[] BuildPartMasks(Renderer renderer, Mesh mesh, Vector3[] vertices, int[] triangles,
+			PartRequest parts)
 		{
-			var mesh = ReferenceSurfaceUtility.ResolveMesh(renderer).Mesh;
 			PartWeights[] weights = null;
 			if (renderer is SkinnedMeshRenderer smr && mesh != null && mesh.GetBonesPerVertex().Length == vertices.Length)
 			{
@@ -680,11 +690,11 @@ namespace MeshModifier.NDMFDeform.Core
 			Entries.Clear();
 		}
 
-		private static int ComputeHash(Renderer renderer, Transform[] bones, bool applyBlendShapes)
+		private static int ComputeHash(Renderer renderer, ReferenceMeshInfo info, Transform[] bones,
+			bool applyBlendShapes)
 		{
 			unchecked
 			{
-				var info = ReferenceSurfaceUtility.ResolveMesh(renderer);
 				var mesh = info.Mesh;
 				var h = 17;
 				h = h * 31 + (mesh != null ? mesh.GetInstanceID() : 0);
