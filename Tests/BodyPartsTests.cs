@@ -236,6 +236,25 @@ namespace MeshModifier.NDMFDeform.Tests
 		}
 
 		[Test]
+		public void Refresh_TracksBonePositionChanges()
+		{
+			var (skeleton, bones) = CreateSkeleton();
+			var hash = skeleton.StateHash;
+
+			// 変化が無ければ false で、軸もハッシュもそのまま
+			Assert.That(skeleton.Refresh(), Is.False);
+			Assert.That(skeleton.StateHash, Is.EqualTo(hash));
+
+			// 前腕の関節を動かすと上腕の軸長と関節位置が追従し、ハッシュが変わる
+			bones[HumanBodyBones.LeftLowerArm].position = new Vector3(0.55f, 1.35f, 0f);
+			Assert.That(skeleton.Refresh(), Is.True);
+			Assert.That(skeleton.StateHash, Is.Not.EqualTo(hash));
+			Assert.That(skeleton.Axes[(int)BodyPart.LeftUpperArm].Length, Is.EqualTo(0.35f).Within(1e-5f));
+			Assert.That(skeleton.ResolveByJoint(new float3(0.55f, 1.35f, 0f), 0.01f), Is.EqualTo(BodyPart.LeftLowerArm));
+			Assert.That(skeleton.ResolveByJoint(new float3(0.45f, 1.35f, 0f), 0.01f), Is.EqualTo(BodyPart.None), "古い関節位置には一致しない");
+		}
+
+		[Test]
 		public void AssignGroupsBySegment_UsesNearestAxis()
 		{
 			var (skeleton, _) = CreateSkeleton();

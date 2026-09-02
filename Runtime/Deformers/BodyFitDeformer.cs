@@ -200,6 +200,9 @@ namespace MeshModifier.NDMFDeform.Core
 		[System.NonSerialized] private NativeArray<PartWeights> _costumeParts;
 		[System.NonSerialized] private int _costumePartsKey;
 		[System.NonSerialized] private MeshAdjacency _adjacencyManaged;
+		[System.NonSerialized] private HumanoidSkeleton _cachedSkeleton;
+		[System.NonSerialized] private Animator _cachedAnimator;
+		[System.NonSerialized] private Avatar _cachedAvatar;
 
 		private void OnValidate()
 		{
@@ -234,6 +237,9 @@ namespace MeshModifier.NDMFDeform.Core
 			_adjacencyMesh = null;
 			_adjacencyManaged = null;
 			_adjacencyVertexCount = 0;
+			_cachedSkeleton = null;
+			_cachedAnimator = null;
+			_cachedAvatar = null;
 			_costumePartsKey = 0;
 			_surfaceReady = false;
 			_partsReady = false;
@@ -417,19 +423,47 @@ namespace MeshModifier.NDMFDeform.Core
 			}
 		}
 
-		/// <summary>骨格の解決: 差し替え → 体の親の Animator → 衣装の親の Animator(ヒューマノイドのみ)</summary>
-		private HumanoidSkeleton ResolveSkeleton()
+		/// <summary>
+		/// パーツ軸に使うヒューマノイド Animator: 体の親 → 衣装(親スタック)の親 の順に探す。
+		/// 見つからなければ null(インスペクタの状態表示も同じ判定を使う)。
+		/// </summary>
+		public Animator FindHumanoidAnimator()
 		{
-			if (SkeletonOverride != null)
-				return SkeletonOverride;
 			var animator = body != null ? body.GetComponentInParent<Animator>() : null;
 			if (animator == null || !animator.isHuman)
 			{
 				var own = GetOwnRenderer();
-				if (own != null)
-					animator = own.GetComponentInParent<Animator>();
+				animator = own != null ? own.GetComponentInParent<Animator>() : null;
 			}
-			return HumanoidSkeleton.FromAnimator(animator);
+			return animator != null && animator.isHuman ? animator : null;
+		}
+
+		/// <summary>
+		/// 骨格の解決: 差し替え → FindHumanoidAnimator。
+		/// 同じ Animator(と Avatar)の間は骨格を再利用し、現在のボーン位置だけ読み直す
+		/// (PrepareBake はプレビューのホットパスから毎回呼ばれるため、全ボーンの再列挙は避ける)。
+		/// </summary>
+		private HumanoidSkeleton ResolveSkeleton()
+		{
+			if (SkeletonOverride != null)
+				return SkeletonOverride;
+			var animator = FindHumanoidAnimator();
+			if (animator == null)
+			{
+				_cachedSkeleton = null;
+				_cachedAnimator = null;
+				_cachedAvatar = null;
+				return null;
+			}
+			if (_cachedSkeleton != null && _cachedAnimator == animator && _cachedAvatar == animator.avatar)
+			{
+				_cachedSkeleton.Refresh();
+				return _cachedSkeleton;
+			}
+			_cachedSkeleton = HumanoidSkeleton.FromAnimator(animator);
+			_cachedAnimator = animator;
+			_cachedAvatar = animator.avatar;
+			return _cachedSkeleton;
 		}
 
 		private void EnsureAdjacency(Mesh source, bool force)

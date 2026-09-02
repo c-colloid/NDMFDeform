@@ -101,14 +101,11 @@ namespace MeshModifier.NDMFDeform.Editor
 			{
 				message = "Body 側にも Deform Stack があります。体側を先にベイクし、その変形後の形状へフィットします(重ね着)。";
 			}
-			else if (fit.Mode == BodyFitDeformer.FitMode.PartCylinder)
+			else if (fit.Mode == BodyFitDeformer.FitMode.PartCylinder && fit.FindHumanoidAnimator() == null)
 			{
-				var animator = body.GetComponentInParent<Animator>();
-				if (animator == null || !animator.isHuman)
-				{
-					message = "Part Cylinder にはヒューマノイドの Animator(アバタールート)が必要です。見つからない場合は Nearest Surface で動作します。";
-					type = HelpBoxMessageType.Warning;
-				}
+				// 実行時と同じ探索(体の親 → 衣装の親)で判定する
+				message = "Part Cylinder にはヒューマノイドの Animator(体または衣装の親)が必要です。見つからない場合は Nearest Surface で動作します。";
+				type = HelpBoxMessageType.Warning;
 			}
 
 			_status.text = message ?? string.Empty;

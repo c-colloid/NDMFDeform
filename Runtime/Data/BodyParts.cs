@@ -132,6 +132,9 @@ namespace MeshModifier.NDMFDeform.Core
 		/// <summary>骨格の状態ハッシュ(関節位置)。キャッシュの無効化に使う</summary>
 		public int StateHash { get; private set; }
 
+		/// <summary>構築に使ったヒューマノイドボーン(Refresh で現在位置を読み直す)</summary>
+		private readonly Dictionary<HumanBodyBones, Transform> _bones = new Dictionary<HumanBodyBones, Transform>();
+
 		public static HumanoidSkeleton FromAnimator(Animator animator)
 		{
 			if (animator == null || !animator.isHuman)
@@ -155,24 +158,44 @@ namespace MeshModifier.NDMFDeform.Core
 				return null;
 
 			var skeleton = new HumanoidSkeleton();
-			var hash = 17;
 			foreach (var pair in bones)
 			{
 				if (pair.Value == null)
 					continue;
+				skeleton._bones[pair.Key] = pair.Value;
+				skeleton.BoneParts[pair.Value] = PartOf(pair.Key);
+			}
+			skeleton.Refresh();
+			return skeleton;
+		}
+
+		/// <summary>
+		/// 現在のボーン位置から関節・軸・状態ハッシュを再計算する(ポーズ変更の追従用)。
+		/// Animator の再列挙(GetBoneTransform × 全ボーン)を伴わないので、プレビューの
+		/// ホットパスから毎回呼べる。位置が変わっていれば true。
+		/// </summary>
+		public bool Refresh()
+		{
+			var previous = StateHash;
+			Joints.Clear();
+			Array.Clear(Axes, 0, Axes.Length);
+			var hash = 17;
+			foreach (var pair in _bones)
+			{
+				if (pair.Value == null)
+					continue;
 				var part = PartOf(pair.Key);
-				skeleton.BoneParts[pair.Value] = part;
 				var position = (float3)pair.Value.position;
-				skeleton.Joints.Add((position, part));
+				Joints.Add((position, part));
 				unchecked
 				{
 					hash = hash * 31 + (int)pair.Key;
 					hash = hash * 31 + pair.Value.position.GetHashCode();
 				}
 			}
-			skeleton.StateHash = hash;
-			skeleton.BuildAxes(bones);
-			return skeleton;
+			StateHash = hash;
+			BuildAxes(_bones);
+			return hash != previous;
 		}
 
 		/// <summary>ヒューマノイドボーン → パーツ</summary>
