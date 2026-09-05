@@ -107,6 +107,7 @@ namespace MeshModifier.NDMFDeform.Tests
 		[Test]
 		public void Falloff_BlendsAcrossTopAndBottomCutLines()
 		{
+			// radius 0.75 / scope 1 → 引き込み 0.25(d = 0.5 では軸横切り防止の圧縮が掛からない量)
 			var (stack, deformer) = CreateSetup(new[]
 			{
 				new Vector3(0.5f, 0f, 0.5f),    // top 上: 全量
@@ -116,7 +117,7 @@ namespace MeshModifier.NDMFDeform.Tests
 				new Vector3(0.5f, 0f, -0.8f),   // bottom より外: 変化なし
 			});
 			deformer.Factor = 1f;
-			deformer.Radius = 0.5f;
+			deformer.Radius = 0.75f;
 			deformer.Scope = 1f;
 			deformer.Top = 0.5f;
 			deformer.Bottom = -0.5f;
@@ -125,10 +126,10 @@ namespace MeshModifier.NDMFDeform.Tests
 			_baked = DeformBakeCore.Bake(stack, _source, _root.transform);
 			var v = _baked.vertices;
 
-			Assert.That(v[0].x, Is.EqualTo(0f).Within(1e-4f));
-			Assert.That(v[1].x, Is.EqualTo(0.25f).Within(1e-4f));
+			Assert.That(v[0].x, Is.EqualTo(0.25f).Within(1e-4f));
+			Assert.That(v[1].x, Is.EqualTo(0.375f).Within(1e-4f));
 			Assert.That(v[2].x, Is.EqualTo(0.5f).Within(1e-4f));
-			Assert.That(v[3].x, Is.EqualTo(0.25f).Within(1e-4f));
+			Assert.That(v[3].x, Is.EqualTo(0.375f).Within(1e-4f));
 			Assert.That(v[4].x, Is.EqualTo(0.5f).Within(1e-4f));
 			// z は変わらない
 			for (var i = 0; i < v.Length; i++)
@@ -244,7 +245,8 @@ namespace MeshModifier.NDMFDeform.Tests
 		// ---- ベイク: 隣接拡散 ----
 
 		/// <summary>
-		/// x 方向に並ぶ帯状メッシュ(2 行 × columns 列、x = column × spacing)。
+		/// x 方向に並ぶ帯状メッシュ(2 行 × columns 列、x = (column + 1) × spacing。
+		/// 列 0 を軸上に置くと放射方向が定義できず動かないため 1 列ぶんずらす)。
 		/// seamColumn の列は UV シーム相当として頂点を複製し(左右のクアッドで別の頂点を使う)、
 		/// 位置溶接をまたいで拡散が伝わることも確かめられるようにする。
 		/// rowStart[c] は列 c の行 0 の頂点インデックス(seamColumn は左側の複製)、
@@ -260,13 +262,14 @@ namespace MeshModifier.NDMFDeform.Tests
 			for (var c = 0; c < columns; c++)
 			{
 				rowStart[c] = vertices.Count;
-				vertices.Add(new Vector3(c * spacing, 0f, 0f));
-				vertices.Add(new Vector3(c * spacing, 0f, 0.1f));
+				var x = (c + 1) * spacing;
+				vertices.Add(new Vector3(x, 0f, 0f));
+				vertices.Add(new Vector3(x, 0f, 0.1f));
 				if (c == seamColumn)
 				{
 					seamAlt = vertices.Count;
-					vertices.Add(new Vector3(c * spacing, 0f, 0f));
-					vertices.Add(new Vector3(c * spacing, 0f, 0.1f));
+					vertices.Add(new Vector3(x, 0f, 0f));
+					vertices.Add(new Vector3(x, 0f, 0.1f));
 				}
 			}
 			for (var c = 0; c + 1 < columns; c++)
@@ -286,11 +289,13 @@ namespace MeshModifier.NDMFDeform.Tests
 		[Test]
 		public void Smoothing_SpreadsHardCutAlongMeshConnectivity()
 		{
-			// 列 x = 0, 0.2, ..., 2.0。scope 1.05 → 列 0..5 が内側、6.. が外側。
+			// 列 x = 0.2, 0.4, ..., 2.2。scope 1.25 → 列 0..5 が内側、6.. が外側。
+			// 引き込みは 0.1 と小さくし、軸横切り防止の圧縮(d < 4/3 × 引き込み)が掛からないようにする。
 			// falloff 0 で段差を作り、拡散で列 5/6 の境界がならされることを見る。
 			// 列 6 はシーム(重複頂点)にし、溶接なしでは右へ伝わらない状況を作る
 			const int columns = 11;
 			const int seam = 6;
+			const float shift = 0.1f;
 			_source = CreateStrip(columns, 0.2f, seam, out var rowStart, out var seamAlt);
 
 			_root = new GameObject("CylindricalVertexTransformTestRoot");
@@ -300,8 +305,8 @@ namespace MeshModifier.NDMFDeform.Tests
 			var deformer = child.AddComponent<CylindricalVertexTransformDeformer>();
 			stack.AddDeformer(deformer);
 			deformer.Factor = 1f;
-			deformer.Radius = 0.55f;
-			deformer.Scope = 1.05f;
+			deformer.Radius = 1.25f - shift;
+			deformer.Scope = 1.25f;
 			deformer.Falloff = 0f;
 			deformer.Top = 1f;
 			deformer.Bottom = -1f;
@@ -323,12 +328,12 @@ namespace MeshModifier.NDMFDeform.Tests
 			foreach (var pull in new[] { pull0, pull1 })
 			{
 				// 境界の両側が部分変位になっている(段差がならされている)
-				Assert.That(pull[5], Is.GreaterThan(0.01f).And.LessThan(0.49f), "inside edge");
-				Assert.That(pull[6], Is.GreaterThan(0.01f).And.LessThan(0.49f), "outside edge (seam)");
+				Assert.That(pull[5], Is.GreaterThan(0.02f * shift).And.LessThan(0.98f * shift), "inside edge");
+				Assert.That(pull[6], Is.GreaterThan(0.02f * shift).And.LessThan(0.98f * shift), "outside edge (seam)");
 				// シームの先(列 7)へも溶接を通じて伝わる
-				Assert.That(pull[7], Is.GreaterThan(0.01f), "beyond seam");
+				Assert.That(pull[7], Is.GreaterThan(0.02f * shift), "beyond seam");
 				// 遠方は全量 / 不変のまま
-				Assert.That(pull[0], Is.EqualTo(0.5f).Within(1e-4f));
+				Assert.That(pull[0], Is.EqualTo(shift).Within(1e-4f));
 				Assert.That(pull[columns - 1], Is.EqualTo(0f).Within(1e-4f));
 				// 変位は内→外へ単調減少
 				for (var c = 1; c < columns; c++)
