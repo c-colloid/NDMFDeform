@@ -14,6 +14,9 @@ Non-destructive mesh deformation plugin for VRChat avatars, built on NDMF.
   - UV マップ上のクリック選択(ズーム / パン / サブメッシュフィルタ付き)
   - シーンビューのメッシュ面クリックでも選択可能(変形後の形状に追従してハイライト)
 - **Cylindrical Scale / Cylindrical Vertex Transform** — 円柱コントローラによる範囲変形
+  - Vertex Transform は断ち切りライン(scope 円筒・top / bottom 平面)を裾上げのように処理:
+    `falloff` で境界を滑らかに減衰、押し出しが外側の頂点を追い越す折り返しを自動で防止、
+    `smoothIterations` でメッシュの繋がりに沿って段差をならす
 - **Transform / Scale** — Transform への補間・軸スケール(旧 Deform 互換)
 - **Sphere / Box / Vertical Gradient / Vertex Color Mask** — 領域・グラデーション・頂点カラーによるマスク(旧 Deform 互換)
 - **正しいベイク**
