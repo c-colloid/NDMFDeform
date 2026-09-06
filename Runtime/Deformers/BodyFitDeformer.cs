@@ -196,6 +196,9 @@ namespace MeshModifier.NDMFDeform.Core
 		[SerializeField, Range(0f, 1f), Tooltip("パーツ円柱: 引き寄せで軸からの距離を縮める率の上限。0 で無制限。既定の 0.15 は元の 85% までしか寄せず、残りは隙間として残す(布の潰れと輪郭の縮みを抑える)")]
 		private float maxShrink = 0.15f;
 
+		[SerializeField, Tooltip("同じ体を参照して連続する Body Fit と 1 つのグループとして合成する(各 Body Fit の変位を同じ入力から求め、重なりでは重み付き平均。順序に依らず、縮み率の上限や factor が累積しない)")]
+		private bool fitGroup = true;
+
 		[SerializeField] private Transform axisOverride;
 
 		public Renderer Body { get => body; set => body = value; }
@@ -250,6 +253,10 @@ namespace MeshModifier.NDMFDeform.Core
 		public float ShoulderCapMargin { get => shoulderCapMargin; set => shoulderCapMargin = Mathf.Clamp(value, 0f, 0.3f); }
 		public bool NeckCap { get => neckCap; set => neckCap = value; }
 		public bool RigidDecorations { get => rigidDecorations; set => rigidDecorations = value; }
+		public bool FitGroup { get => fitGroup; set => fitGroup = value; }
+
+		/// <summary>直近の PrepareBake で決めたフィットグループの大きさ(1 = 単独)</summary>
+		public int FitGroupSize => _groupSize;
 		public float RigidMaxSize { get => rigidMaxSize; set => rigidMaxSize = Mathf.Max(0f, value); }
 		public float MaxShrink { get => maxShrink; set => maxShrink = Mathf.Clamp01(value); }
 
@@ -309,6 +316,12 @@ namespace MeshModifier.NDMFDeform.Core
 		[System.NonSerialized] private Vector3[] _lastVertices;
 		[System.NonSerialized] private MeshAdjacency _adjacencyManaged;
 		[System.NonSerialized] private readonly List<Renderer> _bodyList = new List<Renderer>();
+
+		// フィットグループ(§14.3): 同じ体を参照して連続する Body Fit。先頭がグループの共有バッファを持つ
+		[System.NonSerialized] private BodyFitDeformer _groupLeader;
+		[System.NonSerialized] private bool _groupLast;
+		[System.NonSerialized] private int _groupSize = 1;
+		[System.NonSerialized] private FitGroupBuffers _group;
 		[System.NonSerialized] private HumanoidSkeleton _cachedSkeleton;
 		[System.NonSerialized] private Animator _cachedAnimator;
 		[System.NonSerialized] private Avatar _cachedAvatar;
@@ -344,6 +357,9 @@ namespace MeshModifier.NDMFDeform.Core
 			if (_baseDisplacement.IsCreated) _baseDisplacement.Dispose();
 			if (_costumeParts.IsCreated) _costumeParts.Dispose();
 			if (_follow.IsCreated) _follow.Dispose();
+			_group?.DisposeNow();
+			_group = null;
+			_groupLeader = null;
 			_adjacencyMesh = null;
 			_adjacencyManaged = null;
 			_adjacencyVertexCount = 0;
@@ -550,6 +566,7 @@ namespace MeshModifier.NDMFDeform.Core
 			_passIndex = 0;
 			_surfaceReady = false;
 			_vertexCount = source != null ? source.vertexCount : 0;
+			DetermineGroup();
 
 			if (body == null || source == null || _vertexCount == 0)
 			{
@@ -1150,6 +1167,11 @@ namespace MeshModifier.NDMFDeform.Core
 
 		public override JobHandle Schedule(in MeshBuffers buffers, in DeformSpace space, JobHandle dependency)
 		{
+			// フィットグループのメンバーは、自分が寄与できなくても(末尾なら合成のために)グループの手順を踏む
+			var group = _groupLeader != null ? _groupLeader._group : null;
+			if (group != null && buffers.Length == _vertexCount)
+				return ScheduleGrouped(group, in buffers, in space, dependency);
+
 			if (factor <= 0f || !_surfaceReady || !_surface.IsCreated)
 				return dependency;
 			if (buffers.Length != _vertexCount || !_baseDisplacement.IsCreated)
@@ -1171,8 +1193,20 @@ namespace MeshModifier.NDMFDeform.Core
 
 			if (!_costumeParts.IsCreated || _costumeParts.Length != n)
 				return dependency;
+			return ScheduleCore(in buffers, in space, buffers.Vertices, null, dependency);
+		}
+
+		/// <summary>
+		/// 基本形状のジョブチェーン。input = 隙間を測る頂点位置(単独では buffers.Vertices、グループでは
+		/// スナップショット)。group が null なら結果を buffers.Vertices へ適用して minGap を再保証し、
+		/// 非 null ならグループの累積へ足すだけ(合成と再保証は末尾メンバーが行う)。
+		/// </summary>
+		private JobHandle ScheduleCore(in MeshBuffers buffers, in DeformSpace space, NativeArray<float3> input,
+			FitGroupBuffers group, JobHandle dependency)
+		{
+			var n = buffers.Length;
 			if (_effectiveMode == FitMode.PartCylinder)
-				return SchedulePartCylinder(in buffers, in space, dependency);
+				return SchedulePartCylinder(in buffers, in space, input, group, dependency);
 
 			var delta = new NativeArray<float3>(n, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
 			var weight = new NativeArray<float>(n, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
@@ -1182,7 +1216,7 @@ namespace MeshModifier.NDMFDeform.Core
 			var handle = new QueryJob
 			{
 				surface = _surface,
-				vertices = buffers.Vertices,
+				vertices = input,
 				parts = _costumeParts,
 				usePartFilter = usePartFilter,
 				meshToAxis = space.MeshToAxis,
@@ -1224,29 +1258,43 @@ namespace MeshModifier.NDMFDeform.Core
 				smoothed = true;
 			}
 
-			handle = new ApplyJob
+			if (group != null)
 			{
-				delta = current,
-				weight = weight,
-				factor = factor,
-				vertices = buffers.Vertices,
-				displacement = _baseDisplacement,
-			}.Schedule(n, 128, handle);
-
-			if (smoothed && enforceMinGap)
-			{
-				handle = new EnforceMinGapJob
+				handle = new AccumulateJob
 				{
-					surface = _surface,
-					parts = _costumeParts,
-					usePartFilter = usePartFilter,
+					delta = current,
 					weight = weight,
 					factor = factor,
-					minGap = minGap,
-					searchDistance = searchDistance,
+					sumD = group.SumD,
+					sumW = group.SumW,
+				}.Schedule(n, 128, handle);
+			}
+			else
+			{
+				handle = new ApplyJob
+				{
+					delta = current,
+					weight = weight,
+					factor = factor,
 					vertices = buffers.Vertices,
 					displacement = _baseDisplacement,
-				}.Schedule(n, 32, handle);
+				}.Schedule(n, 128, handle);
+
+				if (smoothed && enforceMinGap)
+				{
+					handle = new EnforceMinGapJob
+					{
+						surface = _surface,
+						parts = _costumeParts,
+						usePartFilter = usePartFilter,
+						weight = weight,
+						factor = factor,
+						minGap = minGap,
+						searchDistance = searchDistance,
+						vertices = buffers.Vertices,
+						displacement = _baseDisplacement,
+					}.Schedule(n, 32, handle);
+				}
 			}
 
 			handle = delta.Dispose(handle);
@@ -1263,7 +1311,8 @@ namespace MeshModifier.NDMFDeform.Core
 		/// 放射変位場 Δr(h, θ) を作り、補間・平滑化)→ RadialApplyJob(各頂点の所属パーツで Δr をサンプル)
 		/// → ApplyJob → EnforceMinGapJob(パーツ制限付きの最近接点で minGap を保証)
 		/// </summary>
-		private JobHandle SchedulePartCylinder(in MeshBuffers buffers, in DeformSpace space, JobHandle dependency)
+		private JobHandle SchedulePartCylinder(in MeshBuffers buffers, in DeformSpace space, NativeArray<float3> input,
+			FitGroupBuffers group, JobHandle dependency)
 		{
 			var n = buffers.Length;
 			var cellCount = HumanoidSkeleton.PartCount * BodyPartProfiles.HCount * BodyPartProfiles.ThetaCount;
@@ -1279,7 +1328,7 @@ namespace MeshModifier.NDMFDeform.Core
 
 			var handle = new CylinderCoordJob
 			{
-				vertices = buffers.Vertices,
+				vertices = input,
 				parts = _costumeParts,
 				profiles = _profiles,
 				meshToAxis = space.MeshToAxis,
@@ -1313,7 +1362,7 @@ namespace MeshModifier.NDMFDeform.Core
 				radialDirs = radialDirs,
 				parts = _costumeParts,
 				grid = grid,
-				vertices = buffers.Vertices,
+				vertices = input,
 				profiles = _profiles,
 				jointFan = jointFan ? 1 : 0,
 				delta = delta,
@@ -1377,29 +1426,43 @@ namespace MeshModifier.NDMFDeform.Core
 				}
 			}
 
-			handle = new ApplyJob
+			if (group != null)
 			{
-				delta = current,
-				weight = weight,
-				factor = factor,
-				vertices = buffers.Vertices,
-				displacement = _baseDisplacement,
-			}.Schedule(n, 128, handle);
-
-			if (enforceMinGap)
-			{
-				handle = new EnforceMinGapJob
+				handle = new AccumulateJob
 				{
-					surface = _surface,
-					parts = _costumeParts,
-					usePartFilter = 1,
+					delta = current,
 					weight = weight,
 					factor = factor,
-					minGap = minGap,
-					searchDistance = searchDistance,
+					sumD = group.SumD,
+					sumW = group.SumW,
+				}.Schedule(n, 128, handle);
+			}
+			else
+			{
+				handle = new ApplyJob
+				{
+					delta = current,
+					weight = weight,
+					factor = factor,
 					vertices = buffers.Vertices,
 					displacement = _baseDisplacement,
-				}.Schedule(n, 32, handle);
+				}.Schedule(n, 128, handle);
+
+				if (enforceMinGap)
+				{
+					handle = new EnforceMinGapJob
+					{
+						surface = _surface,
+						parts = _costumeParts,
+						usePartFilter = 1,
+						weight = weight,
+						factor = factor,
+						minGap = minGap,
+						searchDistance = searchDistance,
+						vertices = buffers.Vertices,
+						displacement = _baseDisplacement,
+					}.Schedule(n, 32, handle);
+				}
 			}
 
 			handle = coords.Dispose(handle);
@@ -1421,7 +1484,264 @@ namespace MeshModifier.NDMFDeform.Core
 			return handle;
 		}
 
+		/// <summary>
+		/// フィットグループの共有バッファ(先頭メンバーが所有、パスごとに確保・末尾メンバーが解放)。
+		/// Snapshot = グループ直前の頂点位置(全メンバーの入力)、SumD = Σ wᵢ fᵢ dᵢ、SumW = Σ wᵢ
+		/// </summary>
+		private sealed class FitGroupBuffers
+		{
+			public NativeArray<float3> Snapshot;
+			public NativeArray<float3> SumD;
+			public NativeArray<float> SumW;
+			public int Pass = -1;
+
+			public bool IsCreated => Snapshot.IsCreated;
+
+			public void Allocate(int n)
+			{
+				DisposeNow();
+				Snapshot = new NativeArray<float3>(n, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+				SumD = new NativeArray<float3>(n, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+				SumW = new NativeArray<float>(n, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+			}
+
+			public JobHandle Dispose(JobHandle handle)
+			{
+				if (Snapshot.IsCreated) handle = Snapshot.Dispose(handle);
+				if (SumD.IsCreated) handle = SumD.Dispose(handle);
+				if (SumW.IsCreated) handle = SumW.Dispose(handle);
+				Pass = -1;
+				return handle;
+			}
+
+			public void DisposeNow()
+			{
+				if (Snapshot.IsCreated) Snapshot.Dispose();
+				if (SumD.IsCreated) SumD.Dispose();
+				if (SumW.IsCreated) SumW.Dispose();
+				Pass = -1;
+			}
+		}
+
+		/// <summary>
+		/// フィットグループを決める: 親スタックの有効なデフォーマの並びで、この Body Fit と同じ体を参照する
+		/// Body Fit(fitGroup が真のもの)が連続する範囲。先頭が共有バッファを持ち、末尾が合成して書き戻す。
+		/// 参照する体が違う(重ね着)、間に他のデフォーマが挟まる、fitGroup が偽、のいずれかで切れる。
+		/// </summary>
+		private void DetermineGroup()
+		{
+			_groupLeader = null;
+			_groupLast = false;
+			_groupSize = 1;
+			_group?.DisposeNow();
+			if (!fitGroup)
+			{
+				_group = null;
+				return;
+			}
+			var stack = GetComponentInParent<DeformStack>();
+			if (stack == null)
+			{
+				_group = null;
+				return;
+			}
+			var ordered = new List<DeformerBase>();
+			foreach (var entry in stack.Deformers)
+			{
+				if (entry.enabled && entry.deformer != null)
+					ordered.Add(entry.deformer);
+			}
+			var index = ordered.IndexOf(this);
+			if (index < 0)
+			{
+				_group = null;
+				return;
+			}
+			var first = index;
+			while (first > 0 && IsGroupMate(ordered[first - 1]))
+				first--;
+			var last = index;
+			while (last + 1 < ordered.Count && IsGroupMate(ordered[last + 1]))
+				last++;
+			if (last == first)
+			{
+				_group = null;
+				return;
+			}
+			_groupLeader = (BodyFitDeformer)ordered[first];
+			_groupLast = index == last;
+			_groupSize = last - first + 1;
+			if (_groupLeader == this)
+				_group ??= new FitGroupBuffers();
+			else
+				_group = null;
+		}
+
+		private bool IsGroupMate(DeformerBase other)
+		{
+			return other is BodyFitDeformer fit && fit != this && fit.fitGroup && SameBodies(fit);
+		}
+
+		/// <summary>参照する体(body + additionalBodies。null は無視)が同じか</summary>
+		private bool SameBodies(BodyFitDeformer other)
+		{
+			if (body != other.body)
+				return false;
+			foreach (var r in additionalBodies)
+			{
+				if (r != null && !other.additionalBodies.Contains(r))
+					return false;
+			}
+			foreach (var r in other.additionalBodies)
+			{
+				if (r != null && !additionalBodies.Contains(r))
+					return false;
+			}
+			return true;
+		}
+
+		private bool CanContribute(int n)
+		{
+			return factor > 0f && _surfaceReady && _surface.IsCreated && n == _vertexCount &&
+			       _baseDisplacement.IsCreated && _costumeParts.IsCreated && _costumeParts.Length == n;
+		}
+
+		/// <summary>
+		/// フィットグループのメンバーとしてのスケジュール(§14.3)。
+		/// パスの最初に走ったメンバーが共有バッファを確保して入力を写し、各メンバーは自分のジョブチェーンを
+		/// 入力のスナップショットに対して回して Σ w f d と Σ w に足す。末尾メンバーが
+		/// p' = p + Σ w f d / max(1, Σ w) を書き戻し、minGap を再保証して共有バッファを解放する。
+		/// シェイプフレーム(FixedDisplacement)は末尾メンバーだけが合成済みの変位を足す。
+		/// </summary>
+		private JobHandle ScheduleGrouped(FitGroupBuffers group, in MeshBuffers buffers, in DeformSpace space,
+			JobHandle dependency)
+		{
+			var pass = _passIndex++;
+			var n = buffers.Length;
+			var handle = dependency;
+
+			if (pass > 0 && _groupLeader.blendShapes == BlendShapeFitMode.FixedDisplacement)
+			{
+				if (!_groupLast || !_baseDisplacement.IsCreated || _baseDisplacement.Length != n)
+					return dependency;
+				return new AddDisplacementJob
+				{
+					displacement = _baseDisplacement,
+					factor = 1f,
+					vertices = buffers.Vertices,
+				}.Schedule(n, 128, dependency);
+			}
+
+			if (group.Pass != pass || !group.IsCreated || group.Snapshot.Length != n)
+			{
+				group.Allocate(n);
+				group.Pass = pass;
+				handle = new InitGroupJob
+				{
+					vertices = buffers.Vertices,
+					snapshot = group.Snapshot,
+					sumD = group.SumD,
+					sumW = group.SumW,
+				}.Schedule(n, 128, handle);
+			}
+
+			if (CanContribute(n))
+				handle = ScheduleCore(in buffers, in space, group.Snapshot, group, handle);
+
+			if (!_groupLast)
+				return handle;
+
+			if (!_baseDisplacement.IsCreated || _baseDisplacement.Length != n)
+			{
+				if (_baseDisplacement.IsCreated)
+					_baseDisplacement.Dispose();
+				_baseDisplacement = new NativeArray<float3>(n, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+			}
+			handle = new CombineJob
+			{
+				snapshot = group.Snapshot,
+				sumD = group.SumD,
+				sumW = group.SumW,
+				vertices = buffers.Vertices,
+				displacement = _baseDisplacement,
+			}.Schedule(n, 128, handle);
+
+			if (enforceMinGap && _surfaceReady && _surface.IsCreated && _costumeParts.IsCreated && _costumeParts.Length == n)
+			{
+				handle = new EnforceMinGapJob
+				{
+					surface = _surface,
+					parts = _costumeParts,
+					usePartFilter = (_effectiveMode == FitMode.PartCylinder || partFilter) && _partsReady ? 1 : 0,
+					weight = group.SumW,
+					clampWeight = 1,
+					factor = 1f,
+					minGap = minGap,
+					searchDistance = searchDistance,
+					vertices = buffers.Vertices,
+					displacement = _baseDisplacement,
+				}.Schedule(n, 32, handle);
+			}
+			return group.Dispose(handle);
+		}
+
 		// ---- ジョブ ----
+
+		/// <summary>フィットグループの共有バッファを初期化する(入力の写し、累積 0)</summary>
+		[BurstCompile]
+		public struct InitGroupJob : IJobParallelFor
+		{
+			[ReadOnly] public NativeArray<float3> vertices;
+			[WriteOnly] public NativeArray<float3> snapshot;
+			[WriteOnly] public NativeArray<float3> sumD;
+			[WriteOnly] public NativeArray<float> sumW;
+
+			public void Execute(int index)
+			{
+				snapshot[index] = vertices[index];
+				sumD[index] = float3.zero;
+				sumW[index] = 0f;
+			}
+		}
+
+		/// <summary>フィットグループへの寄与: Σ w f d と Σ w に足す(w = 領域重み、f = factor)</summary>
+		[BurstCompile]
+		public struct AccumulateJob : IJobParallelFor
+		{
+			[ReadOnly] public NativeArray<float3> delta;
+			[ReadOnly] public NativeArray<float> weight;
+			public float factor;
+			public NativeArray<float3> sumD;
+			public NativeArray<float> sumW;
+
+			public void Execute(int index)
+			{
+				var w = weight[index];
+				if (w <= 0f)
+					return;
+				sumD[index] += delta[index] * (w * factor);
+				sumW[index] += w;
+			}
+		}
+
+		/// <summary>フィットグループの合成: p' = snapshot + Σ w f d / max(1, Σ w)。合成した変位も記録する</summary>
+		[BurstCompile]
+		public struct CombineJob : IJobParallelFor
+		{
+			[ReadOnly] public NativeArray<float3> snapshot;
+			[ReadOnly] public NativeArray<float3> sumD;
+			[ReadOnly] public NativeArray<float> sumW;
+			[WriteOnly] public NativeArray<float3> vertices;
+			[WriteOnly] public NativeArray<float3> displacement;
+
+			public void Execute(int index)
+			{
+				var w = sumW[index];
+				var d = w > 1f ? sumD[index] / w : sumD[index];
+				vertices[index] = snapshot[index] + d;
+				displacement[index] = d;
+			}
+		}
 
 		/// <summary>
 		/// 頂点ごとに領域重みと目標変位を求める。
@@ -1573,6 +1893,9 @@ namespace MeshModifier.NDMFDeform.Core
 			[ReadOnly] public NativeArray<PartWeights> parts;
 			public int usePartFilter;
 			[ReadOnly] public NativeArray<float> weight;
+
+			/// <summary>重みを 1 で頭打ちにする(フィットグループの Σ w は 1 を超える)</summary>
+			public int clampWeight;
 			public float factor;
 			public float minGap;
 			public float searchDistance;
@@ -1584,6 +1907,8 @@ namespace MeshModifier.NDMFDeform.Core
 				var w = weight[index];
 				if (w <= 0f)
 					return;
+				if (clampWeight != 0)
+					w = min(w, 1f);
 
 				var p = vertices[index];
 				var mask = usePartFilter != 0 ? PartMaskOf(parts[index]) : 0;

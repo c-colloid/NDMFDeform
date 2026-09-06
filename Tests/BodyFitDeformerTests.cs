@@ -238,6 +238,86 @@ namespace MeshModifier.NDMFDeform.Tests
 			Assert.That(referenced, Is.EquivalentTo(new[] { s.Body, second }), "追加の体も参照として宣言する");
 		}
 
+		/// <summary>同じ設定の 2 つ目の Body Fit を同じスタックへ追加する(体は同じ)</summary>
+		private BodyFitDeformer AddSecondFit(in Setup s, Renderer body = null)
+		{
+			var fitGo = new GameObject("BodyFit2");
+			fitGo.transform.SetParent(s.CostumeGo.transform, false);
+			var fit = fitGo.AddComponent<BodyFitDeformer>();
+			fit.Body = body != null ? body : s.Body;
+			fit.Region = BodyFitDeformer.FitRegion.WholeMesh;
+			fit.SmoothIterations = 0;
+			fit.SearchDistance = 1f;
+			fit.MinGap = 0.02f;
+			fit.MaxGap = 0.02f;
+			fit.PullIn = true;
+			fit.Factor = 1f;
+			s.Stack.AddDeformer(fit);
+			return fit;
+		}
+
+		[Test]
+		public void FitGroup_OverlapAveragesInsteadOfCompounding()
+		{
+			// factor 0.5 の Body Fit を 2 つ重ねる。頂点 0.8 → 目標 0.52(変位 −0.28)。
+			// 逐次(グループなし)なら 2 つ目が残りの半分を詰めて 0.59、グループなら平均で 0.66(半分のまま)
+			var s = CreateSetup(new[] { new Vector3(0.8f, 0f, 0f) });
+			s.Fit.Factor = 0.5f;
+			var second = AddSecondFit(s);
+			second.Factor = 0.5f;
+
+			var v = Bake(s);
+			Assert.That(s.Fit.FitGroupSize, Is.EqualTo(2));
+			Assert.That(second.FitGroupSize, Is.EqualTo(2));
+			AssertNear(v[0], new Vector3(0.66f, 0f, 0f), "グループ: 重なりは重み付き平均(factor が累積しない)");
+
+			second.FitGroup = false;
+			v = Bake(s);
+			Assert.That(s.Fit.FitGroupSize, Is.EqualTo(1));
+			AssertNear(v[0], new Vector3(0.59f, 0f, 0f), "グループなし: 残差の逐次適用で寄せが進む");
+		}
+
+		[Test]
+		public void FitGroup_IsOrderIndependentWithDifferentGaps()
+		{
+			// maxGap 0.05 と 0.10 の Body Fit。頂点 0.8 の目標は 0.55 と 0.60。
+			// 逐次ならどちらの順でも 0.55(後段の帯に入って止まる / 後段が 0.55 へ寄せる)、グループなら平均 0.575
+			var s = CreateSetup(new[] { new Vector3(0.8f, 0f, 0f) });
+			s.Fit.MaxGap = 0.05f;
+			var second = AddSecondFit(s);
+			second.MaxGap = 0.1f;
+			var v = Bake(s);
+			AssertNear(v[0], new Vector3(0.575f, 0f, 0f), "0.05 → 0.10 の順でも平均");
+
+			s.Fit.MaxGap = 0.1f;
+			second.MaxGap = 0.05f;
+			v = Bake(s);
+			AssertNear(v[0], new Vector3(0.575f, 0f, 0f), "0.10 → 0.05 の順でも平均(順序に依らない)");
+
+			second.FitGroup = false;
+			v = Bake(s);
+			AssertNear(v[0], new Vector3(0.55f, 0f, 0f), "グループなしは後段優先");
+		}
+
+		[Test]
+		public void FitGroup_SplitsWhenBodiesDiffer()
+		{
+			// 2 つ目が別の体(x 1.2 中心の立方体)を参照する重ね着はグループにならず、順に適用される:
+			// 1 つ目で 0.52 へ、2 つ目で 2 つ目の壁(0.7)から 0.02 の 0.68 へ
+			var s = CreateSetup(new[] { new Vector3(0.8f, 0f, 0f) });
+			var secondGo = new GameObject("BodyMesh2");
+			secondGo.transform.SetParent(_root.transform, false);
+			secondGo.transform.position = new Vector3(1.2f, 0f, 0f);
+			secondGo.AddComponent<MeshFilter>().sharedMesh = Track(MakeCube());
+			var secondBody = secondGo.AddComponent<MeshRenderer>();
+			var second = AddSecondFit(s, secondBody);
+
+			var v = Bake(s);
+			Assert.That(s.Fit.FitGroupSize, Is.EqualTo(1));
+			Assert.That(second.FitGroupSize, Is.EqualTo(1));
+			AssertNear(v[0], new Vector3(0.68f, 0f, 0f), "体が違えば逐次適用");
+		}
+
 		[Test]
 		public void Fit_PullsFarVertexInToMaxGap()
 		{
