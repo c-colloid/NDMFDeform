@@ -138,6 +138,12 @@ namespace MeshModifier.NDMFDeform.Core
 		/// <summary>この骨格の元になった Animator(FromAnimator のとき。衣装側の Animator と区別する)</summary>
 		public Animator SourceAnimator { get; private set; }
 
+		/// <summary>
+		/// 肩の軸を「脊椎(胴の軸)上の肩の高さの点 → 上腕関節」にする(Shoulder ボーンが無くても作る)。
+		/// 既定(偽)は Shoulder ボーン → 上腕関節。変更後は <see cref="Refresh"/> で軸を作り直す。
+		/// </summary>
+		public bool ShoulderFromSpine { get; set; }
+
 		/// <summary>ボーン対応付けの信頼度: ヒューマノイド / 祖先 / 名前 / 対応済みの親</summary>
 		public const float ConfidenceStructural = 1f;
 
@@ -217,6 +223,10 @@ namespace MeshModifier.NDMFDeform.Core
 					hash = hash * 31 + (int)pair.Key;
 					hash = hash * 31 + pair.Value.position.GetHashCode();
 				}
+			}
+			unchecked
+			{
+				hash = hash * 31 + (ShoulderFromSpine ? 1 : 0);
 			}
 			StateHash = hash;
 			BuildAxes(_bones);
@@ -310,7 +320,23 @@ namespace MeshModifier.NDMFDeform.Core
 			Segment(BodyPart.Neck, neck, head);
 			Extended(BodyPart.Head, head, neck ?? Pos(HumanBodyBones.Chest) ?? hips, 2f, 0.2f);
 
-			Segment(BodyPart.LeftShoulder, Pos(HumanBodyBones.LeftShoulder), Pos(HumanBodyBones.LeftUpperArm));
+			void Shoulder(BodyPart part, HumanBodyBones shoulderBone, HumanBodyBones armBone)
+			{
+				var arm = Pos(armBone);
+				var shoulder = Pos(shoulderBone);
+				var torso = Axes[(int)BodyPart.Torso];
+				if (!ShoulderFromSpine || arm == null || torso.Valid == 0)
+				{
+					Segment(part, shoulder, arm);
+					return;
+				}
+				// 脊椎上の、肩(無ければ上腕関節)の高さの点から上腕関節へ
+				var anchor = shoulder ?? arm.Value;
+				var t = math.clamp(math.dot(anchor - torso.Origin, torso.Direction), 0f, torso.Length);
+				SetAxis(part, torso.Origin + torso.Direction * t, arm.Value);
+			}
+
+			Shoulder(BodyPart.LeftShoulder, HumanBodyBones.LeftShoulder, HumanBodyBones.LeftUpperArm);
 			Segment(BodyPart.LeftUpperArm, Pos(HumanBodyBones.LeftUpperArm), Pos(HumanBodyBones.LeftLowerArm));
 			Segment(BodyPart.LeftLowerArm, Pos(HumanBodyBones.LeftLowerArm), Pos(HumanBodyBones.LeftHand));
 			var leftMiddle = Pos(HumanBodyBones.LeftMiddleProximal);
@@ -320,7 +346,7 @@ namespace MeshModifier.NDMFDeform.Core
 			else
 				Extended(BodyPart.LeftHand, Pos(HumanBodyBones.LeftHand), Pos(HumanBodyBones.LeftLowerArm), 0.6f, 0.15f);
 
-			Segment(BodyPart.RightShoulder, Pos(HumanBodyBones.RightShoulder), Pos(HumanBodyBones.RightUpperArm));
+			Shoulder(BodyPart.RightShoulder, HumanBodyBones.RightShoulder, HumanBodyBones.RightUpperArm);
 			Segment(BodyPart.RightUpperArm, Pos(HumanBodyBones.RightUpperArm), Pos(HumanBodyBones.RightLowerArm));
 			Segment(BodyPart.RightLowerArm, Pos(HumanBodyBones.RightLowerArm), Pos(HumanBodyBones.RightHand));
 			var rightMiddle = Pos(HumanBodyBones.RightMiddleProximal);

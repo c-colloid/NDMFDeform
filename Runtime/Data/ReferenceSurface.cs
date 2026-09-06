@@ -121,6 +121,9 @@ namespace MeshModifier.NDMFDeform.Core
 			[WriteOnly] public NativeArray<float> radius;
 			public float maxDistance;
 
+			/// <summary>肩の軸が脊椎から伸びるとき、肩のレイは胴・上腕の三角形にも当てる(肩は胴と腕の橋なので)</summary>
+			public int shoulderBridge;
+
 			public void Execute(int index)
 			{
 				const int cellsPerPart = BodyPartProfiles.HCount * BodyPartProfiles.ThetaCount;
@@ -135,11 +138,20 @@ namespace MeshModifier.NDMFDeform.Core
 					return;
 				}
 
+				var mask = 1 << part;
+				if (shoulderBridge != 0)
+				{
+					if (part == (int)BodyPart.LeftShoulder)
+						mask |= (1 << (int)BodyPart.Torso) | (1 << (int)BodyPart.LeftUpperArm);
+					else if (part == (int)BodyPart.RightShoulder)
+						mask |= (1 << (int)BodyPart.Torso) | (1 << (int)BodyPart.RightUpperArm);
+				}
+
 				var h = BodyPartProfiles.HStart +
 				        (hi + 0.5f) / BodyPartProfiles.HCount * (BodyPartProfiles.HEnd - BodyPartProfiles.HStart);
 				var theta = -math.PI + (ti + 0.5f) / BodyPartProfiles.ThetaCount * (2f * math.PI);
 				axis.RayFrom(h, theta, out var origin, out var direction);
-				radius[index] = surface.Raycast(origin, direction, maxDistance, 1 << part, out var t, out _)
+				radius[index] = surface.Raycast(origin, direction, maxDistance, mask, out var t, out _)
 					? t
 					: float.NaN;
 			}
@@ -173,6 +185,7 @@ namespace MeshModifier.NDMFDeform.Core
 				axes = result.Data.Axes,
 				radius = result.Data.Radius,
 				maxDistance = math.max(extent * 4f, 2f),
+				shoulderBridge = skeleton.ShoulderFromSpine ? 1 : 0,
 			}.Schedule(cellCount, 64).Complete();
 
 			FillMissing(result.Data.Radius, result.Data.Usable);

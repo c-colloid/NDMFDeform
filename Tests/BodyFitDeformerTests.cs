@@ -853,6 +853,66 @@ namespace MeshModifier.NDMFDeform.Tests
 		}
 
 		[Test]
+		public void ShoulderAxis_CapVertexMovesVerticallyInsteadOfSideways()
+		{
+			// 胴の上端(天面 y = 1.4)の 5 cm 上にある胴所属の頂点。胴の円柱軸で見ると軸区間の上(h = 1.04)で、
+			// プロファイルの端の値(壁の半径 0.2)に向かって横へ 12 cm 押し出されてしまう。
+			// 肩甲帯(脊椎 → 上腕関節の水平な軸)で扱うと天面からの隙間で上下に動く(0.1 + 0.02 → y = 1.42)
+			var s = CreatePartSetup(new[] { new Vector3(0.1f, 1.45f, 0f) }, new[] { 0 });
+
+			var v = BakePart(s);
+			Assert.That(v[0].x, Is.Not.EqualTo(0.1f).Within(0.02f), "肩甲帯なし: 胴の軸から横へ押し出される");
+
+			s.Fit.ShoulderAxis = true;
+			v = BakePart(s);
+			AssertNear(v[0], new Vector3(0.1f, 1.42f, 0f), "肩甲帯あり: 天面の半径 + 隙間へ上下に動く", 3e-3f);
+			var parts = s.Fit.GetCostumeParts();
+			Assert.That(parts[0].Parts.x, Is.EqualTo((int)BodyPart.LeftShoulder), "胴の成分が肩へ置き換わる");
+		}
+
+		[Test]
+		public void SeamSmoothing_ReducesDisplacementJumpAcrossSeam()
+		{
+			// 袖(腕)と身頃(胴)がつながった 4 頂点。所属は頂点ごと(混合なし)なので、縫い目で変位が飛ぶ。
+			// 縫い目の平滑化は「隣に支配パーツの違う頂点がある」頂点の変位を隣接平均へ寄せ、飛びを小さくする
+			var s = CreatePartSetup(new[]
+			{
+				new Vector3(0.45f, 0.95f, 0f), new Vector3(0.45f, 0.97f, 0f),
+				new Vector3(0.25f, 0.7f, 0f), new Vector3(0.25f, 0.72f, 0f),
+			}, new[] { 1, 1, 0, 0 });
+			s.Source.triangles = new[] { 0, 1, 2, 1, 3, 2 };
+			s.Fit.SeamBlend = 0;
+			s.Fit.EnforceMinGap = false;
+			var orig = s.Source.vertices;
+
+			var v = BakePart(s);
+			var jump0 = Vector3.Distance(v[0] - orig[0], v[2] - orig[2]);
+			Assert.That(jump0, Is.GreaterThan(0.005f), "平滑化なしでは腕(−0.02)と胴(−0.03)の変位が違う");
+
+			s.Fit.SeamSmoothIterations = 4;
+			v = BakePart(s);
+			var jump1 = Vector3.Distance(v[0] - orig[0], v[2] - orig[2]);
+			Assert.That(jump1, Is.LessThan(jump0), "縫い目の平滑化で変位の飛びが小さくなる");
+			Assert.That(v[1].y, Is.EqualTo(0.97f).Within(1e-4f), "放射方向(x)以外は動かない");
+		}
+
+		[Test]
+		public void JointFan_LeavesSinglePartVerticesUnchanged()
+		{
+			// 所属が 1 パーツの頂点は折れ線軸の近似(扇状放射)の対象外なので、通常の放射変位と一致する
+			var s = CreatePartSetup(new[]
+			{
+				new Vector3(0.45f, 0.95f, 0f), new Vector3(0.49f, 0.95f, 0f), new Vector3(0.25f, 0.7f, 0f),
+			}, new[] { 1, 1, 0 });
+			s.Fit.JointFan = true;
+
+			var v = BakePart(s);
+			AssertNear(v[0], new Vector3(0.43f, 0.95f, 0f), "袖の内層", 2e-3f);
+			AssertNear(v[1], new Vector3(0.47f, 0.95f, 0f), "装飾のオフセット維持", 2e-3f);
+			AssertNear(v[2], new Vector3(0.22f, 0.7f, 0f), "胴", 2e-3f);
+		}
+
+		[Test]
 		public void PartLabel_GeometrySourceIgnoresWrongBoneWeights()
 		{
 			// ウェイトは逆(袖 → 胴、胴 → 腕)だが、Source = Geometry なら体の形状で所属を決める

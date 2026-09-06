@@ -113,6 +113,31 @@ namespace MeshModifier.NDMFDeform.Tests
 		}
 
 		[Test]
+		public void Skeleton_ShoulderFromSpineBuildsHorizontalAxisFromTorso()
+		{
+			// Shoulder ボーンが無い骨格: 既定では肩の軸は無く、ShoulderFromSpine なら
+			// 胴の軸上の上腕関節の高さの点(0, 1.35, 0)から上腕関節(0.2, 1.35, 0)へ水平な軸を作る
+			var (skeleton, _) = CreateSkeleton();
+			Assert.That(skeleton.HasAxis(BodyPart.LeftShoulder), Is.False);
+			Assert.That(skeleton.Canonical(BodyPart.LeftShoulder), Is.EqualTo(BodyPart.LeftUpperArm));
+
+			var previous = skeleton.StateHash;
+			skeleton.ShoulderFromSpine = true;
+			skeleton.Refresh();
+			Assert.That(skeleton.StateHash, Is.Not.EqualTo(previous), "軸の作り方が変わると状態ハッシュも変わる(キャッシュの無効化)");
+			Assert.That(skeleton.HasAxis(BodyPart.LeftShoulder), Is.True);
+			var axis = skeleton.Axes[(int)BodyPart.LeftShoulder];
+			Assert.That(math.distance(axis.Origin, new float3(0f, 1.35f, 0f)), Is.LessThan(1e-4f));
+			Assert.That(math.distance(axis.Direction, new float3(1f, 0f, 0f)), Is.LessThan(1e-4f));
+			Assert.That(axis.Length, Is.EqualTo(0.2f).Within(1e-4f));
+			Assert.That(skeleton.Canonical(BodyPart.LeftShoulder), Is.EqualTo(BodyPart.LeftShoulder));
+
+			skeleton.ShoulderFromSpine = false;
+			skeleton.Refresh();
+			Assert.That(skeleton.HasAxis(BodyPart.LeftShoulder), Is.False, "戻すと元の軸構成");
+		}
+
+		[Test]
 		public void MapBones_ResolvesByAncestorJointParentAndSegment()
 		{
 			var (skeleton, bones) = CreateSkeleton();

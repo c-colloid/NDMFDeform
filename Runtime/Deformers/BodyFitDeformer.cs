@@ -166,6 +166,21 @@ namespace MeshModifier.NDMFDeform.Core
 		[SerializeField, Min(0f), Tooltip("衣装アーマチュアの関節をアバターの関節へ対応付ける許容距離(m)")]
 		private float jointTolerance = 0.03f;
 
+		[SerializeField, Range(0, 10), Tooltip("パーツ円柱: 縫い目(所属が混ざる頂点とその隣)の変位ベクトルを衣装の隣接で平滑化する回数(強さは smoothStrength)。0 で無効")]
+		private int seamSmoothIterations;
+
+		[SerializeField, Tooltip("パーツ円柱: 縫い目だけでなく全頂点の変位ベクトルを平滑化する")]
+		private bool seamSmoothAll;
+
+		[SerializeField, Tooltip("パーツ円柱: 所属が混ざる頂点は、所属パーツの軸(線分)の最寄り点から放射する(折れ線軸の近似。関節で放射方向を扇状につなぐ)")]
+		private bool jointFan;
+
+		[SerializeField, Tooltip("肩の軸を脊椎(胴の軸)から上腕関節までの線分にし、胴の上端(肩甲帯: 上腕関節の高さより上)の胴所属を肩へ移す")]
+		private bool shoulderAxis;
+
+		[SerializeField, Range(0f, 0.3f), Tooltip("肩甲帯の下端。上腕関節の高さ(胴の軸の h)からこれだけ下までを肩の軸で扱う")]
+		private float shoulderCapMargin = 0.1f;
+
 		[SerializeField] private Transform axisOverride;
 
 		public Renderer Body { get => body; set => body = value; }
@@ -195,8 +210,26 @@ namespace MeshModifier.NDMFDeform.Core
 
 		/// <summary>直近のパーツ所属計算のグループごとの判定(インスペクタ用。グループ化なしでは空)</summary>
 		public IReadOnlyList<PartGroupReport> PartReports => _partReports;
+
+		/// <summary>
+		/// 直近のパーツ所属計算の頂点ごとの所属(縫い目の混合・軸区間外の差し替え後)をコピーして返す。
+		/// 未計算なら null(インスペクタの可視化・検証用)。
+		/// </summary>
+		public PartWeights[] GetCostumeParts()
+		{
+			if (!_costumeParts.IsCreated)
+				return null;
+			var copy = new PartWeights[_costumeParts.Length];
+			_costumeParts.CopyTo(copy);
+			return copy;
+		}
 		public bool PartFilter { get => partFilter; set => partFilter = value; }
 		public float JointTolerance { get => jointTolerance; set => jointTolerance = Mathf.Max(0f, value); }
+		public int SeamSmoothIterations { get => seamSmoothIterations; set => seamSmoothIterations = Mathf.Clamp(value, 0, 10); }
+		public bool SeamSmoothAll { get => seamSmoothAll; set => seamSmoothAll = value; }
+		public bool JointFan { get => jointFan; set => jointFan = value; }
+		public bool ShoulderAxis { get => shoulderAxis; set => shoulderAxis = value; }
+		public float ShoulderCapMargin { get => shoulderCapMargin; set => shoulderCapMargin = Mathf.Clamp(value, 0f, 0.3f); }
 
 		/// <summary>骨格の差し替え(テスト用。null なら体 / 衣装の親の Animator から作る)</summary>
 		[System.NonSerialized] public HumanoidSkeleton SkeletonOverride;
@@ -521,7 +554,14 @@ namespace MeshModifier.NDMFDeform.Core
 		private HumanoidSkeleton ResolveSkeleton()
 		{
 			if (SkeletonOverride != null)
+			{
+				if (SkeletonOverride.ShoulderFromSpine != shoulderAxis)
+				{
+					SkeletonOverride.ShoulderFromSpine = shoulderAxis;
+					SkeletonOverride.Refresh();
+				}
 				return SkeletonOverride;
+			}
 			var animator = FindHumanoidAnimator();
 			if (animator == null)
 			{
@@ -532,12 +572,18 @@ namespace MeshModifier.NDMFDeform.Core
 			}
 			if (_cachedSkeleton != null && _cachedAnimator == animator && _cachedAvatar == animator.avatar)
 			{
+				_cachedSkeleton.ShoulderFromSpine = shoulderAxis;
 				_cachedSkeleton.Refresh();
 				return _cachedSkeleton;
 			}
 			_cachedSkeleton = HumanoidSkeleton.FromAnimator(animator);
 			_cachedAnimator = animator;
 			_cachedAvatar = animator.avatar;
+			if (_cachedSkeleton != null && _cachedSkeleton.ShoulderFromSpine != shoulderAxis)
+			{
+				_cachedSkeleton.ShoulderFromSpine = shoulderAxis;
+				_cachedSkeleton.Refresh();
+			}
 			return _cachedSkeleton;
 		}
 
@@ -581,6 +627,8 @@ namespace MeshModifier.NDMFDeform.Core
 				key = key * 31 + islandConfidence.GetHashCode();
 				key = key * 31 + seamBlend;
 				key = key * 31 + jointTolerance.GetHashCode();
+				key = key * 31 + (shoulderAxis ? 1 : 0);
+				key = key * 31 + shoulderCapMargin.GetHashCode();
 				key = key * 31 + OverridesHash();
 				var own = GetOwnRenderer();
 				key = key * 31 + (own != null ? own.GetInstanceID() : 0);
@@ -740,6 +788,18 @@ namespace MeshModifier.NDMFDeform.Core
 							report.OutOfRangeCount = counts[report.Group];
 					}
 				}
+			}
+
+			// 肩の帽子領域(胴の上端)は脊椎から上腕関節へ伸びる肩の軸で放射させる
+			if (shoulderAxis && _profiles.IsCreated)
+			{
+				if (world == null)
+				{
+					world = (Vector3[])local.Clone();
+					if (own != null)
+						ReferenceSurfaceUtility.SkinToWorld(own.transform, source, world);
+				}
+				PartLabeler.ApplyShoulderCap(weights, world, in _profiles, shoulderCapMargin);
 			}
 
 			// 縫い目: 同位置の頂点を揃え、境界で所属を混ぜる
@@ -967,7 +1027,7 @@ namespace MeshModifier.NDMFDeform.Core
 			var valid = new NativeArray<byte>(n, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
 			var delta = new NativeArray<float3>(n, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
 			var grid = new NativeArray<float>(cellCount, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
-			var scratch = new NativeArray<float>(cellCount, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+			var gridScratch = new NativeArray<float>(cellCount, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
 
 			var handle = new CylinderCoordJob
 			{
@@ -995,7 +1055,7 @@ namespace MeshModifier.NDMFDeform.Core
 				smoothIterations = smoothIterations,
 				smoothStrength = smoothStrength,
 				grid = grid,
-				scratch = scratch,
+				scratch = gridScratch,
 			}.Schedule(handle);
 
 			handle = new RadialApplyJob
@@ -1004,13 +1064,53 @@ namespace MeshModifier.NDMFDeform.Core
 				radialDirs = radialDirs,
 				parts = _costumeParts,
 				grid = grid,
+				vertices = buffers.Vertices,
+				profiles = _profiles,
+				jointFan = jointFan ? 1 : 0,
 				delta = delta,
 				valid = valid,
 			}.Schedule(n, 64, handle);
 
+			// 縫い目(所属が混ざる頂点とその隣)の変位ベクトルを頂点隣接で平滑化する(放射方向の食い違いをならす)
+			var current = delta;
+			var scratch = default(NativeArray<float3>);
+			var target = default(NativeArray<byte>);
+			if (seamSmoothIterations > 0 && smoothStrength > 0f && _adjList.IsCreated && _adjList.Length > 0 &&
+			    _adjStart.Length == n + 1)
+			{
+				target = new NativeArray<byte>(n, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+				scratch = new NativeArray<float3>(n, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+				handle = new SeamMaskJob
+				{
+					adjStart = _adjStart,
+					adjList = _adjList,
+					parts = _costumeParts,
+					valid = valid,
+					all = seamSmoothAll ? 1 : 0,
+					target = target,
+				}.Schedule(n, 64, handle);
+				var other = scratch;
+				for (var i = 0; i < seamSmoothIterations; i++)
+				{
+					handle = new MaskedSmoothJob
+					{
+						adjStart = _adjStart,
+						adjList = _adjList,
+						valid = valid,
+						target = target,
+						input = current,
+						output = other,
+						strength = smoothStrength,
+					}.Schedule(n, 64, handle);
+					var tmp = current;
+					current = other;
+					other = tmp;
+				}
+			}
+
 			handle = new ApplyJob
 			{
-				delta = delta,
+				delta = current,
 				weight = weight,
 				factor = factor,
 				vertices = buffers.Vertices,
@@ -1040,7 +1140,11 @@ namespace MeshModifier.NDMFDeform.Core
 			handle = valid.Dispose(handle);
 			handle = delta.Dispose(handle);
 			handle = grid.Dispose(handle);
-			handle = scratch.Dispose(handle);
+			handle = gridScratch.Dispose(handle);
+			if (scratch.IsCreated)
+				handle = scratch.Dispose(handle);
+			if (target.IsCreated)
+				handle = target.Dispose(handle);
 			return handle;
 		}
 
@@ -1210,7 +1314,17 @@ namespace MeshModifier.NDMFDeform.Core
 
 				var p = vertices[index];
 				var mask = usePartFilter != 0 ? PartMaskOf(parts[index]) : 0;
-				if (!surface.FindClosest(p, searchDistance, mask, out var hit))
+				var found = surface.FindClosest(p, searchDistance, mask, out var hit);
+				if (mask != 0 && surface.HasPartMasks && (!found || hit.SignedDistance >= minGap) &&
+				    surface.FindClosest(p, searchDistance, 0, out var whole) && whole.SignedDistance < 0f)
+				{
+					// 自分のパーツの三角形が遠い(襟元と肩など)と「十分外側」に見えるが、全身で見て体の内側なら
+					// めり込みなので押し出す。パーツ制限は引き寄せ先の選択のためで、めり込みを許す意図ではない
+					hit = whole;
+					found = true;
+					mask = 0;
+				}
+				if (!found)
 					return;
 				if (!ResolvePushOut(in surface, p, searchDistance, mask, minGap, ref hit))
 					return;
@@ -1416,7 +1530,11 @@ namespace MeshModifier.NDMFDeform.Core
 			}
 		}
 
-		/// <summary>各頂点の所属スロットごとに Δr をサンプルし、放射方向の変位に合成する</summary>
+		/// <summary>
+		/// 各頂点の所属スロットごとに Δr をサンプルし、放射方向の変位に合成する。
+		/// jointFan なら、所属が混ざる頂点(関節・縫い目)は所属パーツの軸(線分)の最寄り点から放射する
+		/// (折れ線軸の近似。関節の外側で放射方向が扇状につながる)。
+		/// </summary>
 		[BurstCompile]
 		public struct RadialApplyJob : IJobParallelFor
 		{
@@ -1424,12 +1542,16 @@ namespace MeshModifier.NDMFDeform.Core
 			[ReadOnly] public NativeArray<float3> radialDirs;
 			[ReadOnly] public NativeArray<PartWeights> parts;
 			[ReadOnly] public NativeArray<float> grid;
+			[ReadOnly] public NativeArray<float3> vertices;
+			public BodyPartProfiles profiles;
+			public int jointFan;
 			[WriteOnly] public NativeArray<float3> delta;
 			[WriteOnly] public NativeArray<byte> valid;
 
 			public void Execute(int index)
 			{
 				var sum = float3.zero;
+				var magnitude = 0f;
 				byte any = 0;
 				var pw = parts[index];
 				for (var s = 0; s < 4; s++)
@@ -1442,10 +1564,119 @@ namespace MeshModifier.NDMFDeform.Core
 					if (isnan(d))
 						continue;
 					sum += radialDirs[index * 4 + s] * (d * c.w);
+					magnitude += d * c.w;
 					any = 1;
+				}
+
+				if (jointFan != 0 && any != 0 && pw.Parts.y != 0 && pw.Weights.y > 0f)
+				{
+					// 所属パーツの線分の最寄り点から放射する
+					var p = vertices[index];
+					var bestSq = float.MaxValue;
+					var nearest = float3.zero;
+					for (var s = 0; s < 4; s++)
+					{
+						var part = pw.Parts[s];
+						if (part == 0 || pw.Weights[s] <= 0f || !profiles.IsUsable(part))
+							continue;
+						var axis = profiles.Axes[part];
+						var t = clamp(dot(p - axis.Origin, axis.Direction), 0f, axis.Length);
+						var q = axis.Origin + axis.Direction * t;
+						var dSq = distancesq(p, q);
+						if (dSq < bestSq)
+						{
+							bestSq = dSq;
+							nearest = q;
+						}
+					}
+					if (bestSq > 1e-12f && bestSq < float.MaxValue)
+						sum = (p - nearest) * (magnitude / sqrt(bestSq));
 				}
 				delta[index] = sum;
 				valid[index] = any;
+			}
+		}
+
+		/// <summary>
+		/// 縫い目の頂点(所属が 2 パーツ以上、または隣に支配パーツの違う頂点がある)を平滑化の対象にする。
+		/// all が非 0 なら有効な全頂点。
+		/// </summary>
+		[BurstCompile]
+		public struct SeamMaskJob : IJobParallelFor
+		{
+			[ReadOnly] public NativeArray<int> adjStart;
+			[ReadOnly] public NativeArray<int> adjList;
+			[ReadOnly] public NativeArray<PartWeights> parts;
+			[ReadOnly] public NativeArray<byte> valid;
+			public int all;
+			[WriteOnly] public NativeArray<byte> target;
+
+			public void Execute(int index)
+			{
+				if (valid[index] == 0)
+				{
+					target[index] = 0;
+					return;
+				}
+				if (all != 0)
+				{
+					target[index] = 1;
+					return;
+				}
+				var pw = parts[index];
+				if (pw.Parts.y != 0 && pw.Weights.y > 0f)
+				{
+					target[index] = 1;
+					return;
+				}
+				var dominant = pw.Parts.x;
+				var start = adjStart[index];
+				var end = adjStart[index + 1];
+				for (var i = start; i < end; i++)
+				{
+					if (parts[adjList[i]].Parts.x != dominant)
+					{
+						target[index] = 1;
+						return;
+					}
+				}
+				target[index] = 0;
+			}
+		}
+
+		/// <summary>対象の頂点(target)だけ、有効な隣接の平均へ strength だけ寄せる(SmoothJob の対象限定版)</summary>
+		[BurstCompile]
+		public struct MaskedSmoothJob : IJobParallelFor
+		{
+			[ReadOnly] public NativeArray<int> adjStart;
+			[ReadOnly] public NativeArray<int> adjList;
+			[ReadOnly] public NativeArray<byte> valid;
+			[ReadOnly] public NativeArray<byte> target;
+			[ReadOnly] public NativeArray<float3> input;
+			[WriteOnly] public NativeArray<float3> output;
+			public float strength;
+
+			public void Execute(int index)
+			{
+				var value = input[index];
+				if (target[index] == 0)
+				{
+					output[index] = value;
+					return;
+				}
+				var start = adjStart[index];
+				var end = adjStart[index + 1];
+				var sum = float3.zero;
+				var count = 0;
+				for (var i = start; i < end; i++)
+				{
+					var j = adjList[i];
+					if (valid[j] == 0)
+						continue;
+					sum += input[j];
+					count++;
+				}
+				output[index] = count == 0 ? value : lerp(value, sum / count, strength);
 			}
 		}
 

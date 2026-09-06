@@ -467,6 +467,85 @@ namespace MeshModifier.NDMFDeform.Core
 			return changed;
 		}
 
+		/// <summary>
+		/// 肩の帽子領域(肩甲帯): 胴所属の頂点のうち、胴の軸で上腕関節の高さ(h)から capMargin 下より上にあるものを、
+		/// 左右の肩パーツ(脊椎から上腕関節へ伸びる水平な軸。<see cref="HumanoidSkeleton.ShoulderFromSpine"/>)へ
+		/// 差し替える。胴の円柱軸から見た放射方向は肩の上面でほぼ水平になり、表面法線(上向き)と食い違って
+		/// 肩の布が脊椎側へ水平に引き寄せられるが、肩の軸から見ると上面は上向き・胸と背は前後向き・脇の下は
+		/// 下向きに放射する。肩の軸は上腕の軸とほぼ同一直線なので、袖付けの縫い目で放射方向が連続になる。
+		/// 左右は、頂点が脊椎からどちらの肩の軸の方向にあるかで決める。差し替えた頂点数を返す。
+		/// </summary>
+		public static int ApplyShoulderCap(PartWeights[] weights, Vector3[] worldVertices, in BodyPartProfiles profiles,
+			float capMargin = 0.1f)
+		{
+			if (weights == null || worldVertices == null || !profiles.IsCreated)
+				return 0;
+			var n = weights.Length;
+			if (worldVertices.Length != n || !profiles.IsUsable((int)BodyPart.Torso))
+				return 0;
+			var left = profiles.IsUsable((int)BodyPart.LeftShoulder);
+			var right = profiles.IsUsable((int)BodyPart.RightShoulder);
+			if (!left && !right)
+				return 0;
+			var torso = profiles.Axes[(int)BodyPart.Torso];
+			var leftAxis = profiles.Axes[(int)BodyPart.LeftShoulder];
+			var rightAxis = profiles.Axes[(int)BodyPart.RightShoulder];
+			var hCap = float.MaxValue;
+			if (left) hCap = math.min(hCap, JointH(in torso, in leftAxis));
+			if (right) hCap = math.min(hCap, JointH(in torso, in rightAxis));
+			hCap -= capMargin;
+
+			var changed = 0;
+			var accum = new float[HumanoidSkeleton.PartCount];
+			for (var v = 0; v < n; v++)
+			{
+				var pw = weights[v];
+				var hasTorso = false;
+				for (var s = 0; s < 4; s++)
+					hasTorso |= pw.Parts[s] == (int)BodyPart.Torso && pw.Weights[s] > 0f;
+				if (!hasTorso)
+					continue;
+				var p = (float3)worldVertices[v];
+				torso.Decompose(p, out var h, out _, out _, out _);
+				if (h < hCap)
+					continue;
+				BodyPart side;
+				if (left && right)
+				{
+					// 脊椎上の点からの向きで左右を決める
+					var origin = leftAxis.Origin;
+					side = math.dot(p - origin, leftAxis.Direction) >= math.dot(p - origin, rightAxis.Direction)
+						? BodyPart.LeftShoulder
+						: BodyPart.RightShoulder;
+				}
+				else
+				{
+					side = left ? BodyPart.LeftShoulder : BodyPart.RightShoulder;
+				}
+				// 胴の成分だけを肩へ置き換える(袖との混合はそのまま残し、縫い目で連続にする)
+				Array.Clear(accum, 0, accum.Length);
+				for (var s = 0; s < 4; s++)
+				{
+					var part = pw.Parts[s];
+					if (part == 0 || pw.Weights[s] <= 0f)
+						continue;
+					if (part == (int)BodyPart.Torso)
+						part = (int)side;
+					accum[part] += pw.Weights[s];
+				}
+				weights[v] = PartAssignment.TopWeights(accum);
+				changed++;
+			}
+			return changed;
+		}
+
+		/// <summary>肩の軸の先端(上腕関節)の、胴の軸での h</summary>
+		private static float JointH(in PartAxis torso, in PartAxis shoulder)
+		{
+			var joint = shoulder.Origin + shoulder.Direction * shoulder.Length;
+			return torso.Length > 1e-6f ? math.dot(joint - torso.Origin, torso.Direction) / torso.Length : 0f;
+		}
+
 		private static void AccumulateInto(float[] sums, int offset, in PartWeights pw)
 		{
 			for (var s = 0; s < 4; s++)
