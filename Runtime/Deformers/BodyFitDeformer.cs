@@ -47,6 +47,12 @@ namespace MeshModifier.NDMFDeform.Core
 
 			/// <summary>メッシュ全体に適用</summary>
 			WholeMesh = 1,
+
+			/// <summary>
+			/// 頂点の所属パーツで指定(regionParts に含まれるパーツの所属重みの和)。縫い目では所属の混合に
+			/// 従って滑らかに減衰する。骨格が無い(パーツ不明)場合はメッシュ全体
+			/// </summary>
+			Parts = 2,
 		}
 
 		public enum BlendShapeFitMode
@@ -106,8 +112,14 @@ namespace MeshModifier.NDMFDeform.Core
 		[SerializeField, Range(0f, 1f), Tooltip("全体の効き。0.5 なら目標位置までの半分だけ動く")]
 		private float factor = 1f;
 
-		[SerializeField, Tooltip("適用範囲。Sphere は二重球の内側のみ、WholeMesh はメッシュ全体")]
+		[SerializeField, Tooltip("適用範囲。Sphere は二重球の内側のみ、WholeMesh はメッシュ全体、Parts は所属パーツで指定(regionParts)")]
 		private FitRegion region = FitRegion.Sphere;
+
+		[SerializeField, Tooltip("Parts のとき適用するパーツ。頂点の所属重みのうち、ここに含まれるパーツの和が効きになる(縫い目で滑らかに減衰)")]
+		private BodyPartMask regionParts = BodyPartMask.All;
+
+		[SerializeField, Range(0, 10), Tooltip("Parts のとき、領域の重みを頂点の隣接で広げる回数。境界(縫い目)の段差をなだらかにする。0 で所属の混合のまま")]
+		private int regionFeather = 4;
 
 		[SerializeField, Min(0f), Tooltip("100% 適用する球の半径(シーンでは実線)")]
 		private float innerRadius = 0.15f;
@@ -208,6 +220,8 @@ namespace MeshModifier.NDMFDeform.Core
 		public bool UseBodyBlendShapes { get => useBodyBlendShapes; set => useBodyBlendShapes = value; }
 		public float Factor { get => factor; set => factor = Mathf.Clamp01(value); }
 		public FitRegion Region { get => region; set => region = value; }
+		public BodyPartMask RegionParts { get => regionParts; set => regionParts = value; }
+		public int RegionFeather { get => regionFeather; set => regionFeather = Mathf.Clamp(value, 0, 10); }
 		public float InnerRadius { get => innerRadius; set => innerRadius = Mathf.Max(0f, value); }
 		public float OuterRadius { get => outerRadius; set => outerRadius = Mathf.Max(0f, value); }
 		public float MinGap { get => minGap; set => minGap = value; }
@@ -1116,6 +1130,26 @@ namespace MeshModifier.NDMFDeform.Core
 		}
 
 		/// <summary>
+		/// Parts 領域のカバー率(直近の <see cref="AnalyzeParts"/> / ベイクのパーツ所属から)。
+		/// full = 重み 1 の頂点数、partial = 0 と 1 の間(縫い目)、none = 0。所属が使えなければ false
+		/// </summary>
+		public bool TryGetRegionCoverage(out int full, out int partial, out int none)
+		{
+			full = partial = none = 0;
+			if (!_partsReady || !_costumeParts.IsCreated)
+				return false;
+			var mask = (int)regionParts;
+			for (var i = 0; i < _costumeParts.Length; i++)
+			{
+				var w = PartRegionWeight(_costumeParts[i], mask);
+				if (w >= 0.999f) full++;
+				else if (w > 0.001f) partial++;
+				else none++;
+			}
+			return true;
+		}
+
+		/// <summary>
 		/// 上書きの参照を、直近のパーツ所属計算のグループ番号へ解決する(ベイクと同じ規則)。
 		/// グループ分けの方式(UV 島 / 連結成分)を切り替えても、島シードで記録した上書きは
 		/// 代表点で、代表点で記録した上書きは最寄り頂点の島で追従する。解決できなければ -1
@@ -1220,7 +1254,8 @@ namespace MeshModifier.NDMFDeform.Core
 				parts = _costumeParts,
 				usePartFilter = usePartFilter,
 				meshToAxis = space.MeshToAxis,
-				wholeMesh = region == FitRegion.WholeMesh ? 1 : 0,
+				regionMode = RegionMode,
+				regionMask = (int)regionParts,
 				innerRadius = innerRadius,
 				outerRadius = outerRadius,
 				minGap = minGap,
@@ -1230,6 +1265,11 @@ namespace MeshModifier.NDMFDeform.Core
 				weight = weight,
 				valid = valid,
 			}.Schedule(n, 32, dependency);
+
+			// Parts 領域の境界をなだらかにする(重みの隣接平滑化)。最近接表面では領域外の頂点は変位を
+			// 持たないので、境界の内側の減衰だけが効く
+			var weightScratch = default(NativeArray<float>);
+			var regionWeight = ScheduleRegionFeather(n, weight, ref weightScratch, ref handle);
 
 			// 変位の平滑化(ピンポンバッファ)
 			var current = delta;
@@ -1263,7 +1303,7 @@ namespace MeshModifier.NDMFDeform.Core
 				handle = new AccumulateJob
 				{
 					delta = current,
-					weight = weight,
+					weight = regionWeight,
 					factor = factor,
 					sumD = group.SumD,
 					sumW = group.SumW,
@@ -1274,7 +1314,7 @@ namespace MeshModifier.NDMFDeform.Core
 				handle = new ApplyJob
 				{
 					delta = current,
-					weight = weight,
+					weight = regionWeight,
 					factor = factor,
 					vertices = buffers.Vertices,
 					displacement = _baseDisplacement,
@@ -1287,7 +1327,7 @@ namespace MeshModifier.NDMFDeform.Core
 						surface = _surface,
 						parts = _costumeParts,
 						usePartFilter = usePartFilter,
-						weight = weight,
+						weight = regionWeight,
 						factor = factor,
 						minGap = minGap,
 						searchDistance = searchDistance,
@@ -1302,7 +1342,38 @@ namespace MeshModifier.NDMFDeform.Core
 			handle = valid.Dispose(handle);
 			if (scratch.IsCreated)
 				handle = scratch.Dispose(handle);
+			if (weightScratch.IsCreated)
+				handle = weightScratch.Dispose(handle);
 			return handle;
+		}
+
+		/// <summary>
+		/// Parts 領域の重みを頂点隣接で regionFeather 回ならす(ピンポン)。戻り値が以後使う重み配列で、
+		/// scratch は呼び出し側が破棄する。対象外(Sphere / WholeMesh、回数 0、隣接なし)なら weight をそのまま返す
+		/// </summary>
+		private NativeArray<float> ScheduleRegionFeather(int n, NativeArray<float> weight,
+			ref NativeArray<float> scratch, ref JobHandle handle)
+		{
+			if (RegionMode != RegionModeParts || regionFeather <= 0 || !_adjList.IsCreated || _adjList.Length == 0 ||
+			    _adjStart.Length != n + 1)
+				return weight;
+			scratch = new NativeArray<float>(n, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+			var current = weight;
+			var other = scratch;
+			for (var i = 0; i < regionFeather; i++)
+			{
+				handle = new WeightSmoothJob
+				{
+					adjStart = _adjStart,
+					adjList = _adjList,
+					input = current,
+					output = other,
+				}.Schedule(n, 64, handle);
+				var tmp = current;
+				current = other;
+				other = tmp;
+			}
+			return current;
 		}
 
 		/// <summary>
@@ -1332,7 +1403,8 @@ namespace MeshModifier.NDMFDeform.Core
 				parts = _costumeParts,
 				profiles = _profiles,
 				meshToAxis = space.MeshToAxis,
-				wholeMesh = region == FitRegion.WholeMesh ? 1 : 0,
+				regionMode = RegionMode,
+				regionMask = (int)regionParts,
 				innerRadius = innerRadius,
 				outerRadius = outerRadius,
 				coords = coords,
@@ -1341,11 +1413,15 @@ namespace MeshModifier.NDMFDeform.Core
 				weight = weight,
 			}.Schedule(n, 64, dependency);
 
+			// Parts 領域の境界(縫い目)をなだらかにする。放射変位は領域外の頂点にも計算されるので両側に効く
+			var weightScratch = default(NativeArray<float>);
+			var regionWeight = ScheduleRegionFeather(n, weight, ref weightScratch, ref handle);
+
 			handle = new RadialFieldJob
 			{
 				coords = coords,
 				binPart = binPart,
-				weight = weight,
+				weight = regionWeight,
 				profiles = _profiles,
 				minGap = minGap,
 				maxGap = pullIn ? Mathf.Max(maxGap, minGap) : float.MaxValue,
@@ -1431,7 +1507,7 @@ namespace MeshModifier.NDMFDeform.Core
 				handle = new AccumulateJob
 				{
 					delta = current,
-					weight = weight,
+					weight = regionWeight,
 					factor = factor,
 					sumD = group.SumD,
 					sumW = group.SumW,
@@ -1442,7 +1518,7 @@ namespace MeshModifier.NDMFDeform.Core
 				handle = new ApplyJob
 				{
 					delta = current,
-					weight = weight,
+					weight = regionWeight,
 					factor = factor,
 					vertices = buffers.Vertices,
 					displacement = _baseDisplacement,
@@ -1455,7 +1531,7 @@ namespace MeshModifier.NDMFDeform.Core
 						surface = _surface,
 						parts = _costumeParts,
 						usePartFilter = 1,
-						weight = weight,
+						weight = regionWeight,
 						factor = factor,
 						minGap = minGap,
 						searchDistance = searchDistance,
@@ -1469,6 +1545,8 @@ namespace MeshModifier.NDMFDeform.Core
 			handle = radialDirs.Dispose(handle);
 			handle = binPart.Dispose(handle);
 			handle = weight.Dispose(handle);
+			if (weightScratch.IsCreated)
+				handle = weightScratch.Dispose(handle);
 			handle = validRadial.Dispose(handle);
 			handle = delta.Dispose(handle);
 			handle = grid.Dispose(handle);
@@ -1758,7 +1836,8 @@ namespace MeshModifier.NDMFDeform.Core
 			[ReadOnly] public NativeArray<PartWeights> parts;
 			public int usePartFilter;
 			public float4x4 meshToAxis;
-			public int wholeMesh;
+			public int regionMode;
+			public int regionMask;
 			public float innerRadius;
 			public float outerRadius;
 			public float minGap;
@@ -1771,7 +1850,9 @@ namespace MeshModifier.NDMFDeform.Core
 			public void Execute(int index)
 			{
 				var p = vertices[index];
-				var w = RegionWeight(p, meshToAxis, wholeMesh, innerRadius, outerRadius);
+				var w = regionMode == RegionModeParts
+					? PartRegionWeight(parts[index], regionMask)
+					: RegionWeight(p, meshToAxis, regionMode, innerRadius, outerRadius);
 				weight[index] = w;
 				if (w <= 0f)
 				{
@@ -1862,6 +1943,32 @@ namespace MeshModifier.NDMFDeform.Core
 					return;
 				}
 				output[index] = lerp(value, sum / count, strength);
+			}
+		}
+
+		/// <summary>スカラーの重みを隣接の平均へ半分寄せる(Parts 領域のフェザー)</summary>
+		[BurstCompile]
+		public struct WeightSmoothJob : IJobParallelFor
+		{
+			[ReadOnly] public NativeArray<int> adjStart;
+			[ReadOnly] public NativeArray<int> adjList;
+			[ReadOnly] public NativeArray<float> input;
+			[WriteOnly] public NativeArray<float> output;
+
+			public void Execute(int index)
+			{
+				var value = input[index];
+				var start = adjStart[index];
+				var end = adjStart[index + 1];
+				if (end <= start)
+				{
+					output[index] = value;
+					return;
+				}
+				var sum = 0f;
+				for (var i = start; i < end; i++)
+					sum += input[adjList[i]];
+				output[index] = 0.5f * (value + sum / (end - start));
 			}
 		}
 
@@ -1956,7 +2063,8 @@ namespace MeshModifier.NDMFDeform.Core
 			[ReadOnly] public NativeArray<PartWeights> parts;
 			public BodyPartProfiles profiles;
 			public float4x4 meshToAxis;
-			public int wholeMesh;
+			public int regionMode;
+			public int regionMask;
 			public float innerRadius;
 			public float outerRadius;
 
@@ -1977,8 +2085,10 @@ namespace MeshModifier.NDMFDeform.Core
 			public void Execute(int index)
 			{
 				var p = vertices[index];
-				weight[index] = RegionWeight(p, meshToAxis, wholeMesh, innerRadius, outerRadius);
 				var pw = parts[index];
+				weight[index] = regionMode == RegionModeParts
+					? PartRegionWeight(pw, regionMask)
+					: RegionWeight(p, meshToAxis, regionMode, innerRadius, outerRadius);
 				var dominant = 0;
 				for (var s = 0; s < 4; s++)
 				{
@@ -2321,13 +2431,42 @@ namespace MeshModifier.NDMFDeform.Core
 			return mask;
 		}
 
+		public const int RegionModeSphere = 0;
+		public const int RegionModeWhole = 1;
+		public const int RegionModeParts = 2;
+
+		/// <summary>ジョブへ渡す領域モード。Parts はパーツ所属が使えるときだけで、無ければメッシュ全体</summary>
+		private int RegionMode => region switch
+		{
+			FitRegion.Sphere => RegionModeSphere,
+			FitRegion.Parts => _partsReady ? RegionModeParts : RegionModeWhole,
+			_ => RegionModeWhole,
+		};
+
+		/// <summary>
+		/// パーツ指定の領域重み: 所属スロットのうちマスクに含まれるパーツの重みの和(0..1)。
+		/// 所属が無い頂点(パーツ不明)は 0。
+		/// </summary>
+		public static float PartRegionWeight(in PartWeights pw, int mask)
+		{
+			var w = 0f;
+			for (var s = 0; s < 4; s++)
+			{
+				var part = pw.Parts[s];
+				if (part != 0 && (mask & (1 << part)) != 0)
+					w += pw.Weights[s];
+			}
+			return saturate(w);
+		}
+
 		/// <summary>
 		/// 二重球の領域重み(軸空間)。内半径の内側で 1、外半径で 0、間は smoothstep で減衰。
+		/// regionMode が Sphere 以外なら 1(Parts は <see cref="PartRegionWeight"/> を使う)。
 		/// </summary>
-		public static float RegionWeight(float3 worldPoint, float4x4 meshToAxis, int wholeMesh,
+		public static float RegionWeight(float3 worldPoint, float4x4 meshToAxis, int regionMode,
 			float innerRadius, float outerRadius)
 		{
-			if (wholeMesh != 0)
+			if (regionMode != RegionModeSphere)
 				return 1f;
 
 			var dist = length(mul(meshToAxis, float4(worldPoint, 1f)).xyz);

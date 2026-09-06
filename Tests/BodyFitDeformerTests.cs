@@ -1030,6 +1030,94 @@ namespace MeshModifier.NDMFDeform.Tests
 		}
 
 		[Test]
+		public void RegionParts_LimitsFitToSelectedParts()
+		{
+			// 0: 袖の内層(腕軸から r = 0.10 → 0.08 へ)、1: 身頃(胴の壁から 5 cm → 隙間 2 cm へ)。
+			// Parts 領域で胴だけを選ぶと袖は動かず、腕だけを選ぶと身頃は動かない
+			var s = CreatePartSetup(new[]
+			{
+				new Vector3(0.45f, 0.95f, 0f), new Vector3(0.25f, 0.7f, 0f),
+			}, new[] { 1, 0 });
+			s.Fit.Region = BodyFitDeformer.FitRegion.Parts;
+			s.Fit.RegionParts = BodyPartMask.Torso;
+
+			var v = BakePart(s);
+			AssertNear(v[0], new Vector3(0.45f, 0.95f, 0f), "胴のみ: 袖は対象外", 1e-4f);
+			AssertNear(v[1], new Vector3(0.22f, 0.7f, 0f), "胴のみ: 身頃は胴の軸基準へ", 2e-3f);
+
+			s.Fit.RegionParts = BodyPartMaskExtensions.Arms;
+			v = BakePart(s);
+			AssertNear(v[0], new Vector3(0.43f, 0.95f, 0f), "腕のみ: 袖は腕の軸基準へ", 2e-3f);
+			AssertNear(v[1], new Vector3(0.25f, 0.7f, 0f), "腕のみ: 身頃は対象外", 1e-4f);
+
+			s.Fit.RegionParts = BodyPartMask.None;
+			v = BakePart(s);
+			AssertNear(v[0], new Vector3(0.45f, 0.95f, 0f), "空: 何も動かない", 1e-4f);
+			AssertNear(v[1], new Vector3(0.25f, 0.7f, 0f), "空: 何も動かない", 1e-4f);
+		}
+
+		[Test]
+		public void RegionParts_AppliesInNearestSurfaceMode()
+		{
+			// 最近接表面モードでも所属パーツで範囲を絞れる(胴のみ → 袖は最近接の腕の壁へ寄らない)
+			var s = CreatePartSetup(new[]
+			{
+				new Vector3(0.45f, 0.95f, 0f), new Vector3(0.25f, 0.7f, 0f),
+			}, new[] { 1, 0 });
+			s.Fit.Mode = BodyFitDeformer.FitMode.NearestSurface;
+			s.Fit.Region = BodyFitDeformer.FitRegion.Parts;
+			s.Fit.RegionParts = BodyPartMask.Torso;
+
+			var v = BakePart(s);
+			Assert.That(s.Fit.EffectiveMode, Is.EqualTo(BodyFitDeformer.FitMode.NearestSurface));
+			AssertNear(v[0], new Vector3(0.45f, 0.95f, 0f), "袖は対象外", 1e-4f);
+			Assert.That(v[1].x, Is.EqualTo(0.22f).Within(5e-3f), "身頃は胴の壁 + 隙間へ");
+		}
+
+		[Test]
+		public void RegionFeather_SpreadsRegionWeightAcrossTheBoundary()
+		{
+			// 身頃 2 頂点(胴)と袖 1 頂点(腕)が 1 三角形でつながる。所属の混合(seamBlend)を切ると Parts の境界は
+			// 段差になる(袖 0 / 身頃 1)。フェザー 1 回で袖は 0.5 × (0 + 1) = 0.5、身頃は 0.5 × (1 + 平均(1, 0)) = 0.75 の
+			// 重みになり、袖も半分動く(放射変位は領域外にも計算されるので両側に効く)
+			var s = CreatePartSetup(new[]
+			{
+				new Vector3(0.25f, 0.7f, 0f), new Vector3(0.25f, 0.75f, 0f), new Vector3(0.45f, 0.95f, 0f),
+			}, new[] { 0, 0, 1 });
+			s.Source.triangles = new[] { 0, 1, 2 };
+			s.Fit.SeamBlend = 0;
+			s.Fit.Region = BodyFitDeformer.FitRegion.Parts;
+			s.Fit.RegionParts = BodyPartMask.Torso;
+			s.Fit.RegionFeather = 0;
+
+			var v = BakePart(s);
+			AssertNear(v[2], new Vector3(0.45f, 0.95f, 0f), "フェザーなし: 袖は動かない", 1e-4f);
+			AssertNear(v[0], new Vector3(0.22f, 0.7f, 0f), "フェザーなし: 身頃は全量", 2e-3f);
+
+			s.Fit.RegionFeather = 1;
+			v = BakePart(s);
+			Assert.That(v[2].x, Is.EqualTo(0.44f).Within(2e-3f), "袖は重み 0.5 で半分(0.45 → 0.43 の中間)");
+			Assert.That(v[0].x, Is.EqualTo(0.2275f).Within(2e-3f), "身頃は重み 0.75");
+		}
+
+		[Test]
+		public void PartRegionWeight_SumsSelectedSlotsAndIgnoresNone()
+		{
+			// 縫い目で胴 0.5 / 上腕 0.5 に混ざる頂点: 胴のみで 0.5、胴 + 腕で 1、所属なしのスロットは数えない
+			var pw = new PartWeights
+			{
+				Parts = new int4((int)BodyPart.Torso, (int)BodyPart.LeftUpperArm, 0, 0),
+				Weights = new float4(0.5f, 0.5f, 0.7f, 0f),
+			};
+			Assert.That(BodyFitDeformer.PartRegionWeight(pw, (int)BodyPartMask.Torso), Is.EqualTo(0.5f).Within(1e-6f));
+			Assert.That(BodyFitDeformer.PartRegionWeight(pw, (int)(BodyPartMask.Torso | BodyPartMask.LeftUpperArm)),
+				Is.EqualTo(1f).Within(1e-6f));
+			Assert.That(BodyFitDeformer.PartRegionWeight(pw, (int)BodyPartMaskExtensions.Legs), Is.EqualTo(0f));
+			Assert.That(BodyFitDeformer.PartRegionWeight(PartWeights.Single(BodyPart.None), (int)BodyPartMask.All),
+				Is.EqualTo(0f), "所属なしは 0");
+		}
+
+		[Test]
 		public void RigidDecorations_AttachedGroupFollowsItsBase()
 		{
 			// 身頃(x 0.25 の 3 頂点)に 1 cm 以内で付く装飾(0.255 → 0.30 → 0.30 と外へ張り出す 3 頂点)。

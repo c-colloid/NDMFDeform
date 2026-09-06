@@ -194,7 +194,8 @@ namespace MeshModifier.NDMFDeform.Editor
 			}
 			if (_partsSummary != null)
 				_partsSummary.text = $"{reports.Count} グループ / 要確認 {review} 件 / 上書き {overridden} 件。" +
-				                     "⚠ はウェイトと体の形状の判定が食い違う、または複数パーツにまたがるグループです。";
+				                     "⚠ はウェイトと体の形状の判定が食い違う、または複数パーツにまたがるグループです。" +
+				                     DescribeRegionCoverage(fit);
 
 			var showAll = _showAllParts != null && _showAllParts.value;
 			var sorted = new List<PartGroupReport>(reports);
@@ -248,6 +249,15 @@ namespace MeshModifier.NDMFDeform.Editor
 		private static string FormatPart(BodyPart part)
 		{
 			return part == BodyPart.None ? "自動" : part.ToString();
+		}
+
+		/// <summary>Parts 領域のとき、所属マスクで何頂点が対象になるかを要約に添える</summary>
+		private static string DescribeRegionCoverage(BodyFitDeformer fit)
+		{
+			if (fit.Region != BodyFitDeformer.FitRegion.Parts ||
+			    !fit.TryGetRegionCoverage(out var full, out var partial, out var none))
+				return string.Empty;
+			return $"\n適用範囲(Parts): 全適用 {full} / 縫い目で部分適用 {partial} / 対象外 {none} 頂点。";
 		}
 
 		private static string DescribeReport(PartGroupReport r)

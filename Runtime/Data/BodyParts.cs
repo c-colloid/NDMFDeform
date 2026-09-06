@@ -34,6 +34,51 @@ namespace MeshModifier.NDMFDeform.Core
 	}
 
 	/// <summary>
+	/// パーツの集合(ビット = 1 &lt;&lt; BodyPart)。<see cref="PartWeights.Mask"/> と同じビット配置なので、
+	/// 頂点の所属マスクと直接 AND できる。Body Fit の適用範囲(FitRegion.Parts)の指定に使う。
+	/// </summary>
+	[System.Flags]
+	public enum BodyPartMask
+	{
+		None = 0,
+		Torso = 1 << BodyPart.Torso,
+		Neck = 1 << BodyPart.Neck,
+		Head = 1 << BodyPart.Head,
+		LeftShoulder = 1 << BodyPart.LeftShoulder,
+		LeftUpperArm = 1 << BodyPart.LeftUpperArm,
+		LeftLowerArm = 1 << BodyPart.LeftLowerArm,
+		LeftHand = 1 << BodyPart.LeftHand,
+		RightShoulder = 1 << BodyPart.RightShoulder,
+		RightUpperArm = 1 << BodyPart.RightUpperArm,
+		RightLowerArm = 1 << BodyPart.RightLowerArm,
+		RightHand = 1 << BodyPart.RightHand,
+		LeftUpperLeg = 1 << BodyPart.LeftUpperLeg,
+		LeftLowerLeg = 1 << BodyPart.LeftLowerLeg,
+		LeftFoot = 1 << BodyPart.LeftFoot,
+		RightUpperLeg = 1 << BodyPart.RightUpperLeg,
+		RightLowerLeg = 1 << BodyPart.RightLowerLeg,
+		RightFoot = 1 << BodyPart.RightFoot,
+		All = Torso | Neck | Head | LeftShoulder | LeftUpperArm | LeftLowerArm | LeftHand | RightShoulder |
+		      RightUpperArm | RightLowerArm | RightHand | LeftUpperLeg | LeftLowerLeg | LeftFoot | RightUpperLeg |
+		      RightLowerLeg | RightFoot,
+	}
+
+	public static class BodyPartMaskExtensions
+	{
+		/// <summary>よく使う組み合わせ</summary>
+		public const BodyPartMask Arms = BodyPartMask.LeftShoulder | BodyPartMask.LeftUpperArm | BodyPartMask.LeftLowerArm |
+		                                 BodyPartMask.LeftHand | BodyPartMask.RightShoulder | BodyPartMask.RightUpperArm |
+		                                 BodyPartMask.RightLowerArm | BodyPartMask.RightHand;
+
+		public const BodyPartMask Legs = BodyPartMask.LeftUpperLeg | BodyPartMask.LeftLowerLeg | BodyPartMask.LeftFoot |
+		                                 BodyPartMask.RightUpperLeg | BodyPartMask.RightLowerLeg | BodyPartMask.RightFoot;
+
+		public const BodyPartMask Feet = BodyPartMask.LeftFoot | BodyPartMask.RightFoot;
+
+		public static bool Contains(this BodyPartMask mask, BodyPart part) => ((int)mask & (1 << (int)part)) != 0;
+	}
+
+	/// <summary>
 	/// パーツの円柱軸(ワールド空間)。h = 軸方向の位置(0 = 根元、1 = 先端)、
 	/// θ = Reference / Binormal 平面での周角、r = 軸からの距離 で頂点を表す。
 	/// </summary>
