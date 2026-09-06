@@ -254,14 +254,16 @@ namespace MeshModifier.NDMFDeform.Editor
 		{
 			var unit = r.IsIsland ? "島" : "成分";
 			var head = (r.NeedsReview ? "⚠ " : string.Empty) + $"{unit} #{r.Group}({r.VertexCount} 頂点)";
+			// 軸区間の外(裾など)は投票の結果に関わらず形状で最寄りのパーツへ移す
+			var tail = r.OutOfRangeCount > 0 ? $"、軸区間外の {r.OutOfRangeCount} 頂点は形状で判定" : string.Empty;
 			switch (r.Decision)
 			{
 				case PartDecision.Override:
-					return $"{head} 上書き: {r.Part}";
+					return $"{head} 上書き: {r.Part}{tail}";
 				case PartDecision.Unified:
-					return $"{head} → {r.Part}({r.Confidence:P0})";
+					return $"{head} → {r.Part}({r.Confidence:P0}){tail}";
 				case PartDecision.PerVertex:
-					return $"{head} 頂点ごと(上位 {r.Part} {r.Confidence:P0})";
+					return $"{head} 頂点ごと(上位 {r.Part} {r.Confidence:P0}){tail}";
 				default:
 					return $"{head} 所属なし";
 			}

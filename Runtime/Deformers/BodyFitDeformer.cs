@@ -642,9 +642,10 @@ namespace MeshModifier.NDMFDeform.Core
 
 			// 証拠 2: 体の形状(ワールド空間の頂点と体のプロファイル)
 			PartWeights[] geometryWeights = null;
+			Vector3[] world = null;
 			if (partSource != PartSource.BoneWeights && _profiles.IsCreated)
 			{
-				var world = (Vector3[])local.Clone();
+				world = (Vector3[])local.Clone();
 				if (own != null)
 					ReferenceSurfaceUtility.SkinToWorld(own.transform, source, world);
 				geometryWeights = PartLabeler.EvaluateGeometry(world, in _profiles);
@@ -719,6 +720,27 @@ namespace MeshModifier.NDMFDeform.Core
 				ConfidenceThreshold = islandConfidence,
 				Overrides = overrides,
 			}, reports);
+
+			// 軸区間の外(腰より下に垂れる裾など)は所属パーツのプロファイルに根拠が無いので、形状証拠(最寄りのパーツ)へ差し替える
+			if (world != null && geometryWeights != null)
+			{
+				var fallback = PartLabeler.ApplyAxisRangeFallback(weights, geometryWeights, world, in _profiles);
+				if (fallback != null && groups != null && reports != null)
+				{
+					var counts = new int[groupCount];
+					for (var v = 0; v < n; v++)
+					{
+						var g = groups[v];
+						if (fallback[v] && g >= 0 && g < groupCount)
+							counts[g]++;
+					}
+					foreach (var report in reports)
+					{
+						if (report.Group >= 0 && report.Group < groupCount)
+							report.OutOfRangeCount = counts[report.Group];
+					}
+				}
+			}
 
 			// 縫い目: 同位置の頂点を揃え、境界で所属を混ぜる
 			PartLabeler.BlendSeams(weights, adjacency, seamBlend);
@@ -1081,6 +1103,13 @@ namespace MeshModifier.NDMFDeform.Core
 
 				valid[index] = 1;
 				var d = hit.SignedDistance;
+				if (d < minGap && !ResolvePushOut(in surface, p, searchDistance, mask, minGap, ref hit))
+				{
+					// 全身で見れば隙間が足りている(パーツ境界の面による「内側」の誤判定)
+					delta[index] = float3.zero;
+					return;
+				}
+				d = hit.SignedDistance;
 				var target = clamp(d, minGap, maxGap);
 				if (target == d)
 				{
@@ -1183,11 +1212,10 @@ namespace MeshModifier.NDMFDeform.Core
 				var mask = usePartFilter != 0 ? PartMaskOf(parts[index]) : 0;
 				if (!surface.FindClosest(p, searchDistance, mask, out var hit))
 					return;
-
-				var d = hit.SignedDistance;
-				if (d >= minGap)
+				if (!ResolvePushOut(in surface, p, searchDistance, mask, minGap, ref hit))
 					return;
 
+				var d = hit.SignedDistance;
 				var correction = OutwardDirection(p, hit) * (minGap - d) * w;
 				vertices[index] = p + correction * factor;
 				displacement[index] += correction;
@@ -1447,6 +1475,31 @@ namespace MeshModifier.NDMFDeform.Core
 			if (dist <= innerRadius)
 				return 1f;
 			return smoothstep(0f, 1f, unlerp(outerRadius, innerRadius, dist));
+		}
+
+		/// <summary>
+		/// 押し出し(隙間が minGap 未満)の基準にする最近接点を決める。
+		/// パーツ制限付きの最近接(hit)は、パーツの三角形集合が閉じていない(骨盤と太ももの境界の面など)ため、
+		/// パーツの外側にある頂点でも境界面の裏側にあれば「内側」と判定し、面の向こうへ大きく押し込んでしまう
+		/// (腰より下に垂れる裾が股へ押し込まれる)。そこで全身の最近接点も見て、必要な補正量(minGap − d)が
+		/// 小さい方を採用する。全身で見て隙間が足りていれば押し出さない(false)。
+		/// hit が minGap 以上ならそのまま false。
+		/// </summary>
+		public static bool ResolvePushOut(in MeshSurfaceData surface, float3 p, float searchDistance, int partMask,
+			float minGap, ref MeshSurfaceHit hit)
+		{
+			if (hit.SignedDistance >= minGap)
+				return false;
+			if (partMask == 0 || !surface.HasPartMasks)
+				return true;
+			if (surface.FindClosest(p, searchDistance, 0, out var whole) && whole.Triangle != hit.Triangle &&
+			    whole.SignedDistance > hit.SignedDistance)
+			{
+				hit = whole;
+				if (hit.SignedDistance >= minGap)
+					return false;
+			}
+			return true;
 		}
 
 		/// <summary>探索距離の上限付近(75%〜100%)で 1 → 0 へ滑らかに減衰する係数</summary>

@@ -83,6 +83,12 @@ namespace MeshModifier.NDMFDeform.Core
 
 		/// <summary>ウェイトと形状の判定が食い違う、または大きなグループが頂点ごとの所属に落ちた</summary>
 		public bool NeedsReview;
+
+		/// <summary>
+		/// 所属パーツの軸区間の外にあり、形状証拠(最寄りのパーツ)へ差し替えた頂点数
+		/// (腰より下に垂れる裾など。<see cref="PartLabeler.ApplyAxisRangeFallback"/>)
+		/// </summary>
+		public int OutOfRangeCount;
 	}
 
 	/// <summary>PartLabeler.Label の入力</summary>
@@ -423,6 +429,42 @@ namespace MeshModifier.NDMFDeform.Core
 				});
 			}
 			return result;
+		}
+
+		/// <summary>
+		/// 所属パーツの軸区間(半径プロファイルの範囲 [HStart, HEnd])の外にある頂点を、形状証拠(最寄りのパーツ)へ
+		/// 差し替える。プロファイルは範囲外を端の値でクランプするため、腰より下に垂れる裾(Hips のウェイトしか無く
+		/// 胴に揃う)を胴の軸で評価すると骨盤の半径へ引き込まれる。裾の高さで実際に近いのは太ももなので、
+		/// 投票の結果(グループ単位の統一・上書き)に関わらず、支配パーツの h が範囲外の頂点は形状の判定へ移す。
+		/// 形状の候補が無い頂点(足より下など)はそのまま。差し替えた頂点のフラグを返す(1 つも無ければ null)。
+		/// </summary>
+		public static bool[] ApplyAxisRangeFallback(PartWeights[] weights, PartWeights[] geometry,
+			Vector3[] worldVertices, in BodyPartProfiles profiles)
+		{
+			if (weights == null || geometry == null || worldVertices == null || !profiles.IsCreated)
+				return null;
+			var n = weights.Length;
+			if (geometry.Length != n || worldVertices.Length != n)
+				return null;
+
+			bool[] changed = null;
+			for (var v = 0; v < n; v++)
+			{
+				var dominant = weights[v].Parts.x;
+				if (dominant == 0 || !profiles.IsUsable(dominant))
+					continue;
+				var axis = profiles.Axes[dominant];
+				axis.Decompose(worldVertices[v], out var h, out _, out _, out _);
+				if (h >= BodyPartProfiles.HStart && h <= BodyPartProfiles.HEnd)
+					continue;
+				var geo = geometry[v];
+				if (geo.Parts.x == 0 || geo.Parts.x == dominant)
+					continue;
+				weights[v] = geo;
+				changed ??= new bool[n];
+				changed[v] = true;
+			}
+			return changed;
 		}
 
 		private static void AccumulateInto(float[] sums, int offset, in PartWeights pw)

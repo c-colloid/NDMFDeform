@@ -572,8 +572,12 @@ namespace MeshModifier.NDMFDeform.Tests
 		/// 体 = 胴の円柱(軸 x=0、半径 0.2、y 0〜1.4)+ 左上腕の円柱(軸 x=0.35、半径 0.06、y 0.6〜1.3)。
 		/// 骨格 = Hips(0,0,0) → Neck(0,1.4,0)、LeftUpperArm(0.35,1.3,0) → LeftLowerArm(0.35,0.6,0)。
 		/// 衣装 = 指定頂点(ボーン 0 = Hips、1 = LeftUpperArm にウェイト)。両方とも同じボーンを使う。
+		/// withLeg なら左太もも(LeftUpperLeg(0.1,0,0) → LeftLowerLeg(0.1,−0.7,0)、半径 0.08 の円柱、ボーン 2)を
+		/// 胴の下に足す。legInnerStripToHips なら太ももの内側(x &lt; 0.1)の頂点を Hips のウェイトにして、
+		/// 胴パーツの三角形集合に「太ももの内側の壁」を含める(HAOLAN の骨盤〜股の構造を模す)。
 		/// </summary>
-		private PartSetup CreatePartSetup(Vector3[] costumeVertices, int[] costumeBones)
+		private PartSetup CreatePartSetup(Vector3[] costumeVertices, int[] costumeBones, bool withLeg = false,
+			bool legInnerStripToHips = false)
 		{
 			_root = new GameObject("Avatar");
 			var hips = new GameObject("Hips").transform;
@@ -588,16 +592,32 @@ namespace MeshModifier.NDMFDeform.Tests
 			var lowerArm = new GameObject("LeftLowerArm").transform;
 			lowerArm.SetParent(upperArm, false);
 			lowerArm.position = new Vector3(0.35f, 0.6f, 0f);
-			var bones = new[] { hips, upperArm };
-			var bindposes = new[] { hips.worldToLocalMatrix, upperArm.worldToLocalMatrix };
-
-			var skeleton = HumanoidSkeleton.FromBones(new Dictionary<HumanBodyBones, Transform>
+			var humanBones = new Dictionary<HumanBodyBones, Transform>
 			{
 				{ HumanBodyBones.Hips, hips },
 				{ HumanBodyBones.Neck, neck },
 				{ HumanBodyBones.LeftUpperArm, upperArm },
 				{ HumanBodyBones.LeftLowerArm, lowerArm },
-			});
+			};
+			var boneList = new List<Transform> { hips, upperArm };
+			if (withLeg)
+			{
+				var upperLeg = new GameObject("LeftUpperLeg").transform;
+				upperLeg.SetParent(hips, false);
+				upperLeg.position = new Vector3(0.1f, 0f, 0f);
+				var lowerLeg = new GameObject("LeftLowerLeg").transform;
+				lowerLeg.SetParent(upperLeg, false);
+				lowerLeg.position = new Vector3(0.1f, -0.7f, 0f);
+				humanBones[HumanBodyBones.LeftUpperLeg] = upperLeg;
+				humanBones[HumanBodyBones.LeftLowerLeg] = lowerLeg;
+				boneList.Add(upperLeg);
+			}
+			var bones = boneList.ToArray();
+			var bindposes = new Matrix4x4[bones.Length];
+			for (var i = 0; i < bones.Length; i++)
+				bindposes[i] = bones[i].worldToLocalMatrix;
+
+			var skeleton = HumanoidSkeleton.FromBones(humanBones);
 
 			// 体
 			var bv = new List<Vector3>();
@@ -605,6 +625,19 @@ namespace MeshModifier.NDMFDeform.Tests
 			var bw = new List<BoneWeight>();
 			AppendCylinder(bv, bt, bw, new Vector3(0f, 0f, 0f), 0.2f, 1.4f, 0);
 			AppendCylinder(bv, bt, bw, new Vector3(0.35f, 0.6f, 0f), 0.06f, 0.7f, 1);
+			if (withLeg)
+			{
+				var legStart = bv.Count;
+				AppendCylinder(bv, bt, bw, new Vector3(0.1f, -0.7f, 0f), 0.08f, 0.7f, 2);
+				if (legInnerStripToHips)
+				{
+					for (var i = legStart; i < bv.Count; i++)
+					{
+						if (bv[i].x < 0.1f - 1e-4f)
+							bw[i] = new BoneWeight { boneIndex0 = 0, weight0 = 1f };
+					}
+				}
+			}
 			var bodyMesh = Track(new Mesh { vertices = bv.ToArray(), triangles = bt.ToArray() });
 			bodyMesh.boneWeights = bw.ToArray();
 			bodyMesh.bindposes = bindposes;
@@ -740,6 +773,83 @@ namespace MeshModifier.NDMFDeform.Tests
 			Assert.That(report.Part, Is.EqualTo(BodyPart.LeftUpperArm));
 			Assert.That(report.GeometryPart, Is.EqualTo(BodyPart.Torso));
 			Assert.That(report.NeedsReview, Is.True);
+		}
+
+		[Test]
+		public void PartLabel_HemBelowAxisRangeFollowsNearestPartByGeometry()
+		{
+			// 胴(Hips)のウェイトしか持たない裾の頂点が、胴の軸区間(プロファイルの範囲 h ≥ −0.25 ↔ y ≥ −0.35)より
+			// 下(y = −0.5)に垂れている。胴の軸で評価すると端の値でクランプされて動かない(または骨盤の半径へ
+			// 引き込まれる)が、形状で太ももへ所属が移り、太ももの軸基準で半径 0.08 + 隙間 0.02 へ寄る
+			var s = CreatePartSetup(new[]
+			{
+				new Vector3(0.22f, -0.5f, 0f), // 裾(太ももの外側 x = 0.18 から 4 cm)
+				new Vector3(0.25f, 0.7f, 0f), // 身頃(胴の壁 x = 0.2 から 5 cm)
+			}, new[] { 0, 0 }, withLeg: true);
+
+			var v = BakePart(s);
+			Assert.That(s.Fit.EffectiveMode, Is.EqualTo(BodyFitDeformer.FitMode.PartCylinder));
+			AssertNear(v[0], new Vector3(0.20f, -0.5f, 0f), "裾は太ももの軸基準で太ももの半径 + 隙間へ", 2e-3f);
+			AssertNear(v[1], new Vector3(0.22f, 0.7f, 0f), "身頃は胴の軸基準のまま", 2e-3f);
+
+			// ウェイトのみ(形状証拠なし)では差し替えが起きず、胴のプロファイルの端の値で評価される
+			s.Fit.Source = BodyFitDeformer.PartSource.BoneWeights;
+			v = BakePart(s);
+			Assert.That(v[0].x, Is.Not.EqualTo(0.20f).Within(2e-3f), "ウェイトのみでは形状へ差し替えない");
+		}
+
+		[Test]
+		public void PartLabel_AxisRangeFallbackIsReportedPerGroup()
+		{
+			// 裾 2 頂点 + 身頃 1 頂点の連結成分。多数決で胴に揃うが、裾は軸区間外なので形状(太もも)へ移り、件数が報告される
+			var s = CreatePartSetup(new[]
+			{
+				new Vector3(0.22f, -0.5f, 0f), new Vector3(0.22f, -0.52f, 0f), new Vector3(0.25f, 0.7f, 0f),
+			}, new[] { 0, 0, 0 }, withLeg: true);
+			s.Source.triangles = new[] { 0, 1, 2 };
+			s.Fit.Grouping = BodyFitDeformer.PartGrouping.ConnectedComponents;
+			s.Fit.SeamBlend = 0;
+
+			var v = BakePart(s);
+			Assert.That(s.Fit.PartReports, Has.Count.EqualTo(1));
+			var report = s.Fit.PartReports[0];
+			Assert.That(report.Part, Is.EqualTo(BodyPart.Torso), "投票では胴");
+			Assert.That(report.OutOfRangeCount, Is.EqualTo(2), "軸区間外の裾 2 頂点が形状へ差し替えられた");
+			Assert.That(v[0].x, Is.EqualTo(0.20f).Within(2e-3f), "裾は太ももの軸基準");
+			Assert.That(v[2].x, Is.EqualTo(0.22f).Within(2e-3f), "身頃は胴の軸基準");
+		}
+
+		[Test]
+		public void EnforceMinGap_DoesNotPushThroughOpenPartBoundary()
+		{
+			// 太ももの内側の壁が胴パーツに含まれる体(骨盤〜股)。胴所属の裾の頂点が太ももの外側(x = 0.22、太ももの壁から 4 cm)
+			// にあると、胴の三角形だけで見た最近接は内側の壁(x = 0.02、法線 −X)で「内側」と誤判定され、
+			// 修正前は minGap − d = 0.22 だけ −X へ(太ももを貫いて x = 0.0 へ)押し込まれた。
+			// 全身の最近接(太ももの外側の壁、隙間 4 cm ≥ minGap)を見て押し出さない
+			var s = CreatePartSetup(new[] { new Vector3(0.22f, -0.5f, 0f) }, new[] { 0 },
+				withLeg: true, legInnerStripToHips: true);
+			s.Fit.Source = BodyFitDeformer.PartSource.BoneWeights; // 形状への差し替えを切り、胴所属のままにする
+			s.Fit.PullIn = false; // 押し出しのみ
+
+			var v = BakePart(s);
+			Assert.That(s.Fit.EffectiveMode, Is.EqualTo(BodyFitDeformer.FitMode.PartCylinder));
+			AssertNear(v[0], new Vector3(0.22f, -0.5f, 0f), "パーツ円柱: 全身で隙間が足りていれば押し込まない", 2e-3f);
+
+			// 最近接表面モードのパーツ制限付き検索でも同じ誤判定が起きる
+			s.Fit.Mode = BodyFitDeformer.FitMode.NearestSurface;
+			s.Fit.PartFilter = true;
+			v = BakePart(s);
+			Assert.That(s.Fit.EffectiveMode, Is.EqualTo(BodyFitDeformer.FitMode.NearestSurface));
+			AssertNear(v[0], new Vector3(0.22f, -0.5f, 0f), "最近接表面: 全身で隙間が足りていれば押し込まない", 2e-3f);
+
+			// 本当に太ももにめり込んでいる(全身で見ても内側)頂点は、補正量の小さい太ももの壁から外へ押し出される
+			s.Fit.Mode = BodyFitDeformer.FitMode.PartCylinder;
+			s.Source.vertices = new[] { new Vector3(0.17f, -0.5f, 0f) }; // 外側の壁 x = 0.18 から 1 cm 内側
+			v = BakePart(s);
+			// 24 分割の円柱の面法線(7.5° 傾く)に沿って押し出されるため z に数 mm 乗る
+			Assert.That(v[0].x, Is.EqualTo(0.20f).Within(3e-3f), "めり込みは太ももの壁の外(半径 + 隙間)へ");
+			Assert.That(v[0].y, Is.EqualTo(-0.5f).Within(1e-3f));
+			Assert.That(Mathf.Abs(v[0].z), Is.LessThan(0.01f), "太ももを貫いて内側の壁の向こうへは行かない");
 		}
 
 		[Test]
