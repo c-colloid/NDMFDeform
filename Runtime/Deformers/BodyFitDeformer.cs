@@ -1710,12 +1710,14 @@ namespace MeshModifier.NDMFDeform.Core
 				for (var c = 0; c < cellCount; c++)
 					grid[c] = float.PositiveInfinity;
 
-				// 1. 最内層半径
+				// 1. 最内層半径。領域(二重球)の重みに関わらず全頂点から取る: 領域が格子の一部しか覆わないとき、
+				//    最内層が領域の外にあると領域内の外側の層が最内層として体へ潰されるため(§14)。
+				//    領域の重みは変位の適用にだけ効く
 				var n = binPart.Length;
 				for (var i = 0; i < n; i++)
 				{
 					var part = binPart[i];
-					if (part == 0 || weight[i] <= 0f)
+					if (part == 0)
 						continue;
 					var c = coords[i * 4];
 					var hi = (int)floor((c.x - BodyPartProfiles.HStart) / (BodyPartProfiles.HEnd - BodyPartProfiles.HStart) * H);
