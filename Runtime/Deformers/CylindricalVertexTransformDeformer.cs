@@ -192,6 +192,7 @@ namespace MeshModifier.NDMFDeform.Core
 			var scratch = new NativeArray<float>(n, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
 			var offsets = new NativeArray<int>(_adjacency.Offsets, Allocator.TempJob);
 			var neighbors = new NativeArray<int>(_adjacency.Neighbors, Allocator.TempJob);
+			var neighborWeights = new NativeArray<float>(_adjacency.NeighborWeights, Allocator.TempJob);
 
 			var handle = new WeightJob
 			{
@@ -214,6 +215,7 @@ namespace MeshModifier.NDMFDeform.Core
 					lambda = CylindricalCutLine.SmoothingLambda,
 					offsets = offsets,
 					neighbors = neighbors,
+					neighborWeights = neighborWeights,
 					source = src,
 					result = dst,
 				}.Schedule(n, 128, handle);
@@ -233,6 +235,7 @@ namespace MeshModifier.NDMFDeform.Core
 			handle = scratch.Dispose(handle);
 			handle = offsets.Dispose(handle);
 			handle = neighbors.Dispose(handle);
+			handle = neighborWeights.Dispose(handle);
 			return handle;
 		}
 
@@ -282,13 +285,17 @@ namespace MeshModifier.NDMFDeform.Core
 			}
 		}
 
-		/// <summary>隣接頂点の平均へ lambda だけ寄せる(ラプラシアン拡散 1 回分)</summary>
+		/// <summary>
+		/// 隣接頂点の(辺長の逆数で重み付けした)加重平均へ lambda だけ寄せる(ラプラシアン拡散 1 回分)。
+		/// 重みは MeshAdjacency.NeighborWeights(頂点ごとに正規化済み)。
+		/// </summary>
 		[BurstCompile]
 		public struct DiffuseWeightJob : IJobParallelFor
 		{
 			public float lambda;
 			[ReadOnly] public NativeArray<int> offsets;
 			[ReadOnly] public NativeArray<int> neighbors;
+			[ReadOnly] public NativeArray<float> neighborWeights;
 			[ReadOnly] public NativeArray<float> source;
 			[WriteOnly] public NativeArray<float> result;
 
@@ -304,8 +311,8 @@ namespace MeshModifier.NDMFDeform.Core
 				}
 				var sum = 0f;
 				for (var i = begin; i < end; i++)
-					sum += source[neighbors[i]];
-				result[index] = lerp(value, sum / (end - begin), lambda);
+					sum += source[neighbors[i]] * neighborWeights[i];
+				result[index] = lerp(value, sum, lambda);
 			}
 		}
 

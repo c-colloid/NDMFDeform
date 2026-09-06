@@ -18,6 +18,9 @@ namespace MeshModifier.NDMFDeform.Core
 		/// <summary>位置溶接の量子化単位(この距離未満の頂点は同一位置とみなす)</summary>
 		public const float WeldEpsilon = 1e-5f;
 
+		/// <summary>拡散重みの計算で辺長をこの値以上に丸める(退化した辺で重みが発散しないように)</summary>
+		public const float MinEdgeLength = 1e-4f;
+
 		public int VertexCount { get; private set; }
 
 		/// <summary>頂点 i の隣接は Neighbors[Offsets[i] .. Offsets[i + 1])。長さ VertexCount + 1</summary>
@@ -25,6 +28,13 @@ namespace MeshModifier.NDMFDeform.Core
 
 		/// <summary>隣接頂点(代表頂点)のインデックス列</summary>
 		public int[] Neighbors { get; private set; }
+
+		/// <summary>
+		/// Neighbors と同じ並びの拡散重み。辺長の逆数を頂点ごとに正規化(和 = 1)したもので、
+		/// 短い辺ほど強く結合するため、頂点密度が不均一なメッシュでも拡散が幾何学的な距離に沿う
+		/// (一様重みだと細長い三角形の短辺の両端に大きな値差が残る)。
+		/// </summary>
+		public float[] NeighborWeights { get; private set; }
 
 		/// <summary>頂点 i と同じ位置の頂点群を代表するインデックス(自身のこともある)</summary>
 		public int[] Representative { get; private set; }
@@ -98,17 +108,32 @@ namespace MeshModifier.NDMFDeform.Core
 			offsets[n] = total;
 
 			var neighbors = new int[total];
+			var weights = new float[total];
 			for (var i = 0; i < n; i++)
 			{
 				var list = lists[representative[i]];
 				if (list == null)
 					continue;
 				list.CopyTo(neighbors, offsets[i]);
+
+				var begin = offsets[i];
+				var end = offsets[i + 1];
+				var sum = 0f;
+				var vi = vertices[i];
+				for (var k = begin; k < end; k++)
+				{
+					var w = 1f / math.max(Vector3.Distance(vi, vertices[neighbors[k]]), MinEdgeLength);
+					weights[k] = w;
+					sum += w;
+				}
+				for (var k = begin; k < end; k++)
+					weights[k] /= sum;
 			}
 
 			result.VertexCount = n;
 			result.Offsets = offsets;
 			result.Neighbors = neighbors;
+			result.NeighborWeights = weights;
 			result.Representative = representative;
 			return result;
 		}
@@ -130,6 +155,7 @@ namespace MeshModifier.NDMFDeform.Core
 			VertexCount = n;
 			Offsets = new int[n + 1];
 			Neighbors = System.Array.Empty<int>();
+			NeighborWeights = System.Array.Empty<float>();
 			Representative = new int[n];
 			for (var i = 0; i < n; i++)
 				Representative[i] = i;

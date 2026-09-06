@@ -402,12 +402,38 @@ namespace MeshModifier.NDMFDeform.Tests
 		}
 
 		[Test]
+		public void MeshAdjacency_WeightsFavorShortEdgesAndSumToOne()
+		{
+			// 頂点 0 から 1 は 0.1、0 から 2 は 0.4 離れている → 0 の重みは 1 側が 4 倍
+			var mesh = new Mesh
+			{
+				vertices = new[] { new Vector3(0f, 0f, 0f), new Vector3(0.1f, 0f, 0f), new Vector3(0f, 0.4f, 0f) },
+				triangles = new[] { 0, 1, 2 },
+			};
+			try
+			{
+				var adjacency = MeshAdjacency.Build(mesh);
+				var begin = adjacency.Offsets[0];
+				var w = new System.Collections.Generic.Dictionary<int, float>();
+				for (var k = begin; k < adjacency.Offsets[1]; k++)
+					w[adjacency.Neighbors[k]] = adjacency.NeighborWeights[k];
+				Assert.That(w[1] + w[2], Is.EqualTo(1f).Within(1e-5f));
+				Assert.That(w[1] / w[2], Is.EqualTo(4f).Within(1e-3f));
+			}
+			finally
+			{
+				Object.DestroyImmediate(mesh);
+			}
+		}
+
+		[Test]
 		public void MeshAdjacency_EmptyMeshHasNoNeighbors()
 		{
 			var adjacency = MeshAdjacency.Build(null);
 			Assert.That(adjacency.VertexCount, Is.EqualTo(0));
 			Assert.That(adjacency.Offsets.Length, Is.EqualTo(1));
 			Assert.That(adjacency.Neighbors.Length, Is.EqualTo(0));
+			Assert.That(adjacency.NeighborWeights.Length, Is.EqualTo(0));
 		}
 
 		private static int[] Neighbors(MeshAdjacency adjacency, int vertex)
