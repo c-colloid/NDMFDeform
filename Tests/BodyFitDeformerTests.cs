@@ -715,6 +715,7 @@ namespace MeshModifier.NDMFDeform.Tests
 			fit.PullIn = true;
 			fit.Factor = 1f;
 			fit.Grouping = BodyFitDeformer.PartGrouping.None;
+			fit.MaxShrink = 0f; // 放射変位そのものを検証するので縮み率の上限は外す
 			stack.AddDeformer(fit);
 
 			return new PartSetup { Body = body, CostumeGo = costumeGo, Stack = stack, Fit = fit, Source = source };
@@ -946,6 +947,47 @@ namespace MeshModifier.NDMFDeform.Tests
 			AssertNear(v[0], new Vector3(0.43f, 0.95f, 0f), "袖の内層", 2e-3f);
 			AssertNear(v[1], new Vector3(0.47f, 0.95f, 0f), "装飾のオフセット維持", 2e-3f);
 			AssertNear(v[2], new Vector3(0.22f, 0.7f, 0f), "胴", 2e-3f);
+		}
+
+		[Test]
+		public void RigidDecorations_AttachedGroupFollowsItsBase()
+		{
+			// 身頃(x 0.25 の 3 頂点)に 1 cm 以内で付く装飾(0.255 → 0.30 → 0.30 と外へ張り出す 3 頂点)。
+			// 頂点ごとの放射では張り出した先端(r 0.30)がその格子の最内層として胴の半径 + 隙間(0.22)へ潰れる。
+			// 追従では付け根(0.255。身頃と同じ格子で Δr = −0.03)の変位を写し、先端は 0.27 で輪郭を保つ
+			var s = CreatePartSetup(new[]
+			{
+				new Vector3(0.25f, 0.70f, 0f), new Vector3(0.25f, 0.72f, 0f), new Vector3(0.25f, 0.74f, 0f),
+				new Vector3(0.255f, 0.72f, 0f), new Vector3(0.30f, 0.76f, 0f), new Vector3(0.30f, 0.80f, 0f),
+			}, new[] { 0, 0, 0, 0, 0, 0 });
+			s.Source.triangles = new[] { 0, 1, 2, 3, 4, 5 };
+			s.Fit.Grouping = BodyFitDeformer.PartGrouping.ConnectedComponents;
+			s.Fit.RigidMaxSize = 0.2f;
+
+			s.Fit.RigidDecorations = false;
+			var v = BakePart(s);
+			Assert.That(v[5].x, Is.EqualTo(0.22f).Within(3e-3f), "追従なし: 先端は自分の格子の最内層として潰れる");
+
+			s.Fit.RigidDecorations = true;
+			v = BakePart(s);
+			Assert.That(v[3].x, Is.EqualTo(0.225f).Within(3e-3f), "付け根は自分の放射変位");
+			Assert.That(v[4].x, Is.EqualTo(0.27f).Within(3e-3f), "中間は付け根の変位(−0.03)を写す");
+			Assert.That(v[5].x, Is.EqualTo(0.27f).Within(3e-3f), "先端も付け根の変位を写し、張り出しを保つ");
+			Assert.That(v[5].y, Is.EqualTo(0.80f).Within(1e-3f), "上下には動かない");
+			Assert.That(v[0].x, Is.EqualTo(0.22f).Within(3e-3f), "身頃は胴の半径 + 隙間へ");
+		}
+
+		[Test]
+		public void MaxShrink_LimitsPullIn()
+		{
+			// 胴の壁(0.2)から 10 cm 離れた頂点。無制限なら 0.22 まで寄るが、縮み率 10% なら 0.30 × 0.9 = 0.27 で止まる
+			var s = CreatePartSetup(new[] { new Vector3(0.30f, 0.7f, 0f) }, new[] { 0 });
+			var v = BakePart(s);
+			AssertNear(v[0], new Vector3(0.22f, 0.7f, 0f), "無制限", 2e-3f);
+
+			s.Fit.MaxShrink = 0.1f;
+			v = BakePart(s);
+			AssertNear(v[0], new Vector3(0.27f, 0.7f, 0f), "縮み率 10% で止まる", 2e-3f);
 		}
 
 		[Test]

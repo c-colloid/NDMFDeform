@@ -121,8 +121,8 @@ namespace MeshModifier.NDMFDeform.Core
 		[SerializeField, Tooltip("離れすぎた頂点を体へ引き寄せる。切るとめり込みの解消だけを行う(ブカッとした衣装向け)")]
 		private bool pullIn = true;
 
-		[SerializeField, Tooltip("体との最大の隙間(m)。これより遠い頂点を引き寄せる(pullIn が有効なとき)")]
-		private float maxGap = 0.005f;
+		[SerializeField, Tooltip("体との最大の隙間(m)。これより遠い頂点を引き寄せる(pullIn が有効なとき)。既定の 2 cm は「帯」設定(5 mm〜2 cm は動かさない)。ぴったりにするなら minGap と同じ値にする")]
+		private float maxGap = 0.02f;
 
 		[SerializeField, Min(0f), Tooltip("体表面を探す距離の上限(m)。これより体から離れた頂点は対象外(上限の 75% から滑らかに効きが減る)")]
 		private float searchDistance = 0.1f;
@@ -187,6 +187,15 @@ namespace MeshModifier.NDMFDeform.Core
 		[SerializeField, Tooltip("首の関節より上にある胴所属(襟など)を首パーツへ移し、首・頭のプロファイルで動かす(首から上が別レンダラーなら additionalBodies に入れる)。実験的")]
 		private bool neckCap;
 
+		[SerializeField, Tooltip("パーツ円柱: 小さなグループ(紐・ボタンなど独立した UV 島 / 連結成分の装飾)は頂点ごとに放射させず、付け根(他のグループに接する頂点)の変位に追従させて輪郭を保つ。実験的")]
+		private bool rigidDecorations;
+
+		[SerializeField, Min(0f), Tooltip("付け根に追従させるグループの大きさ(バウンズ対角、m)の上限")]
+		private float rigidMaxSize = 0.2f;
+
+		[SerializeField, Range(0f, 1f), Tooltip("パーツ円柱: 引き寄せで軸からの距離を縮める率の上限。0 で無制限。既定の 0.15 は元の 85% までしか寄せず、残りは隙間として残す(布の潰れと輪郭の縮みを抑える)")]
+		private float maxShrink = 0.15f;
+
 		[SerializeField] private Transform axisOverride;
 
 		public Renderer Body { get => body; set => body = value; }
@@ -240,6 +249,15 @@ namespace MeshModifier.NDMFDeform.Core
 		public bool ShoulderAxis { get => shoulderAxis; set => shoulderAxis = value; }
 		public float ShoulderCapMargin { get => shoulderCapMargin; set => shoulderCapMargin = Mathf.Clamp(value, 0f, 0.3f); }
 		public bool NeckCap { get => neckCap; set => neckCap = value; }
+		public bool RigidDecorations { get => rigidDecorations; set => rigidDecorations = value; }
+		public float RigidMaxSize { get => rigidMaxSize; set => rigidMaxSize = Mathf.Max(0f, value); }
+		public float MaxShrink { get => maxShrink; set => maxShrink = Mathf.Clamp01(value); }
+
+		/// <summary>直近のパーツ所属計算のグループ分け(頂点 → グループ番号、-1 = 所属なし)のコピー。未計算・グループ化なしなら null</summary>
+		public int[] GetPartGroups()
+		{
+			return _lastGroups == null ? null : (int[])_lastGroups.Clone();
+		}
 
 		/// <summary>骨格の差し替え(テスト用。null なら体 / 衣装の親の Animator から作る)</summary>
 		[System.NonSerialized] public HumanoidSkeleton SkeletonOverride;
@@ -276,6 +294,10 @@ namespace MeshModifier.NDMFDeform.Core
 		[System.NonSerialized] private bool _partsReady;
 		[System.NonSerialized] private FitMode _effectiveMode = FitMode.NearestSurface;
 		[System.NonSerialized] private NativeArray<PartWeights> _costumeParts;
+
+		// 装飾の追従: 頂点 → 変位を写す元の頂点(-1 = 自分の放射変位)。_costumeParts と同じ寿命
+		[System.NonSerialized] private NativeArray<int> _follow;
+		[System.NonSerialized] private int[] _followManaged;
 		[System.NonSerialized] private int _costumePartsKey;
 		[System.NonSerialized] private int _surfaceHash;
 		[System.NonSerialized] private readonly List<PartGroupReport> _partReports = new List<PartGroupReport>();
@@ -321,6 +343,7 @@ namespace MeshModifier.NDMFDeform.Core
 			if (_adjList.IsCreated) _adjList.Dispose();
 			if (_baseDisplacement.IsCreated) _baseDisplacement.Dispose();
 			if (_costumeParts.IsCreated) _costumeParts.Dispose();
+			if (_follow.IsCreated) _follow.Dispose();
 			_adjacencyMesh = null;
 			_adjacencyManaged = null;
 			_adjacencyVertexCount = 0;
@@ -670,6 +693,8 @@ namespace MeshModifier.NDMFDeform.Core
 				key = key * 31 + (shoulderAxis ? 1 : 0);
 				key = key * 31 + shoulderCapMargin.GetHashCode();
 				key = key * 31 + (neckCap ? 1 : 0);
+				key = key * 31 + (rigidDecorations ? 1 : 0);
+				key = key * 31 + rigidMaxSize.GetHashCode();
 				key = key * 31 + OverridesHash();
 				var own = GetOwnRenderer();
 				key = key * 31 + (own != null ? own.GetInstanceID() : 0);
@@ -679,9 +704,14 @@ namespace MeshModifier.NDMFDeform.Core
 
 			if (_costumeParts.IsCreated)
 				_costumeParts.Dispose();
+			if (_follow.IsCreated)
+				_follow.Dispose();
 			ClearPartReports();
+			_followManaged = null;
 			var weights = skeleton != null ? BuildCostumePartWeights(source, skeleton, _partReports) : new PartWeights[n];
 			_costumeParts = new NativeArray<PartWeights>(weights, Allocator.Persistent);
+			if (_followManaged != null && _followManaged.Length == n)
+				_follow = new NativeArray<int>(_followManaged, Allocator.Persistent);
 			_costumePartsKey = key;
 		}
 
@@ -783,6 +813,11 @@ namespace MeshModifier.NDMFDeform.Core
 			_lastAnalysis = analysis;
 			_lastVertices = local;
 
+			// 装飾の追従: 小さなグループの頂点は付け根の頂点の変位を写す
+			_followManaged = rigidDecorations && groups != null
+				? BuildFollowSources(local, groups, groupCount, adjacency, rigidMaxSize)
+				: null;
+
 			// 手動上書き → グループ番号
 			Dictionary<int, BodyPart> overrides = null;
 			if (groups != null && partOverrides.Count > 0)
@@ -849,6 +884,174 @@ namespace MeshModifier.NDMFDeform.Core
 			// 縫い目: 同位置の頂点を揃え、境界で所属を混ぜる
 			PartLabeler.BlendSeams(weights, adjacency, seamBlend);
 			return weights;
+		}
+
+		/// <summary>
+		/// 装飾の追従の写し元を求める。バウンズ対角が maxSize 以下のグループ(襟・紐・ボタン)について、
+		/// 「付け根」= 他のグループの頂点と同じ位置にある / 隣接している / 1 cm 以内にある頂点 を探し、
+		/// グループの各頂点に最も近い付け根の頂点番号を写し元にする(付け根自身は自分)。
+		/// 付け根の無い(どこにも付いていない)グループと大きなグループは -1(頂点ごとの放射変位のまま)。
+		/// 襟のような部品が、傾いた軸の放射や軸区間の切り替わりで輪郭を崩さず、付け根の布と一緒に動く。
+		/// </summary>
+		public static int[] BuildFollowSources(Vector3[] vertices, int[] groups, int groupCount, MeshAdjacency adjacency,
+			float maxSize)
+		{
+			var n = vertices.Length;
+			if (groups == null || groups.Length != n || groupCount <= 0)
+				return null;
+
+			var min = new Vector3[groupCount];
+			var max = new Vector3[groupCount];
+			var seen = new bool[groupCount];
+			for (var v = 0; v < n; v++)
+			{
+				var g = groups[v];
+				if (g < 0 || g >= groupCount)
+					continue;
+				if (!seen[g])
+				{
+					seen[g] = true;
+					min[g] = vertices[v];
+					max[g] = vertices[v];
+				}
+				else
+				{
+					min[g] = Vector3.Min(min[g], vertices[v]);
+					max[g] = Vector3.Max(max[g], vertices[v]);
+				}
+			}
+			var small = new bool[groupCount];
+			var anySmall = false;
+			for (var g = 0; g < groupCount; g++)
+			{
+				small[g] = seen[g] && (max[g] - min[g]).magnitude <= maxSize;
+				anySmall |= small[g];
+			}
+			if (!anySmall)
+				return null;
+
+			// 溶接グループ(同じ位置の頂点)に含まれるグループ: UV シームで分かれた同位置の頂点を付け根とみなす
+			var weldOf = adjacency != null && adjacency.VertexCount == n ? adjacency.GroupOf : null;
+			var weldCount = weldOf != null ? adjacency.Representative.Length : 0;
+			var weldFirst = new int[weldCount];
+			var weldMixed = new bool[weldCount];
+			for (var w = 0; w < weldCount; w++)
+				weldFirst[w] = -1;
+			if (weldOf != null)
+			{
+				for (var v = 0; v < n; v++)
+				{
+					var w = weldOf[v];
+					var g = groups[v];
+					if (g < 0)
+						continue;
+					if (weldFirst[w] < 0)
+						weldFirst[w] = g;
+					else if (weldFirst[w] != g)
+						weldMixed[w] = true;
+				}
+			}
+
+			// 近接(1 cm)の判定用の均一グリッド
+			const float attach = 0.01f;
+			var cells = new Dictionary<long, List<int>>();
+			long Key(Vector3 p)
+			{
+				var x = (long)Mathf.Floor(p.x / attach);
+				var y = (long)Mathf.Floor(p.y / attach);
+				var z = (long)Mathf.Floor(p.z / attach);
+				return ((x & 0x1FFFFF) << 42) ^ ((y & 0x1FFFFF) << 21) ^ (z & 0x1FFFFF);
+			}
+			for (var v = 0; v < n; v++)
+			{
+				var key = Key(vertices[v]);
+				if (!cells.TryGetValue(key, out var list))
+					cells[key] = list = new List<int>();
+				list.Add(v);
+			}
+
+			bool OtherGroupNear(int v, int g)
+			{
+				var p = vertices[v];
+				for (var dx = -1; dx <= 1; dx++)
+				for (var dy = -1; dy <= 1; dy++)
+				for (var dz = -1; dz <= 1; dz++)
+				{
+					if (!cells.TryGetValue(Key(p + new Vector3(dx, dy, dz) * attach), out var list))
+						continue;
+					foreach (var u in list)
+					{
+						if (groups[u] != g && groups[u] >= 0 && (vertices[u] - p).sqrMagnitude <= attach * attach)
+							return true;
+					}
+				}
+				return false;
+			}
+
+			var isBase = new bool[n];
+			var members = new List<int>[groupCount];
+			for (var v = 0; v < n; v++)
+			{
+				var g = groups[v];
+				if (g < 0 || !small[g])
+					continue;
+				(members[g] ??= new List<int>()).Add(v);
+				var isSeam = false;
+				if (weldOf != null)
+				{
+					var w = weldOf[v];
+					isSeam = weldMixed[w] || (weldFirst[w] >= 0 && weldFirst[w] != g);
+					if (!isSeam && adjacency.HasEdges)
+					{
+						for (var i = adjacency.Start[v]; i < adjacency.Start[v + 1] && !isSeam; i++)
+						{
+							var nw = weldOf[adjacency.Neighbors[i]];
+							isSeam = weldMixed[nw] || (weldFirst[nw] >= 0 && weldFirst[nw] != g);
+						}
+					}
+				}
+				isBase[v] = isSeam || OtherGroupNear(v, g);
+			}
+
+			var result = new int[n];
+			for (var v = 0; v < n; v++)
+				result[v] = -1;
+			var bases = new List<int>();
+			for (var g = 0; g < groupCount; g++)
+			{
+				if (members[g] == null)
+					continue;
+				bases.Clear();
+				foreach (var v in members[g])
+				{
+					if (isBase[v])
+						bases.Add(v);
+				}
+				if (bases.Count == 0)
+					continue;
+				foreach (var v in members[g])
+				{
+					if (isBase[v])
+					{
+						result[v] = v;
+						continue;
+					}
+					var best = -1;
+					var bestDist = float.MaxValue;
+					var p = vertices[v];
+					foreach (var b in bases)
+					{
+						var d = (vertices[b] - p).sqrMagnitude;
+						if (d < bestDist)
+						{
+							bestDist = d;
+							best = b;
+						}
+					}
+					result[v] = best;
+				}
+			}
+			return result;
 		}
 
 		/// <summary>上書きの参照(島シード / 代表点)を現在のグループ番号へ解決する。見つからなければ -1</summary>
@@ -1068,7 +1271,8 @@ namespace MeshModifier.NDMFDeform.Core
 			var radialDirs = new NativeArray<float3>(n * 4, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
 			var binPart = new NativeArray<int>(n, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
 			var weight = new NativeArray<float>(n, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
-			var valid = new NativeArray<byte>(n, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+			var validRadial = new NativeArray<byte>(n, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+			var valid = validRadial;
 			var delta = new NativeArray<float3>(n, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
 			var grid = new NativeArray<float>(cellCount, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
 			var gridScratch = new NativeArray<float>(cellCount, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
@@ -1098,6 +1302,7 @@ namespace MeshModifier.NDMFDeform.Core
 				maxGap = pullIn ? Mathf.Max(maxGap, minGap) : float.MaxValue,
 				smoothIterations = smoothIterations,
 				smoothStrength = smoothStrength,
+				maxShrink = maxShrink,
 				grid = grid,
 				scratch = gridScratch,
 			}.Schedule(handle);
@@ -1115,10 +1320,30 @@ namespace MeshModifier.NDMFDeform.Core
 				valid = valid,
 			}.Schedule(n, 64, handle);
 
-			// 縫い目(所属が混ざる頂点とその隣)の変位ベクトルを頂点隣接で平滑化する(放射方向の食い違いをならす)
 			var current = delta;
+			var followBuffer = default(NativeArray<float3>);
 			var scratch = default(NativeArray<float3>);
 			var target = default(NativeArray<byte>);
+			var validFollow = default(NativeArray<byte>);
+
+			// 装飾の追従: 小さなグループの頂点は付け根の頂点の変位を写す(輪郭を保つ)
+			if (rigidDecorations && _follow.IsCreated && _follow.Length == n)
+			{
+				followBuffer = new NativeArray<float3>(n, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+				validFollow = new NativeArray<byte>(n, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+				handle = new FollowJob
+				{
+					follow = _follow,
+					input = current,
+					validIn = valid,
+					output = followBuffer,
+					validOut = validFollow,
+				}.Schedule(n, 128, handle);
+				current = followBuffer;
+				valid = validFollow;
+			}
+
+			// 縫い目(所属が混ざる頂点とその隣)の変位ベクトルを頂点隣接で平滑化する(放射方向の食い違いをならす)
 			if (seamSmoothIterations > 0 && smoothStrength > 0f && _adjList.IsCreated && _adjList.Length > 0 &&
 			    _adjStart.Length == n + 1)
 			{
@@ -1181,14 +1406,18 @@ namespace MeshModifier.NDMFDeform.Core
 			handle = radialDirs.Dispose(handle);
 			handle = binPart.Dispose(handle);
 			handle = weight.Dispose(handle);
-			handle = valid.Dispose(handle);
+			handle = validRadial.Dispose(handle);
 			handle = delta.Dispose(handle);
 			handle = grid.Dispose(handle);
 			handle = gridScratch.Dispose(handle);
+			if (followBuffer.IsCreated)
+				handle = followBuffer.Dispose(handle);
 			if (scratch.IsCreated)
 				handle = scratch.Dispose(handle);
 			if (target.IsCreated)
 				handle = target.Dispose(handle);
+			if (validFollow.IsCreated)
+				handle = validFollow.Dispose(handle);
 			return handle;
 		}
 
@@ -1465,6 +1694,9 @@ namespace MeshModifier.NDMFDeform.Core
 			public float maxGap;
 			public int smoothIterations;
 			public float smoothStrength;
+
+			/// <summary>引き寄せで軸からの距離を縮める率の上限(0 で無制限)</summary>
+			public float maxShrink;
 			public NativeArray<float> grid;
 			public NativeArray<float> scratch;
 
@@ -1511,7 +1743,10 @@ namespace MeshModifier.NDMFDeform.Core
 							continue;
 						}
 						var target = clamp(rMin, radius + minGap, radius + maxGap);
-						grid[idx] = target - rMin;
+						var dr = target - rMin;
+						if (maxShrink > 0f)
+							dr = max(dr, -maxShrink * rMin); // 周を maxShrink より縮めない(布の潰れを抑える)
+						grid[idx] = dr;
 					}
 				}
 
@@ -1638,6 +1873,30 @@ namespace MeshModifier.NDMFDeform.Core
 				}
 				delta[index] = sum;
 				valid[index] = any;
+			}
+		}
+
+		/// <summary>装飾の追従: follow[i] ≥ 0 の頂点は、その頂点の変位と有効フラグをそのまま写す</summary>
+		[BurstCompile]
+		public struct FollowJob : IJobParallelFor
+		{
+			[ReadOnly] public NativeArray<int> follow;
+			[ReadOnly] public NativeArray<float3> input;
+			[ReadOnly] public NativeArray<byte> validIn;
+			[WriteOnly] public NativeArray<float3> output;
+			[WriteOnly] public NativeArray<byte> validOut;
+
+			public void Execute(int index)
+			{
+				var source = follow[index];
+				if (source < 0 || source == index)
+				{
+					output[index] = input[index];
+					validOut[index] = validIn[index];
+					return;
+				}
+				output[index] = input[source];
+				validOut[index] = validIn[source];
 			}
 		}
 
