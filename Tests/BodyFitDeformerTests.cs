@@ -856,12 +856,12 @@ namespace MeshModifier.NDMFDeform.Tests
 		public void ShoulderAxis_CapVertexMovesVerticallyInsteadOfSideways()
 		{
 			// 胴の上端(天面 y = 1.4)の 5 cm 上にある胴所属の頂点。胴の円柱軸で見ると軸区間の上(h = 1.04)で、
-			// プロファイルの端の値(壁の半径 0.2)に向かって横へ 12 cm 押し出されてしまう。
+			// 横向きのレイは体に当たらず、プロファイルの端の値(壁の半径 0.2)で外挿されて横へ押し出される。
 			// 肩甲帯(脊椎 → 上腕関節の水平な軸)で扱うと天面からの隙間で上下に動く(0.1 + 0.02 → y = 1.42)
 			var s = CreatePartSetup(new[] { new Vector3(0.1f, 1.45f, 0f) }, new[] { 0 });
 
 			var v = BakePart(s);
-			Assert.That(v[0].x, Is.Not.EqualTo(0.1f).Within(0.02f), "肩甲帯なし: 胴の軸から横へ押し出される");
+			Assert.That(v[0].x, Is.Not.EqualTo(0.1f).Within(0.02f), "肩甲帯なし: 胴の軸から横へ押し出される(外挿)");
 
 			s.Fit.ShoulderAxis = true;
 			v = BakePart(s);

@@ -1560,7 +1560,7 @@ namespace MeshModifier.NDMFDeform.Core
 					if (c.w <= 0f)
 						continue;
 					var part = pw.Parts[s];
-					var d = BodyPartProfiles.SampleGrid(in grid, part, c.x, c.y);
+					var d = BodyPartProfiles.SampleGridSkipNaN(in grid, part, c.x, c.y);
 					if (isnan(d))
 						continue;
 					sum += radialDirs[index * 4 + s] * (d * c.w);

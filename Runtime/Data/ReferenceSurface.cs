@@ -85,6 +85,36 @@ namespace MeshModifier.NDMFDeform.Core
 			return math.lerp(math.lerp(a, b, fv), math.lerp(c, d, fv), fu);
 		}
 
+		/// <summary>
+		/// 格子値の双線形サンプル(NaN の角は除いて重みを正規化する)。参照なし(NaN)の格子との境界で、
+		/// 有効な角の値だけで補間する。4 角とも NaN なら NaN。
+		/// </summary>
+		public static float SampleGridSkipNaN(in NativeArray<float> grid, int part, float h, float theta)
+		{
+			GridCoords(h, theta, out var u, out var v);
+			u = math.clamp(u, 0f, HCount - 1f);
+			var u0 = (int)math.floor(u);
+			var u1 = math.min(u0 + 1, HCount - 1);
+			var fu = u - u0;
+			var v0 = (int)math.floor(v) % ThetaCount;
+			var v1 = (v0 + 1) % ThetaCount;
+			var fv = v - math.floor(v);
+			var sum = 0f;
+			var weight = 0f;
+			void Add(float value, float w)
+			{
+				if (math.isnan(value) || w <= 0f)
+					return;
+				sum += value * w;
+				weight += w;
+			}
+			Add(grid[CellIndex(part, u0, v0)], (1f - fu) * (1f - fv));
+			Add(grid[CellIndex(part, u0, v1)], (1f - fu) * fv);
+			Add(grid[CellIndex(part, u1, v0)], fu * (1f - fv));
+			Add(grid[CellIndex(part, u1, v1)], fu * fv);
+			return weight > 0f ? sum / weight : float.NaN;
+		}
+
 		public bool IsUsable(int part)
 		{
 			return IsCreated && part > 0 && part < HumanoidSkeleton.PartCount && Usable[part] != 0 &&
@@ -194,6 +224,8 @@ namespace MeshModifier.NDMFDeform.Core
 
 		/// <summary>
 		/// NaN の格子を有効な近傍(h 方向はクランプ、θ 方向は周期)の平均で繰り返し埋める。
+		/// 体の無い行(体メッシュの上端より上の襟など)も端の行の値で外挿する: そこの布は下の布と同じ
+		/// Δr で動き(装飾のオフセット維持と同じ扱い)、動かさないと布が裂けるため(§13.5)。
 		/// ヒットが少なすぎるパーツは使えない扱いにして NaN のまま残す。
 		/// </summary>
 		public static void FillMissing(NativeArray<float> radius, NativeArray<int> usable)
