@@ -203,6 +203,42 @@ namespace MeshModifier.NDMFDeform.Tests
 		}
 
 		[Test]
+		public void Fit_AdditionalBodiesAreCombinedIntoOneSurface()
+		{
+			// 2 つ目の体 = x 1.2 中心の立方体(面は 0.7 と 1.7)。頂点 x 0.65 は 1 つ目の壁(0.5)より
+			// 2 つ目の壁(0.7)に近いので、追加の体を参照するとそちらの隙間 0.02 へ寄る
+			var s = CreateSetup(new[] { new Vector3(0.65f, 0f, 0f) });
+			var secondGo = new GameObject("BodyMesh2");
+			secondGo.transform.SetParent(_root.transform, false);
+			secondGo.transform.position = new Vector3(1.2f, 0f, 0f);
+			secondGo.AddComponent<MeshFilter>().sharedMesh = Track(MakeCube());
+			var second = secondGo.AddComponent<MeshRenderer>();
+
+			var v = Bake(s);
+			AssertNear(v[0], new Vector3(0.52f, 0f, 0f), "体 1 つ: 1 つ目の壁へ");
+
+			s.Fit.AdditionalBodies.Add(second);
+			var builds = ReferenceSurfaceCache.BuildCount;
+			v = Bake(s);
+			AssertNear(v[0], new Vector3(0.68f, 0f, 0f), "体 2 つ: 近い方(2 つ目の壁)へ");
+			Assert.That(ReferenceSurfaceCache.BuildCount, Is.EqualTo(builds + 1), "結合表面を 1 回構築する");
+
+			builds = ReferenceSurfaceCache.BuildCount;
+			v = Bake(s);
+			Assert.That(ReferenceSurfaceCache.BuildCount, Is.EqualTo(builds), "変化が無ければ結合表面を再利用する");
+
+			// 追加の体を動かすと作り直され、遠ざかれば 1 つ目の壁へ戻る
+			secondGo.transform.position = new Vector3(1.4f, 0f, 0f);
+			v = Bake(s);
+			Assert.That(ReferenceSurfaceCache.BuildCount, Is.EqualTo(builds + 1), "追加の体の移動で作り直す");
+			AssertNear(v[0], new Vector3(0.52f, 0f, 0f), "2 つ目の壁(0.9)が遠くなれば 1 つ目の壁へ");
+
+			var referenced = new List<Renderer>();
+			s.Fit.CollectReferencedRenderers(referenced);
+			Assert.That(referenced, Is.EquivalentTo(new[] { s.Body, second }), "追加の体も参照として宣言する");
+		}
+
+		[Test]
 		public void Fit_PullsFarVertexInToMaxGap()
 		{
 			var s = CreateSetup(new[] { new Vector3(0.8f, 0f, 0f) });

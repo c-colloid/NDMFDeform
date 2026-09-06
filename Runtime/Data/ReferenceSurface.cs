@@ -563,16 +563,142 @@ namespace MeshModifier.NDMFDeform.Core
 			/// ホットパス(約 20Hz)のハッシュ計算用に保持する(構築時に取り直す)
 			/// </summary>
 			public Transform[] Bones;
+
+			/// <summary>結合エントリ(複数レンダラー)のとき: 結合した全レンダラー(先頭が主)とそのボーン配列</summary>
+			public Renderer[] Renderers;
+			public Transform[][] AllBones;
 		}
 
 		// キー = レンダラー ID とシェイプ適用有無の組(同じ体を別設定で参照するデフォーマが
 		// 互いのエントリを作り直して、取得済みの MeshSurfaceData を無効化しないようにする)
 		private static readonly Dictionary<long, Entry> Entries = new Dictionary<long, Entry>();
 
-		private static long KeyOf(Renderer renderer, bool applyBlendShapes, bool flipNormals, bool withParts)
+		private static long KeyOf(Renderer renderer, bool applyBlendShapes, bool flipNormals, bool withParts,
+			bool combined = false)
 		{
-			return ((long)renderer.GetInstanceID() << 3) | (withParts ? 4L : 0L) | (applyBlendShapes ? 2L : 0L) |
-			       (flipNormals ? 1L : 0L);
+			return ((long)renderer.GetInstanceID() << 4) | (combined ? 8L : 0L) | (withParts ? 4L : 0L) |
+			       (applyBlendShapes ? 2L : 0L) | (flipNormals ? 1L : 0L);
+		}
+
+		/// <summary>
+		/// 複数のレンダラー(体 + 首から上が別メッシュのアバターの頭など)を 1 つの参照表面に結合して返す。
+		/// 先頭のレンダラーを主とし、null と重複は除く。1 つだけなら単独の <see cref="TryGet(Renderer, bool, bool, PartRequest, out MeshSurfaceData, out BodyPartProfiles, out int)"/>。
+		/// 頂点・三角形・パーツマスクをレンダラーごとに構築して連結し、BVH・擬似法線・プロファイルは結合後に作る
+		/// (レンダラーの境界(首の付け根など)では擬似法線が片側のみになるが、衣装が接する部位では実用上問題にならない)。
+		/// ハッシュは各レンダラーのメッシュ・ボーン・シェイプ重みの組で、どれかが変われば作り直す。
+		/// </summary>
+		public static bool TryGet(IReadOnlyList<Renderer> renderers, bool applyBlendShapes, bool flipNormals,
+			PartRequest parts, out MeshSurfaceData data, out BodyPartProfiles profiles, out int surfaceHash)
+		{
+			data = default;
+			profiles = default;
+			surfaceHash = 0;
+			if (renderers == null)
+				return false;
+			var list = new List<Renderer>();
+			foreach (var r in renderers)
+			{
+				if (r != null && !list.Contains(r))
+					list.Add(r);
+			}
+			if (list.Count == 0)
+				return false;
+			if (list.Count == 1)
+				return TryGet(list[0], applyBlendShapes, flipNormals, parts, out data, out profiles, out surfaceHash);
+			if (parts != null && parts.Skeleton == null)
+				parts = null;
+
+			Sweep();
+
+			var withParts = parts != null;
+			var primary = list[0];
+			var key = KeyOf(primary, applyBlendShapes, flipNormals, withParts, true);
+			Entries.TryGetValue(key, out var entry);
+			var sameSet = entry?.Renderers != null && entry.Renderers.Length == list.Count;
+			if (sameSet)
+			{
+				for (var i = 0; i < list.Count; i++)
+					sameSet &= entry.Renderers[i] == list[i];
+			}
+
+			var infos = new ReferenceMeshInfo[list.Count];
+			var hash = 17;
+			for (var i = 0; i < list.Count; i++)
+			{
+				var r = list[i];
+				var bones = sameSet && entry.AllBones != null && i < entry.AllBones.Length
+					? entry.AllBones[i]
+					: (r as SkinnedMeshRenderer)?.bones;
+				infos[i] = ReferenceSurfaceUtility.ResolveMesh(r);
+				unchecked
+				{
+					hash = hash * 31 + r.GetInstanceID();
+					hash = hash * 31 + ComputeHash(r, infos[i], bones, applyBlendShapes);
+				}
+			}
+			if (withParts)
+				hash = unchecked(hash * 31 + parts.Hash());
+			if (entry != null && sameSet && entry.Hash == hash && entry.Surface != null && entry.Surface.IsCreated &&
+			    (!withParts || (entry.Profiles != null && entry.Profiles.IsCreated)))
+			{
+				data = entry.Surface.Data;
+				if (withParts)
+					profiles = entry.Profiles.Data;
+				surfaceHash = hash;
+				return true;
+			}
+
+			var allVertices = new List<Vector3>();
+			var allTriangles = new List<int>();
+			var allMasks = withParts ? new List<int>() : null;
+			var allBones = new Transform[list.Count][];
+			for (var i = 0; i < list.Count; i++)
+			{
+				var r = list[i];
+				if (!ReferenceSurfaceUtility.TryBuildWorldGeometry(r, infos[i].Mesh, applyBlendShapes, flipNormals,
+					    out var vertices, out var triangles))
+					continue;
+				var offset = allVertices.Count;
+				allVertices.AddRange(vertices);
+				foreach (var index in triangles)
+					allTriangles.Add(index + offset);
+				if (withParts)
+					allMasks.AddRange(BuildPartMasks(r, infos[i].Mesh, vertices, triangles, parts));
+				allBones[i] = (r as SkinnedMeshRenderer)?.bones;
+			}
+			if (allTriangles.Count == 0)
+			{
+				Evict(key);
+				return false;
+			}
+
+			BuildCount++;
+			var surface = MeshSurface.Build(allVertices.ToArray(), allTriangles.ToArray(), Allocator.Persistent,
+				allMasks?.ToArray());
+			if (!surface.IsCreated)
+			{
+				surface.Dispose();
+				Evict(key);
+				return false;
+			}
+
+			if (entry == null)
+			{
+				entry = new Entry { Renderer = primary };
+				Entries[key] = entry;
+			}
+			entry.Surface?.Dispose();
+			entry.Surface = surface;
+			entry.Profiles?.Dispose();
+			entry.Profiles = withParts ? PartProfileData.Build(in surface.Data, parts.Skeleton, Allocator.Persistent) : null;
+			if (withParts)
+				profiles = entry.Profiles.Data;
+			entry.Hash = hash;
+			entry.Renderers = list.ToArray();
+			entry.AllBones = allBones;
+			data = surface.Data;
+			surfaceHash = hash;
+			return true;
 		}
 
 		/// <summary>表面データを構築した回数(キャッシュの再利用を検証するテスト用)</summary>
@@ -710,8 +836,8 @@ namespace MeshModifier.NDMFDeform.Core
 		{
 			if (renderer == null)
 				return;
-			for (var variant = 0; variant < 8; variant++)
-				Evict(KeyOf(renderer, (variant & 2) != 0, (variant & 1) != 0, (variant & 4) != 0));
+			for (var variant = 0; variant < 16; variant++)
+				Evict(KeyOf(renderer, (variant & 2) != 0, (variant & 1) != 0, (variant & 4) != 0, (variant & 8) != 0));
 		}
 
 		private static void Evict(long key)
@@ -729,7 +855,13 @@ namespace MeshModifier.NDMFDeform.Core
 			List<long> dead = null;
 			foreach (var pair in Entries)
 			{
-				if (pair.Value.Renderer == null)
+				var gone = pair.Value.Renderer == null;
+				if (!gone && pair.Value.Renderers != null)
+				{
+					foreach (var r in pair.Value.Renderers)
+						gone |= r == null;
+				}
+				if (gone)
 					(dead ??= new List<long>()).Add(pair.Key);
 			}
 			if (dead == null)

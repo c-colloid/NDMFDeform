@@ -97,6 +97,9 @@ namespace MeshModifier.NDMFDeform.Core
 		[SerializeField, Tooltip("沿わせる体のレンダラー(SkinnedMeshRenderer / MeshRenderer)。衣装と同じアバター上のものを指定する")]
 		private Renderer body;
 
+		[SerializeField, Tooltip("追加で参照する体のレンダラー(首から上が別メッシュのアバターの頭など)。Body と合わせて 1 つの表面として扱う")]
+		private List<Renderer> additionalBodies = new List<Renderer>();
+
 		[SerializeField, Tooltip("体のレンダラーに設定されている現在のブレンドシェイプ重みを体の形状に反映する")]
 		private bool useBodyBlendShapes = true;
 
@@ -181,9 +184,15 @@ namespace MeshModifier.NDMFDeform.Core
 		[SerializeField, Range(0f, 0.3f), Tooltip("肩甲帯の下端。上腕関節の高さ(胴の軸の h)からこれだけ下までを肩の軸で扱う")]
 		private float shoulderCapMargin = 0.1f;
 
+		[SerializeField, Tooltip("首の関節より上にある胴所属(襟など)を首パーツへ移し、首・頭のプロファイルで動かす(首から上が別レンダラーなら additionalBodies に入れる)。実験的")]
+		private bool neckCap;
+
 		[SerializeField] private Transform axisOverride;
 
 		public Renderer Body { get => body; set => body = value; }
+
+		/// <summary>追加で参照する体のレンダラー(Body と結合して 1 つの参照表面にする)</summary>
+		public List<Renderer> AdditionalBodies => additionalBodies;
 		public bool UseBodyBlendShapes { get => useBodyBlendShapes; set => useBodyBlendShapes = value; }
 		public float Factor { get => factor; set => factor = Mathf.Clamp01(value); }
 		public FitRegion Region { get => region; set => region = value; }
@@ -230,6 +239,7 @@ namespace MeshModifier.NDMFDeform.Core
 		public bool JointFan { get => jointFan; set => jointFan = value; }
 		public bool ShoulderAxis { get => shoulderAxis; set => shoulderAxis = value; }
 		public float ShoulderCapMargin { get => shoulderCapMargin; set => shoulderCapMargin = Mathf.Clamp(value, 0f, 0.3f); }
+		public bool NeckCap { get => neckCap; set => neckCap = value; }
 
 		/// <summary>骨格の差し替え(テスト用。null なら体 / 衣装の親の Animator から作る)</summary>
 		[System.NonSerialized] public HumanoidSkeleton SkeletonOverride;
@@ -276,6 +286,7 @@ namespace MeshModifier.NDMFDeform.Core
 		[System.NonSerialized] private UVIslandAnalysis _lastAnalysis;
 		[System.NonSerialized] private Vector3[] _lastVertices;
 		[System.NonSerialized] private MeshAdjacency _adjacencyManaged;
+		[System.NonSerialized] private readonly List<Renderer> _bodyList = new List<Renderer>();
 		[System.NonSerialized] private HumanoidSkeleton _cachedSkeleton;
 		[System.NonSerialized] private Animator _cachedAnimator;
 		[System.NonSerialized] private Avatar _cachedAvatar;
@@ -363,6 +374,26 @@ namespace MeshModifier.NDMFDeform.Core
 		{
 			if (body != null)
 				results.Add(body);
+			foreach (var r in additionalBodies)
+			{
+				if (r != null && !results.Contains(r))
+					results.Add(r);
+			}
+		}
+
+		/// <summary>参照する体のレンダラー一覧(Body + 追加。null・衣装自身・重複を除く)を _bodyList に集める</summary>
+		private List<Renderer> CollectBodies()
+		{
+			_bodyList.Clear();
+			var own = GetOwnRenderer();
+			if (body != null && body != own)
+				_bodyList.Add(body);
+			foreach (var r in additionalBodies)
+			{
+				if (r != null && r != own && !_bodyList.Contains(r))
+					_bodyList.Add(r);
+			}
+			return _bodyList;
 		}
 
 		/// <summary>親の DeformStack が付いているレンダラー(衣装自身)</summary>
@@ -411,6 +442,15 @@ namespace MeshModifier.NDMFDeform.Core
 			if (found == null)
 				return false;
 			body = found;
+			// 名前に body を含む他のレンダラー(Body / Body2 のように体が分かれているアバター)は追加の体にする
+			additionalBodies.Clear();
+			foreach (var smr in root.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+			{
+				if (smr == own || smr == found || smr.sharedMesh == null)
+					continue;
+				if (smr.name.IndexOf("body", System.StringComparison.OrdinalIgnoreCase) >= 0)
+					additionalBodies.Add(smr);
+			}
 			return true;
 		}
 
@@ -506,7 +546,7 @@ namespace MeshModifier.NDMFDeform.Core
 			var request = skeleton != null
 				? new PartRequest { Skeleton = skeleton, JointTolerance = jointTolerance }
 				: null;
-			_surfaceReady = ReferenceSurfaceCache.TryGet(body, useBodyBlendShapes, flipBodyNormals, request,
+			_surfaceReady = ReferenceSurfaceCache.TryGet(CollectBodies(), useBodyBlendShapes, flipBodyNormals, request,
 				out _surface, out _profiles, out _surfaceHash);
 			if (!_surfaceReady)
 			{
@@ -629,6 +669,7 @@ namespace MeshModifier.NDMFDeform.Core
 				key = key * 31 + jointTolerance.GetHashCode();
 				key = key * 31 + (shoulderAxis ? 1 : 0);
 				key = key * 31 + shoulderCapMargin.GetHashCode();
+				key = key * 31 + (neckCap ? 1 : 0);
 				key = key * 31 + OverridesHash();
 				var own = GetOwnRenderer();
 				key = key * 31 + (own != null ? own.GetInstanceID() : 0);
@@ -769,7 +810,22 @@ namespace MeshModifier.NDMFDeform.Core
 				Overrides = overrides,
 			}, reports);
 
-			// 軸区間の外(腰より下に垂れる裾など)は所属パーツのプロファイルに根拠が無いので、形状証拠(最寄りのパーツ)へ差し替える
+			// 首の帽子領域(首の関節より上の襟など)は首パーツで動かす。肩甲帯(肩の軸)より先に適用する
+			if ((neckCap || shoulderAxis) && _profiles.IsCreated && world == null)
+			{
+				world = (Vector3[])local.Clone();
+				if (own != null)
+					ReferenceSurfaceUtility.SkinToWorld(own.transform, source, world);
+			}
+			if (neckCap && _profiles.IsCreated)
+				PartLabeler.ApplyNeckCap(weights, world, in _profiles);
+
+			// 肩の帽子領域(胴の上端)は脊椎から上腕関節へ伸びる肩の軸で放射させる
+			if (shoulderAxis && _profiles.IsCreated)
+				PartLabeler.ApplyShoulderCap(weights, world, in _profiles, shoulderCapMargin);
+
+			// 軸区間の外(腰より下に垂れる裾、首の軸より上の襟の先など)は所属パーツのプロファイルに根拠が無いので、
+			// 形状証拠(最寄りのパーツ)へ差し替える
 			if (world != null && geometryWeights != null)
 			{
 				var fallback = PartLabeler.ApplyAxisRangeFallback(weights, geometryWeights, world, in _profiles);
@@ -788,18 +844,6 @@ namespace MeshModifier.NDMFDeform.Core
 							report.OutOfRangeCount = counts[report.Group];
 					}
 				}
-			}
-
-			// 肩の帽子領域(胴の上端)は脊椎から上腕関節へ伸びる肩の軸で放射させる
-			if (shoulderAxis && _profiles.IsCreated)
-			{
-				if (world == null)
-				{
-					world = (Vector3[])local.Clone();
-					if (own != null)
-						ReferenceSurfaceUtility.SkinToWorld(own.transform, source, world);
-				}
-				PartLabeler.ApplyShoulderCap(weights, world, in _profiles, shoulderCapMargin);
 			}
 
 			// 縫い目: 同位置の頂点を揃え、境界で所属を混ぜる

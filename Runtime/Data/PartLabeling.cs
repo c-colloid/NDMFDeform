@@ -539,6 +539,50 @@ namespace MeshModifier.NDMFDeform.Core
 			return changed;
 		}
 
+		/// <summary>
+		/// 首の帽子領域: 胴の軸の上端(首の関節、h = 1)より上にある胴成分を首パーツへ置き換える。
+		/// 胴のプロファイルは胴マスクの三角形しか見ないので、首から上が別レンダラーでも襟は首を参照できない。
+		/// 首パーツが使える(首のプロファイルにヒットがある)ときだけ効く。差し替えた頂点数を返す。
+		/// </summary>
+		public static int ApplyNeckCap(PartWeights[] weights, Vector3[] worldVertices, in BodyPartProfiles profiles,
+			float margin = 0f)
+		{
+			if (weights == null || worldVertices == null || !profiles.IsCreated)
+				return 0;
+			var n = weights.Length;
+			if (worldVertices.Length != n || !profiles.IsUsable((int)BodyPart.Torso) || !profiles.IsUsable((int)BodyPart.Neck))
+				return 0;
+			var torso = profiles.Axes[(int)BodyPart.Torso];
+			var hCap = 1f - margin;
+			var changed = 0;
+			var accum = new float[HumanoidSkeleton.PartCount];
+			for (var v = 0; v < n; v++)
+			{
+				var pw = weights[v];
+				var hasTorso = false;
+				for (var s = 0; s < 4; s++)
+					hasTorso |= pw.Parts[s] == (int)BodyPart.Torso && pw.Weights[s] > 0f;
+				if (!hasTorso)
+					continue;
+				torso.Decompose(worldVertices[v], out var h, out _, out _, out _);
+				if (h < hCap)
+					continue;
+				Array.Clear(accum, 0, accum.Length);
+				for (var s = 0; s < 4; s++)
+				{
+					var part = pw.Parts[s];
+					if (part == 0 || pw.Weights[s] <= 0f)
+						continue;
+					if (part == (int)BodyPart.Torso)
+						part = (int)BodyPart.Neck;
+					accum[part] += pw.Weights[s];
+				}
+				weights[v] = PartAssignment.TopWeights(accum);
+				changed++;
+			}
+			return changed;
+		}
+
 		/// <summary>肩の軸の先端(上腕関節)の、胴の軸での h</summary>
 		private static float JointH(in PartAxis torso, in PartAxis shoulder)
 		{
