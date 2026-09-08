@@ -21,6 +21,11 @@
             "name": "jp.colloid.uitk-font-fix",
             "expression": "",
             "define": "UITK_FONT_FIX"
+        },
+        {
+            "name": "jp.colloid.uitk-font-fix",
+            "expression": "0.4.0",
+            "define": "UITK_FONT_FIX_CACHES_INVALIDATED"
         }
     ],
     "noEngineReferences": false
