@@ -21,7 +21,7 @@
   },
   "vpmDependencies": {
     "nadena.dev.ndmf": ">=1.6.0",
-    "jp.colloid.uitk-font-fix": ">=0.4.0"
+    "jp.colloid.uitk-font-fix": ">=0.4.1"
   },
   "legacyFolders": {
     "Assets\\NDMFDeform": ""
