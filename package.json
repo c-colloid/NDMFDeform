@@ -1,6 +1,8 @@
 {
   "name": "jp.colloid.nemfdeform",
-  "author": "ｺﾛｲﾄﾞ",
+  "author": {
+    "name": "ｺﾛｲﾄﾞ"
+  },
   "displayName": "NDMFDeform",
   "version": "0.1.2",
   "unity": "2022.3",
